@@ -1,0 +1,10 @@
+{
+  "name": "CricArena - Cinematic IPL Auction Simulator",
+  "description": "A high-fidelity IPL franchise management game featuring real-time auctions, match simulations, and AI-driven strategy.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "3D rendering",
+    "Game simulation",
+    "State management"
+  ]
+}

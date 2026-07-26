@@ -1,0 +1,99 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');
+@import "tailwindcss";
+
+@layer base {
+  html,
+  body,
+  #root {
+    min-height: 100%;
+    overflow-x: hidden;
+  }
+
+  body {
+    background: #09090b;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  img,
+  video,
+  canvas,
+  svg {
+    max-width: 100%;
+  }
+
+  * {
+    -webkit-tap-highlight-color: transparent;
+  }
+}
+
+@theme {
+  --font-serif: "Playfair Display", serif;
+  --font-sans: "Inter", sans-serif;
+  
+  --color-primary: #09090b;
+  --color-accent: #ffffff;
+  --color-surface: #18181b;
+  --color-surface-light: #27272a;
+}
+
+@layer utilities {
+  .glass {
+    @apply bg-zinc-900/80 backdrop-blur-xl border border-zinc-800 shadow-lg shadow-black/20;
+  }
+  
+  .text-glow {
+    text-shadow: 0 0 20px rgba(255, 255, 255, 0.15), 0 0 40px rgba(255, 255, 255, 0.05);
+  }
+
+  .text-glow-amber {
+    text-shadow: 0 0 16px rgba(245, 158, 11, 0.3);
+  }
+
+  .text-glow-green {
+    text-shadow: 0 0 16px rgba(16, 185, 129, 0.3);
+  }
+  
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
+  .scrollbar-hide {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+
+  .premium-card {
+    @apply rounded-2xl border border-zinc-800 bg-zinc-900 shadow-lg shadow-black/10;
+  }
+
+  .premium-btn {
+    @apply rounded-xl px-5 py-3 text-xs font-bold uppercase tracking-wider transition-all active:scale-95;
+  }
+
+  .btn-glow {
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3), 0 4px 16px rgba(0, 0, 0, 0.2);
+  }
+
+  .btn-glow-green {
+    box-shadow: 0 0 20px rgba(16, 185, 129, 0.15), 0 4px 16px rgba(0, 0, 0, 0.3);
+  }
+
+  .gradient-border {
+    border-image: linear-gradient(135deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.02)) 1;
+  }
+
+  .safe-bottom {
+    padding-bottom: env(safe-area-inset-bottom, 0);
+  }
+
+  .shimmer {
+    background: linear-gradient(110deg, transparent 33%, rgba(255,255,255,0.02) 50%, transparent 67%);
+    background-size: 200% 100%;
+    animation: shimmer 3s infinite;
+  }
+
+  @keyframes shimmer {
+    0% { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+  }
+}
