@@ -7,9 +7,29 @@ import { ArrowLeft, Users, Trophy, CheckCircle2, ChevronRight } from 'lucide-rea
 import { cn } from '../lib/utils';
 import { getPlayerImage, handlePlayerImageError } from '../lib/playerImages';
 import JerseyPlayerImage from './JerseyPlayerImage';
+import { getIntlTeamLogoUrl } from '../data/crexIntlTeams';
+
+const IPL_TEAM_LOGOS: Record<string, string> = {
+  MI:   'https://cricketvectors.akamaized.net/Teams/F.png',
+  CSK:  'https://cricketvectors.akamaized.net/Teams/G.png',
+  RCB:  'https://cricketvectors.akamaized.net/Teams/K.png',
+  KKR:  'https://cricketvectors.akamaized.net/Teams/J.png',
+  GT:   'https://cricketvectors.akamaized.net/Teams/KB.png',
+  RR:   'https://cricketvectors.akamaized.net/Teams/M.png',
+  DC:   'https://cricketvectors.akamaized.net/Teams/H.png',
+  LSG:  'https://cricketvectors.akamaized.net/Teams/KC.png',
+  SRH:  'https://cricketvectors.akamaized.net/Teams/L.png',
+  PBKS: 'https://cricketvectors.akamaized.net/Teams/I.png',
+};
+
+function resolveTeamLogo(team?: { shortName: string; logo?: string } | null): string {
+  if (!team) return '';
+  return getIntlTeamLogoUrl(team.shortName) || IPL_TEAM_LOGOS[team.shortName] || team.logo || '';
+}
 
 export default function PreMatch() {
-  const { currentMatchId, fixtures, franchises, players, selectedFranchiseId, setGameState, setSelectedSquadIds, setCurrentMatchToss, setCaptain } = useGameStore();
+  const { currentMatchId, fixtures, franchises, players, selectedFranchiseId, selectedSquadIds, playingXIIds, setSelectedSquadIds, setPlayingXIIds, setCurrentMatchToss, setCaptain, setGameState } = useGameStore();
+  const isIPL = useGameStore(s => s.selectedFormat === 'IPL');
   const currentMatch = fixtures.find(f => f.id === currentMatchId);
   const userTeam = franchises.find(f => f.id === selectedFranchiseId);
   
@@ -17,13 +37,24 @@ export default function PreMatch() {
   const team2 = franchises.find(f => f.id === currentMatch?.team2Id);
   const opponentTeam = team1?.id === userTeam?.id ? team2 : team1;
 
+  React.useEffect(() => {
+    if (!userTeam || !opponentTeam) {
+      setGameState(GameState.LANDING);
+    }
+  }, [userTeam, opponentTeam, setGameState]);
+
+  if (!userTeam || !opponentTeam) return null;
+
   const [step, setStep] = useState<'toss' | 'squad'>('toss');
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [captainId, setCaptainId] = useState<string | null>(null);
   const [tossResult, setTossResult] = useState<{ winnerId: string; decision: TossDecision | null } | null>(null);
   const [isFlipping, setIsFlipping] = useState(false);
 
-  const teamPlayers = players.filter(p => userTeam?.squad.includes(p.id));
+  // For international: use selectedSquadIds (15-man). For IPL: use franchise.squad.
+  const teamPlayers = isIPL
+    ? players.filter(p => userTeam?.squad.includes(p.id))
+    : players.filter(p => selectedSquadIds.includes(p.id));
 
   const autoSelectSquad = () => {
     // Basic logic: Select top rated players by role to ensure balance
@@ -91,13 +122,14 @@ export default function PreMatch() {
   };
 
   const startMatch = () => {
-    setSelectedSquadIds(selectedIds);
     if (userTeam && captainId) {
         setCaptain(userTeam.id, captainId);
     }
     if (tossResult && tossResult.decision) {
         setCurrentMatchToss({ winnerId: tossResult.winnerId, decision: tossResult.decision });
     }
+    // Save the playing XI
+    setPlayingXIIds(selectedIds);
     setGameState(GameState.MATCH_SIMULATION);
   };
 
@@ -116,20 +148,20 @@ export default function PreMatch() {
       <header className="sticky top-0 z-50 bg-zinc-950/80 backdrop-blur-xl border-b border-zinc-800/60 px-4 py-3 sm:px-6">
         <div className="max-w-4xl mx-auto flex items-center gap-3">
           <button 
-            onClick={() => setGameState(GameState.LEAGUE)}
+            onClick={() => setGameState(GameState.ARENA_DASHBOARD)}
             className="w-9 h-9 rounded-lg bg-white/5 border border-white/[.06] flex items-center justify-center hover:bg-white/10 transition-colors shrink-0"
           >
             <ArrowLeft className="w-4 h-4" />
           </button>
           <div className="flex-1 flex items-center justify-center gap-3 min-w-0">
             <div className="flex items-center gap-2">
-                <img src={userTeam.logo} alt={userTeam.shortName} className="w-6 h-6 object-contain" />
+                <img src={resolveTeamLogo(userTeam)} alt={userTeam.shortName} className="w-6 h-6 object-contain" />
                 <span className="text-sm font-bold hidden sm:inline truncate">{userTeam.name}</span>
             </div>
             <span className="text-[10px] font-bold text-white/20">VS</span>
             <div className="flex items-center gap-2">
                 <span className="text-sm font-bold hidden sm:inline truncate">{opponentTeam.name}</span>
-                <img src={opponentTeam.logo} alt={opponentTeam.shortName} className="w-6 h-6 object-contain" />
+                <img src={resolveTeamLogo(opponentTeam)} alt={opponentTeam.shortName} className="w-6 h-6 object-contain" />
             </div>
           </div>
           <div className="w-9" />
@@ -152,7 +184,7 @@ export default function PreMatch() {
                 <div className="flex flex-col items-center gap-3 w-32">
                   <div className="w-24 h-24 rounded-full bg-white/5 border border-white/10 flex items-center justify-center shadow-[0_0_30px_rgba(255,255,255,0.05)] backdrop-blur-md relative overflow-hidden">
                     <div className="absolute inset-0 bg-gradient-to-br from-white/10 to-transparent" />
-                    <img src={userTeam.logo} alt={userTeam.name} className="w-16 h-16 object-contain relative z-10 drop-shadow-md" />
+                    <img src={resolveTeamLogo(userTeam)} alt={userTeam.name} className="w-16 h-16 object-contain relative z-10 drop-shadow-md" />
                   </div>
                   <span className="text-sm font-black tracking-tight text-center leading-tight drop-shadow-md">{userTeam.name}</span>
                 </div>
@@ -164,7 +196,7 @@ export default function PreMatch() {
                 <div className="flex flex-col items-center gap-3 w-32">
                   <div className="w-24 h-24 rounded-full bg-white/5 border border-white/10 flex items-center justify-center shadow-[0_0_30px_rgba(255,255,255,0.05)] backdrop-blur-md relative overflow-hidden">
                     <div className="absolute inset-0 bg-gradient-to-br from-white/10 to-transparent" />
-                    <img src={opponentTeam.logo} alt={opponentTeam.name} className="w-16 h-16 object-contain relative z-10 drop-shadow-md" />
+                    <img src={resolveTeamLogo(opponentTeam)} alt={opponentTeam.name} className="w-16 h-16 object-contain relative z-10 drop-shadow-md" />
                   </div>
                   <span className="text-sm font-black tracking-tight text-center leading-tight drop-shadow-md">{opponentTeam.name}</span>
                 </div>

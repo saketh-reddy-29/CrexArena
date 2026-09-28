@@ -1,17 +1,20 @@
 import type { Player } from '../types/common';
 import type { SyntheticEvent } from 'react';
 import { PLAYER_CREX_IDS } from '../data/crexImages';
+import { INTL_PLAYER_CREX_IDS } from '../data/intlCrexImages';
+
+const ALL_CREX_IDS = { ...PLAYER_CREX_IDS, ...INTL_PLAYER_CREX_IDS };
 
 export function getPlayerAvatar(name = 'player') {
-  return `https://ui-avatars.com/api/?name=${encodeURIComponent(name)}&background=18181b&color=ffffff&bold=true&format=svg`;
+  return `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(name)}&backgroundColor=18181b&textColor=ffffff&fontWeight=700`;
 }
 
 export function getPlayerImage(player?: Pick<Player, 'name'> | null) {
   if (!player) return getPlayerAvatar('player');
   
-  const crexId = PLAYER_CREX_IDS[player.name];
+  const crexId = ALL_CREX_IDS[player.name];
   if (crexId) {
-    return `https://cricketvectors.akamaized.net/players/org/${crexId}.png`;
+    return `/images/players/${crexId.split('/')[0]}.png`;
   }
   
   return getPlayerAvatar(player.name);

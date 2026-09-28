@@ -22,11 +22,15 @@ function totalLegalBalls(overs: number, balls: number) {
 }
 
 export default function MatchSimulation() {
-  const { currentMatchId, fixtures, franchises, players, updateMatchResult, setGameState, selectedSquadIds, selectedFranchiseId, currentMatchToss } = useGameStore();
+  const { currentMatchId, fixtures, franchises, players, updateMatchResult, setGameState, selectedSquadIds, playingXIIds, selectedFranchiseId, currentMatchToss, selectedFormat } = useGameStore();
   const currentMatch = fixtures.find(f => f.id === currentMatchId);
   const team1 = franchises.find(f => f.id === currentMatch?.team1Id);
   const team2 = franchises.find(f => f.id === currentMatch?.team2Id);
   const userTeam = franchises.find(f => f.id === selectedFranchiseId);
+  const format = selectedFormat || 'T20';
+  const matchMaxOvers = MatchEngine.getOversPerMatch(format);
+  const bowlerMaxBalls = MatchEngine.getMaxOversPerBowler(format) * 6;
+  const matchMaxBalls = matchMaxOvers * 6;
 
   // Match State
   const [activeTab, setActiveTab] = useState<'info' | 'live' | 'scorecard'>('live');
@@ -120,8 +124,8 @@ export default function MatchSimulation() {
     const isUser = teamId === userTeam?.id;
     let squadIds: string[] = [];
     
-    if (isUser && selectedSquadIds.length === 11) {
-        squadIds = selectedSquadIds;
+    if (isUser && playingXIIds && playingXIIds.length === 11) {
+        squadIds = playingXIIds;
     } else {
         const team = franchises.find(f => f.id === teamId);
         squadIds = team?.squad.slice(0, 11) || [];
@@ -207,7 +211,7 @@ export default function MatchSimulation() {
           const s = innings.bowlers[p.id];
           const overs = s?.overs || 0;
           const balls = s?.balls || 0;
-          const hasOversLeft = totalLegalBalls(overs, balls) < 24;
+          const hasOversLeft = totalLegalBalls(overs, balls) < bowlerMaxBalls;
           const notConsecutive = p.id !== lastOverBowlerId;
           return hasOversLeft && notConsecutive;
         }) || ordered.find(p => p.id !== lastOverBowlerId) || ordered[0];
@@ -244,7 +248,7 @@ export default function MatchSimulation() {
     const currentBowler = players.find(p => p.id === currentBowlerId)!;
 
     const requiredRate = currentInnings === 2 
-        ? ((innings1!.runs + 1 - innings.runs) / (Math.max(1, 120 - (innings.overs * 6 + innings.balls)) / 6))
+        ? ((innings1!.runs + 1 - innings.runs) / (Math.max(1, matchMaxBalls - (innings.overs * 6 + innings.balls)) / 6))
         : 8;
 
     // Update Innings
@@ -256,7 +260,8 @@ export default function MatchSimulation() {
     
     // Simulate ball using the updated stats
     const currentOverProgress = innings.overs + innings.balls / 6;
-    const ball = MatchEngine.simulateBall(currentBatsman, currentBowler, currentOverProgress, innings.wickets, requiredRate, pitch, weather, strikerStats, bowlerStats, recentOutcomes);
+    const { selectedFormat } = useGameStore.getState();
+    const ball = MatchEngine.simulateBall(currentBatsman, currentBowler, currentOverProgress, innings.wickets, requiredRate, pitch, weather, strikerStats, bowlerStats, recentOutcomes, false, 0, selectedFormat || 'T20');
     const isLegalDelivery = ball.extraType !== 'Wide' && ball.extraType !== 'No Ball';
     const batterRuns = ball.isExtra ? 0 : ball.runs;
 
@@ -354,11 +359,35 @@ export default function MatchSimulation() {
                 setCurrentBowlerId(null);
                 setPendingUserAction('pick-bowler');
             } else {
-                // Cycle through top 5 bowlers like the real engine
+                // Enforce strict top 6 bowlers for auto-selection (avoids pure batters bowling)
                 const bowlerOrder = MatchEngine.getBowlerOrder(bowlingSquad.map(p => p.id), players);
-                const activeBowlers = bowlerOrder.slice(0, Math.min(6, bowlerOrder.length));
-                const nextBowler = activeBowlers[updatedInnings.overs % Math.max(1, activeBowlers.length)];
-                setCurrentBowlerId(nextBowler?.id || bowlingSquad[0]?.id);
+                const activeBowlers = bowlerOrder.slice(0, 6);
+                
+                let nextBowlerId = null;
+                // Try to find an eligible top bowler using rotation
+                for (let i = 0; i < activeBowlers.length; i++) {
+                   const candidate = activeBowlers[(updatedInnings.overs + i) % activeBowlers.length];
+                   const stats = updatedInnings.bowlers[candidate.id];
+                   const ballsBowled = stats ? (stats.overs * 6 + (stats.balls || 0)) : 0;
+                   
+                   if (candidate.id !== currentBowlerId && ballsBowled < bowlerMaxBalls) {
+                       nextBowlerId = candidate.id;
+                       break;
+                   }
+                }
+                
+                // Fallback if all top 6 bowlers have finished their quotas (e.g. T20 requires 5 bowlers minimum, but someone could get injured or if there's a bug)
+                if (!nextBowlerId) {
+                   const fallback = bowlerOrder.find(b => {
+                       if (b.id === currentBowlerId) return false;
+                       const stats = updatedInnings.bowlers[b.id];
+                       const ballsBowled = stats ? (stats.overs * 6 + (stats.balls || 0)) : 0;
+                       return ballsBowled < bowlerMaxBalls;
+                   });
+                   nextBowlerId = fallback?.id || bowlingSquad[0]?.id;
+                }
+                
+                setCurrentBowlerId(nextBowlerId);
             }
         }
       }
@@ -366,7 +395,7 @@ export default function MatchSimulation() {
 
     if (currentInnings === 1) {
       setInnings1(updatedInnings);
-      if (updatedInnings.overs === 20 || updatedInnings.wickets === 10) {
+      if (updatedInnings.overs === matchMaxOvers || updatedInnings.wickets === 10) {
         setCurrentInnings(2);
         setCurrentBowlerId(null);
         setLastOverBowlerId(null);
@@ -396,7 +425,7 @@ export default function MatchSimulation() {
       setInnings2(updatedInnings);
       if (updatedInnings.runs > innings1!.runs) {
         endMatch(updatedInnings.battingTeamId, updatedInnings, innings1!);
-      } else if (updatedInnings.overs === 20 || updatedInnings.wickets === 10) {
+      } else if (updatedInnings.overs === matchMaxOvers || updatedInnings.wickets === 10) {
         endMatch(innings1!.battingTeamId, innings1!, updatedInnings);
       }
     }
@@ -558,14 +587,14 @@ export default function MatchSimulation() {
                   }
 
                   if (pendingUserAction === 'pick-bowler') {
-                    // Show bowlers
-                    const bowlingOrdered = MatchEngine.getBowlerOrder(mySquad.map(p => p.id), players);
+                    // Show top 6 bowlers only
+                    const bowlingOrdered = MatchEngine.getBowlerOrder(mySquad.map(p => p.id), players).slice(0, 6);
                     return bowlingOrdered.map(p => {
                       const bowlerStats = activeInnings?.bowlers[p.id];
                       const oversBowled = bowlerStats?.overs || 0;
                       const ballsBowled = bowlerStats?.balls || 0;
                       const isLastBowler = lastOverBowlerId === p.id;
-                      const isDisabled = totalLegalBalls(oversBowled, ballsBowled) >= 24 || isLastBowler;
+                      const isDisabled = totalLegalBalls(oversBowled, ballsBowled) >= bowlerMaxBalls || isLastBowler;
                       return (
                         <button
                           key={p.id}
@@ -580,7 +609,7 @@ export default function MatchSimulation() {
                           )}
                         >
                         {isLastBowler && <div className="absolute top-2 right-2 text-[8px] uppercase tracking-widest text-red-400 font-bold">Just Bowled</div>}
-                        {totalLegalBalls(oversBowled, ballsBowled) >= 24 && <div className="absolute top-2 right-2 text-[8px] uppercase tracking-widest text-white/40 font-bold">Max Overs</div>}
+                        {totalLegalBalls(oversBowled, ballsBowled) >= bowlerMaxBalls && <div className="absolute top-2 right-2 text-[8px] uppercase tracking-widest text-white/40 font-bold">Max Overs</div>}
                         <div className="w-10 h-10 rounded-full bg-white/10 flex items-center justify-center shrink-0">
                           {p.role[0]}
                         </div>
@@ -707,7 +736,6 @@ export default function MatchSimulation() {
                     </div>
                 </motion.div>
             )}
-        </AnimatePresence>
         </AnimatePresence>
       </main>
       </div>

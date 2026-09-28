@@ -4,6 +4,7 @@ import { handlePlayerImageError } from '../lib/playerImages';
 import { useGameStore } from '../stores/useGameStore';
 import { getTeamJerseyUrl } from '../data/crexTeams';
 import { PLAYER_CREX_IDS } from '../data/crexImages';
+import { INTL_PLAYER_CREX_IDS } from '../data/intlCrexImages';
 import { cn } from '../lib/utils';
 
 const DEFAULT_JERSEY =
@@ -34,7 +35,7 @@ export default function JerseyPlayerImage({
     (franchise ? getTeamJerseyUrl(franchise.shortName) : null) ??
     DEFAULT_JERSEY;
 
-  const crexId = player ? PLAYER_CREX_IDS[player.name] : null;
+  const crexId = player ? (PLAYER_CREX_IDS[player.name] || INTL_PLAYER_CREX_IDS[player.name]) : null;
 
   return (
     <div
@@ -55,7 +56,7 @@ export default function JerseyPlayerImage({
       <div className="absolute bottom-0 left-0 right-0 flex flex-col items-center">
         {crexId && (
           <img
-            src={`https://cricketvectors.akamaized.net/players/org/${crexId}.png`}
+            src={`/images/players/${crexId.split('/')[0]}.png`}
             onError={(e) => handlePlayerImageError(e, player?.name)}
             alt={player?.name ?? "Player"}
             draggable={false}

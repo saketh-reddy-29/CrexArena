@@ -8,6 +8,25 @@ import type { Player } from '../types/common';
 import { MatchEngine } from '../lib/matchEngine';
 import { getPlayerImage, handlePlayerImageError } from '../lib/playerImages';
 import { MatchStatus, PitchType, WeatherCondition, type InningsData, type PlayerMatchStats, DRSResult } from '../types/match';
+import { getIntlTeamLogoUrl } from '../data/crexIntlTeams';
+
+const IPL_TEAM_LOGOS: Record<string, string> = {
+  MI:   'https://cricketvectors.akamaized.net/Teams/F.png',
+  CSK:  'https://cricketvectors.akamaized.net/Teams/G.png',
+  RCB:  'https://cricketvectors.akamaized.net/Teams/K.png',
+  KKR:  'https://cricketvectors.akamaized.net/Teams/J.png',
+  GT:   'https://cricketvectors.akamaized.net/Teams/KB.png',
+  RR:   'https://cricketvectors.akamaized.net/Teams/M.png',
+  DC:   'https://cricketvectors.akamaized.net/Teams/H.png',
+  LSG:  'https://cricketvectors.akamaized.net/Teams/KC.png',
+  SRH:  'https://cricketvectors.akamaized.net/Teams/L.png',
+  PBKS: 'https://cricketvectors.akamaized.net/Teams/I.png',
+};
+
+function resolveTeamLogo(team?: { shortName: string; logo?: string } | null): string {
+  if (!team) return '';
+  return getIntlTeamLogoUrl(team.shortName) || IPL_TEAM_LOGOS[team.shortName] || team.logo || '';
+}
 
 type Tab = 'Commentary' | 'Scorecard' | 'Graphs' | 'Points Table';
 
@@ -237,7 +256,7 @@ function emptyInnings(battingTeamId: string, bowlingTeamId: string): InningsStat
 }
 
 export default function LiveMatchCenter() {
-  const { currentMatchId, fixtures, franchises, players, selectedFranchiseId, selectedSquadIds, setSelectedSquadIds, currentMatchToss, standings, setGameState, updateMatchResult, liveMatchState, saveLiveMatchState } = useGameStore();
+  const { currentMatchId, fixtures, franchises, players, selectedFranchiseId, selectedSquadIds, playingXIIds, setSelectedSquadIds, setPlayingXIIds, currentMatchToss, standings, setGameState, updateMatchResult, liveMatchState, saveLiveMatchState, selectedFormat } = useGameStore();
   const [activeTab, setActiveTab] = useState<Tab>('Commentary');
   const [autoPlay, setAutoPlay] = useState(true);
   
@@ -265,9 +284,9 @@ export default function LiveMatchCenter() {
   const handleImpactSubstitution = () => {
     if (!impactIncomingId || !impactOutgoingId) return;
     
-    // Update global selectedSquadIds
-    const newSquadIds = selectedSquadIds.filter(id => id !== impactOutgoingId).concat(impactIncomingId);
-    setSelectedSquadIds(newSquadIds);
+    // Update playing XI for impact player
+    const newXiIds = playingXIIds.filter(id => id !== impactOutgoingId).concat(impactIncomingId);
+    setPlayingXIIds(newXiIds);
 
     // Record in current innings
     setInnings(prev => {
@@ -298,8 +317,8 @@ export default function LiveMatchCenter() {
   };
 
   const currentMatch = fixtures.find((fixture) => fixture.id === currentMatchId);
-  const fallbackTeam1 = franchises.find((team) => team.shortName === 'MI') || franchises[0];
-  const fallbackTeam2 = franchises.find((team) => team.shortName === 'RCB') || franchises[1] || fallbackTeam1;
+  const fallbackTeam1 = franchises[0];
+  const fallbackTeam2 = franchises[1] || fallbackTeam1;
   const team1 = franchises.find((team) => team.id === currentMatch?.team1Id) || fallbackTeam1;
   const team2 = franchises.find((team) => team.id === currentMatch?.team2Id) || fallbackTeam2;
   const tossWinner = franchises.find((team) => team.id === currentMatchToss?.winnerId);
@@ -307,10 +326,15 @@ export default function LiveMatchCenter() {
   const firstBattingTeamId = currentMatchToss ? (currentMatchToss.decision === 'Bat' ? currentMatchToss.winnerId : otherTeamId) : team1.id;
   const secondBattingTeamId = firstBattingTeamId === team1.id ? team2.id : team1.id;
   const myTeamId = selectedFranchiseId || '';
+  const maxBalls = selectedFormat === 'ODI' ? 300 : selectedFormat === 'TEST' ? 9999 : 120; // balls per innings
 
+  // Use locked Playing XI (11 players). Falls back to franchise.squad for AI/IPL teams.
   const selectedXiPlayers = useMemo(
-    () => selectedSquadIds.map((id) => players.find((player) => player.id === id)).filter(Boolean) as Player[],
-    [players, selectedSquadIds],
+    () => {
+      const xiIds = playingXIIds.length > 0 ? playingXIIds : selectedSquadIds;
+      return xiIds.map((id) => players.find((player) => player.id === id)).filter(Boolean) as Player[];
+    },
+    [players, playingXIIds, selectedSquadIds],
   );
 
   const getTeamSquad = (teamId: string) => {
@@ -337,9 +361,21 @@ export default function LiveMatchCenter() {
   }, []);
 
   const getAvailableBowlers = useCallback((score: InningsState | undefined, squad: Player[], previousOverBowlerId?: string | null) => {
-    return MatchEngine.getBowlerOrder(squad.map((player) => player.id), players)
-      .filter((player) => (score?.bowlers[player.id]?.balls || 0) < 24 && player.id !== previousOverBowlerId);
-  }, [players]);
+    const maxBalls = MatchEngine.getMaxOversPerBowler(selectedFormat || 'T20') * 6;
+    const bowlerOrder = MatchEngine.getBowlerOrder(squad.map((player) => player.id), players);
+    
+    // Strict rule: Only the top 6 bowlers in the playing XI can bowl.
+    // This perfectly prevents pure batters from ever bowling in ODI or T20.
+    const top6 = bowlerOrder.slice(0, 6);
+    
+    const available = top6.filter((player) => (score?.bowlers[player.id]?.balls || 0) < maxBalls && player.id !== previousOverBowlerId);
+    
+    // Fallback if somehow all top 6 are exhausted (should not happen normally)
+    if (available.length === 0) {
+        return bowlerOrder.filter((player) => (score?.bowlers[player.id]?.balls || 0) < maxBalls && player.id !== previousOverBowlerId);
+    }
+    return available;
+  }, [players, selectedFormat]);
 
   const chooseAiBowler = useCallback((score: InningsState | undefined, squad: Player[], previousOverBowlerId?: string | null) => {
     const over = Math.floor((score?.balls || 0) / 6);
@@ -358,14 +394,14 @@ export default function LiveMatchCenter() {
       const spinner = isSpinner(p);
       const rank = candidates.findIndex(c => c.id === p.id);
       
-      // Penalize part-timers
       if (rank > 5) candidateScore -= 20;
 
-      if (over < 6) { 
+      const phase = MatchEngine.getPowerPlayPhase(over * 6, selectedFormat || 'T20');
+      if (phase === 'Mandatory') { 
         // Powerplay: Prefer pacers, penalize spinners
         if (spinner) candidateScore -= 15; 
         candidateScore -= (bowled * 5); 
-      } else if (over < 16) { 
+      } else if (phase === 'Middle') { 
         // Middle overs: Prefer spinners
         if (spinner) candidateScore += 15; 
         candidateScore -= (bowled * 5);
@@ -441,7 +477,7 @@ export default function LiveMatchCenter() {
       if (current.isComplete) return;
 
       const target = inningNo === 2 ? (innings[0]?.runs || 0) + 1 : 0;
-      const ballsRemaining = Math.max(1, 120 - current.balls);
+      const ballsRemaining = Math.max(1, maxBalls - current.balls);
       const requiredRate = target ? ((target - current.runs) / (ballsRemaining / 6)) : 0;
       const strikerLine = current.batters[striker.id] || { balls: 0, dots: 0, fours: 0, out: false, runs: 0, sixes: 0, status: 'not out' };
       const currentBowlerLine = current.bowlers[currentBowler.id] || { balls: 0, dots: 0, runs: 0, wickets: 0 };
@@ -485,6 +521,7 @@ export default function LiveMatchCenter() {
         current.recentBalls,
         current.isFreeHitPending,
         currentBowlerLine.bouncersThisOver || 0,
+        selectedFormat || 'T20'
       );
 
       let wicket = ball.isWicket && current.wickets < 10;
@@ -524,7 +561,7 @@ export default function LiveMatchCenter() {
       // ---- Determine state transitions ----
       const overEnded = !wicket && isLegalDelivery && nextBall % 6 === 0;
       const wicketAtOverEnd = wicket && isLegalDelivery && nextBall % 6 === 0;
-      const inningsComplete = nextBall >= 120 || wicketNumber >= 10 || (inningNo === 2 && target > 0 && nextRuns >= target);
+      const inningsComplete = nextBall >= maxBalls || wicketNumber >= 10 || (inningNo === 2 && target > 0 && nextRuns >= target);
 
       // ---- Update innings (pure updater, no side effects) ----
       setInnings((previous) => {
@@ -787,7 +824,7 @@ export default function LiveMatchCenter() {
           </button>
           <div className="min-w-0 flex-1 text-center">
             <div className="truncate text-sm font-bold">{team1.shortName} vs {team2.shortName}</div>
-            <div className="text-[10px] text-slate-500">{currentMatch?.isPlayoff ? currentMatch.playoffType : `Match ${currentMatch?.matchNumber || 1}`} · {matchStatus}</div>
+            <div className="text-[10px] text-slate-500">{currentMatch?.isPlayoff ? currentMatch.playoffType : `Match ${currentMatch?.matchNumber || 1}`} · {selectedFormat || 'T20'} · {matchStatus}</div>
           </div>
           <button onClick={() => setAutoPlay((v) => !v)} className={`shrink-0 rounded-full px-3 py-1 text-[10px] font-black uppercase ${autoPlay ? 'bg-green-500 text-white' : 'bg-white/10 text-slate-300'}`}>
             {autoPlay ? 'Auto' : 'Manual'}
@@ -800,7 +837,7 @@ export default function LiveMatchCenter() {
         <div className="border-b border-zinc-800 bg-zinc-900/80 backdrop-blur-md px-3 py-3">
           {/* Batting team */}
           <div className="flex items-center gap-2.5">
-            <img src={battingTeam.logo} alt={battingTeam.shortName} className="h-9 w-9 shrink-0 object-contain" />
+            <img src={resolveTeamLogo(battingTeam)} alt={battingTeam.shortName} className="h-9 w-9 shrink-0 object-contain" onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }} />
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-1.5">
                 <span className="text-sm font-bold text-white truncate">{battingTeam.name}</span>
@@ -819,12 +856,12 @@ export default function LiveMatchCenter() {
           {/* Target info */}
           {inningNo === 2 && innings[0] && inning && !inning.isComplete && (
             <div className="mt-2 rounded-lg bg-zinc-800 px-3 py-1.5 text-center text-xs font-bold text-zinc-300">
-              {battingTeam.shortName} need <span className="text-white">{Math.max(0, innings[0].runs + 1 - inning.runs)}</span> runs from <span className="text-white">{Math.max(0, 120 - inning.balls)}</span> balls · RRR: <span className="text-white">{(((innings[0].runs + 1 - inning.runs) / Math.max(0.5, (120 - inning.balls) / 6))).toFixed(2)}</span>
+              {battingTeam.shortName} need <span className="text-white">{Math.max(0, innings[0].runs + 1 - inning.runs)}</span> runs from <span className="text-white">{Math.max(0, maxBalls - inning.balls)}</span> balls · RRR: <span className="text-white">{(((innings[0].runs + 1 - inning.runs) / Math.max(0.5, (maxBalls - inning.balls) / 6))).toFixed(2)}</span>
             </div>
           )}
           {inningNo === 2 && innings[0] && (
             <div className="mt-1.5 flex items-center gap-2 text-[11px] text-slate-500">
-              <img src={bowlingTeam.logo} alt={bowlingTeam.shortName} className="h-5 w-5 shrink-0 object-contain" />
+              <img src={resolveTeamLogo(bowlingTeam)} alt={bowlingTeam.shortName} className="h-5 w-5 shrink-0 object-contain" onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }} />
               <span>{innings[0].runs}-{innings[0].wickets} ({formatOvers(innings[0].balls)})</span>
             </div>
           )}

@@ -1,4 +1,5 @@
 import { Player } from '../types/common';
+import { PLAYER_RATINGS } from './playerRatings';
 
 // ─── REAL IPL BASE PRICE RULES ───────────────────────────────────────────
 // Capped players (played international cricket): max base price ₹2 Cr
@@ -23,20 +24,40 @@ const createPlayer = (
   batting = role === 'Bowler' ? 30 : 82,
   bowling = role === 'Batsman' || role === 'Wicketkeeper' ? 0 : 78,
   capped = true,              // false = uncapped player
-): Player => ({
-  id,
-  name,
-  role,
-  nationality,
-  rating,
-  basePrice: ipl(rawBasePrice, capped),
-  intendedTeamId,
-  stats: {
-    batting,
-    bowling,
-    fielding: Math.min(96, Math.max(70, rating - 2)),
-  },
-});
+): Player => {
+  const balanced = PLAYER_RATINGS[name];
+  const finalBatting = balanced?.batting ?? batting;
+  const finalBowling = balanced?.bowling ?? bowling;
+  const finalFielding = balanced?.fielding ?? Math.min(96, Math.max(70, rating - 2));
+  const finalForm = balanced?.form ?? 85;
+
+  return {
+    id,
+    name,
+    role,
+    nationality,
+    rating,
+    baseAbility: rating,
+    form: finalForm,
+    basePrice: ipl(rawBasePrice, capped),
+    intendedTeamId,
+    stats: {
+      batting: finalBatting,
+      bowling: finalBowling,
+      fielding: finalFielding,
+    },
+  careerStats: {
+    matches: 0,
+    runs: 0,
+    wickets: 0,
+    ballsFaced: 0,
+    ballsBowled: 0,
+    runsConceded: 0,
+    dismissals: 0,
+    catches: 0
+  }
+  };
+};
 
 
 // ─── MUMBAI INDIANS (MI) ───────────────────────────────────────────────────

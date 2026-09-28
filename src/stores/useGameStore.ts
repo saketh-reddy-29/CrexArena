@@ -1,24 +1,28 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import { Fixture, Standing, MatchStatus, MatchScorecard, InningsData, TossDecision } from '../types/match';
+import { Fixture, Standing, MatchStatus, MatchScorecard, InningsData, TossDecision, MatchFormat } from '../types/match';
 import { Player } from '../types/common';
 import { INITIAL_PLAYER_POOL } from '../data/players';
+import { INTL_PLAYER_POOL, INTL_TEAMS_DATA } from '../data/intlPlayers';
 import { OFFICIAL_2026_SQUADS } from '../data/officialSquads';
 import { MatchEngine } from '../lib/matchEngine';
-import { generateIPLSchedule } from '../lib/scheduleGenerator';
+import { generateIPLSchedule, generateDoubleRoundRobinSchedule } from '../lib/scheduleGenerator';
+import { calculatePostMatchPerformance } from '../lib/performanceEngine';
 
 export enum GameState {
   LANDING = 'landing',
+  FORMAT_SELECTION = 'format_selection',
   TEAM_SELECTION = 'team_selection',
+  ARENA_DASHBOARD = 'arena_dashboard',
   AUCTION = 'auction',
   LEAGUE = 'league',
-  SQUAD_PLANNER = 'squad_planner',
-  PLAYERS = 'players',
-  TEAMS = 'teams',
+  BOARD_SELECTION = 'board_selection',
+  PLAYING_XI_BUILDER = 'playing_xi_builder',
   MATCH_SIMULATION = 'match_simulation',
   PRE_MATCH = 'pre_match',
 }
 
+export type ArenaFormat = 'IPL' | 'T20' | 'ODI' | 'TEST';
 export type TeamStrategy = 'Aggressive' | 'Balanced' | 'Value';
 
 export interface PlayerSeasonStats {
@@ -118,12 +122,16 @@ interface GameStore {
   currentMatchId: string | null;
   currentMatchToss: { winnerId: string; decision: TossDecision } | null;
   playerSeasonStats: Record<string, PlayerSeasonStats>;
-  selectedSquadIds: string[];
+  selectedSquadIds: string[];   // 15-man squad
+  playingXIIds: string[];       // locked 11-man playing XI
   liveMatchState: Record<string, any> | null;
+  selectedFormat: ArenaFormat | null;
 
   setGameState: (state: GameState) => void;
+  setFormat: (format: ArenaFormat) => void;
   goBack: () => void;
   setSelectedSquadIds: (ids: string[]) => void;
+  setPlayingXIIds: (ids: string[]) => void;
   selectFranchise: (id: string) => void;
   updatePurse: (franchiseId: string, amount: number) => void;
   addToSquad: (franchiseId: string, playerId: string) => void;
@@ -140,6 +148,7 @@ interface GameStore {
   saveLiveMatchState: (state: Record<string, any> | null) => void;
 
   // Match Actions
+  initializeIntlFranchises: () => void;
   generateSeasonFixtures: () => void;
   updateMatchResult: (matchId: string, scorecard: MatchScorecard) => void;
   setCurrentMatch: (matchId: string | null) => void;
@@ -147,14 +156,17 @@ interface GameStore {
   autoSimulateMatch: (matchId: string) => void;
   generatePlayoffFixtures: () => void;
   setCaptain: (franchiseId: string, captainId: string) => void;
+  setupQuickMatch: (team1Id: string, team2Id: string, format: MatchFormat) => void;
+  applyPostMatchPlayerUpdates: (playerId: string, updates: Partial<Player>) => void;
 }
 
 export const useGameStore = create<GameStore>()(
   persist(
     (set, get) => ({
   gameState: GameState.LANDING,
+  selectedFormat: null,
   selectedFranchiseId: null,
-  players: INITIAL_PLAYER_POOL,
+  players: [...INITIAL_PLAYER_POOL, ...INTL_PLAYER_POOL],
   franchises: INITIAL_FRANCHISES,
   currentAuctionPlayerId: null,
   auctionHistory: [],
@@ -167,9 +179,11 @@ export const useGameStore = create<GameStore>()(
   currentMatchToss: null,
   playerSeasonStats: {},
   selectedSquadIds: [],
+  playingXIIds: [],
   liveMatchState: null,
   
   // Actions
+  setFormat: (format) => set({ selectedFormat: format }),
   setGameState: (state) => set((prev) => ({ 
     previousGameState: prev.gameState,
     gameState: state 
@@ -179,6 +193,7 @@ export const useGameStore = create<GameStore>()(
   setCurrentMatchToss: (toss) => set({ currentMatchToss: toss }),
   saveLiveMatchState: (matchState) => set({ liveMatchState: matchState }),
   setSelectedSquadIds: (ids) => set({ selectedSquadIds: ids }),
+  setPlayingXIIds: (ids) => set({ playingXIIds: ids }),
   selectFranchise: (id) => set({ selectedFranchiseId: id }),
   updatePurse: (franchiseId, amount) => set((state) => ({
     franchises: state.franchises.map(f => f.id === franchiseId ? { ...f, purse: f.purse - amount } : f)
@@ -186,6 +201,8 @@ export const useGameStore = create<GameStore>()(
   addToSquad: (franchiseId, playerId) => set((state) => ({
     franchises: state.franchises.map(f => {
       if (f.id !== franchiseId) return f;
+      if (f.squad.includes(playerId)) return f; // Prevent duplicates!
+      
       const player = state.players.length > 0 ? state.players.find(p => p.id === playerId) : null;
       const isOverseas = player?.nationality === 'Overseas';
       return { 
@@ -201,9 +218,13 @@ export const useGameStore = create<GameStore>()(
       return { ...f, squad: f.squad.filter(id => id !== playerId) };
     })
   })),
+  applyPostMatchPlayerUpdates: (playerId, updates) => set((state) => ({
+    players: state.players.map(p => p.id === playerId ? { ...p, ...updates } : p)
+  })),
   addToShortlist: (franchiseId, playerId) => set((state) => ({
     franchises: state.franchises.map(f => {
       if (f.id !== franchiseId) return f;
+      if (f.shortlist?.includes(playerId)) return f; // Prevent duplicates!
       return { ...f, shortlist: [...(f.shortlist || []), playerId] };
     })
   })),
@@ -242,6 +263,7 @@ export const useGameStore = create<GameStore>()(
     currentMatchToss: null,
     playerSeasonStats: {},
     selectedSquadIds: [],
+    playingXIIds: [],
     liveMatchState: null,
   }),
 
@@ -269,8 +291,32 @@ export const useGameStore = create<GameStore>()(
 
     return { fixtures: [...state.fixtures, ...playoffFixtures] };
   }),
+  initializeIntlFranchises: () => set((state) => {
+    if (state.selectedFormat === 'IPL') return state;
+    const newFranchises = INTL_TEAMS_DATA.map(teamData => {
+      const isUserTeam = teamData.id === state.selectedFranchiseId;
+      let squadIds = isUserTeam 
+        ? state.selectedSquadIds 
+        : state.players.filter(p => p.intendedTeamId === teamData.id).sort((a, b) => b.rating - a.rating).slice(0, 15).map(p => p.id);
+        
+      return {
+        id: teamData.id,
+        name: teamData.name,
+        shortName: teamData.shortName,
+        color: teamData.color,
+        logo: '',
+        purse: 0,
+        squad: squadIds,
+        shortlist: [],
+        overseasCount: 0,
+        strategy: 'Aggressive' as const
+      };
+    });
+    return { franchises: newFranchises };
+  }),
   generateSeasonFixtures: () => set((state) => {
-    const fixtureList = generateIPLSchedule(state.franchises);
+    // Generate full double round-robin
+    const fixtureList = generateDoubleRoundRobinSchedule(state.franchises, state.selectedFormat || 'T20');
 
     const initialStandings: Standing[] = state.franchises.map(t => ({
       teamId: t.id,
@@ -415,7 +461,53 @@ export const useGameStore = create<GameStore>()(
         }
     }
 
-    return { fixtures: [...updatedFixtures, ...extraFixtures], standings: updatedStandings, playerSeasonStats: newPlayerStats };
+    // NEW: Update Base Ability, Form, and Career Stats for Arena matches
+    const newPlayers = [...state.players];
+    const format = state.selectedFormat || 'T20'; // Fallback
+    
+    const applyArenaStats = (innings: InningsData) => {
+      // Create unified scorecard objects for players
+      const playerScores: Record<string, any> = {};
+      
+      Object.entries(innings.batsmen).forEach(([id, b]) => {
+        if (!playerScores[id]) playerScores[id] = { runs: 0, balls: 0, fours: 0, sixes: 0, isOut: false, overs: 0, wickets: 0, runsConceded: 0 };
+        playerScores[id].runs = b.runs;
+        playerScores[id].balls = b.balls;
+        playerScores[id].fours = b.fours;
+        playerScores[id].sixes = b.sixes;
+        playerScores[id].isOut = b.isOut;
+      });
+
+      Object.entries(innings.bowlers).forEach(([id, b]) => {
+        if (!playerScores[id]) playerScores[id] = { runs: 0, balls: 0, fours: 0, sixes: 0, isOut: false, overs: 0, wickets: 0, runsConceded: 0 };
+        playerScores[id].overs = b.overs + (b.balls / 6);
+        playerScores[id].wickets = b.wickets;
+        playerScores[id].runsConceded = b.runsConceded;
+      });
+
+      Object.entries(playerScores).forEach(([id, score]) => {
+        const pIndex = newPlayers.findIndex(p => p.id === id);
+        if (pIndex !== -1) {
+          const delta = calculatePostMatchPerformance(newPlayers[pIndex], score, format);
+          newPlayers[pIndex] = {
+            ...newPlayers[pIndex],
+            baseAbility: delta.newBaseAbility,
+            form: delta.newForm,
+            careerStats: delta.updatedCareerStats,
+          };
+        }
+      });
+    };
+    
+    applyArenaStats(team1Innings);
+    applyArenaStats(team2Innings);
+
+    return { 
+      fixtures: [...updatedFixtures, ...extraFixtures], 
+      standings: updatedStandings, 
+      playerSeasonStats: newPlayerStats,
+      players: newPlayers 
+    };
   }),
 
   autoSimulateMatch: (matchId) => set((state) => {
@@ -469,6 +561,8 @@ export const useGameStore = create<GameStore>()(
       const pitch = MatchEngine.generatePitch();
       const weather = MatchEngine.generateWeather();
 
+      const maxOvers = MatchEngine.getOversPerMatch(fixture.format);
+
       // Simple loop to generate an innings score
       const simInnings = (batSquad: string[], bowlSquad: string[], target: number) => {
         const inn = MatchEngine.createEmptyInnings(batFirstId, bowlFirstId); // Just a tracker
@@ -483,7 +577,7 @@ export const useGameStore = create<GameStore>()(
         let nonStrikerIdx = 1;
         
         let ballCount = 0;
-        while(inn.overs < 20 && inn.wickets < 10) {
+        while(inn.overs < maxOvers && inn.wickets < 10) {
            const p1 = state.players.find(p => p.id === batSquad[strikerIdx]) || state.players[0];
            
            // rotate bowlers every over among the 6 selected
@@ -498,7 +592,7 @@ export const useGameStore = create<GameStore>()(
            const bowlerStats = MatchEngine.getPlayerStats(p2.id, inn.bowlers);
 
            const currentOverProgress = inn.overs + inn.balls / 6;
-           const ball = MatchEngine.simulateBall(p1, p2, currentOverProgress, inn.wickets, target ? ((target - inn.runs) / (Math.max(1, 120 - ballCount) / 6)) : 8, pitch, weather, strikerStats, bowlerStats);
+           const ball = MatchEngine.simulateBall(p1, p2, currentOverProgress, inn.wickets, target ? ((target - inn.runs) / (Math.max(1, (maxOvers * 6) - ballCount) / 6)) : 8, pitch, weather, strikerStats, bowlerStats, [], false, 0, fixture.format);
            const isLegalDelivery = ball.extraType !== 'Wide' && ball.extraType !== 'No Ball';
            const batterRuns = ball.isExtra ? 0 : ball.runs;
            
@@ -627,9 +721,25 @@ export const useGameStore = create<GameStore>()(
   setCaptain: (franchiseId, captainId) => set((state) => ({
     franchises: state.franchises.map((f) => f.id === franchiseId ? { ...f, captainId } : f),
   })),
+  setupQuickMatch: (team1Id: string, team2Id: string, format: MatchFormat) => {
+    const fixture: Fixture = {
+      id: `qm-${Date.now()}`,
+      matchNumber: 1,
+      day: 1,
+      team1Id,
+      team2Id,
+      status: MatchStatus.UPCOMING,
+      format
+    };
+    set({
+      fixtures: [fixture],
+      currentMatchId: fixture.id,
+      gameState: GameState.PRE_MATCH
+    });
+  },
     }),
     {
-      name: 'crickkk-game-storage',
+      name: 'cricket-arena-v3',
     }
   )
 );

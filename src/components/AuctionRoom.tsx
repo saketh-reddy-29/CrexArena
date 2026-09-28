@@ -1009,7 +1009,7 @@ export default function AuctionRoom() {
                     </div>
                   )}
                   <button 
-                    onClick={() => setGameState(GameState.SQUAD_PLANNER)}
+                    onClick={() => setGameState(GameState.ARENA_DASHBOARD)}
                     className="w-full py-2 rounded-lg bg-zinc-900 border border-zinc-800 text-[10px] font-bold uppercase tracking-wider text-zinc-450 hover:text-white hover:border-zinc-700 transition-all flex items-center justify-center gap-1.5"
                   >
                     View Planner <ChevronRight className="w-3 h-3" />

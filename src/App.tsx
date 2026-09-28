@@ -12,6 +12,11 @@ import SquadPlanner from './components/SquadPlanner';
 import PlayersView from './components/PlayersView';
 import TeamsView from './components/TeamsView';
 import PreMatch from './components/PreMatch';
+import QuickMatchSetup from './components/QuickMatchSetup';
+import TeamSelection from './components/TeamSelection';
+import BoardSelection from './components/BoardSelection';
+import ArenaDashboard from './components/ArenaDashboard';
+import PlayingXIBuilder from './components/PlayingXIBuilder';
 import { useGameStore, GameState } from './stores/useGameStore';
 
 export default function App() {
@@ -20,27 +25,36 @@ export default function App() {
   return (
     <main className="min-h-screen bg-zinc-950">
       {gameState === GameState.LANDING && <LandingPage />}
+      {gameState === GameState.TEAM_SELECTION && <TeamSelection />}
+      {gameState === GameState.BOARD_SELECTION && <BoardSelection />}
+      {gameState === GameState.ARENA_DASHBOARD && <ArenaDashboard />}
+      {gameState === GameState.PLAYING_XI_BUILDER && <PlayingXIBuilder />}
 
-      {(gameState === GameState.AUCTION || gameState === GameState.SQUAD_PLANNER) && (
+      {(gameState === GameState.AUCTION || false) && (
         <div className={gameState !== GameState.AUCTION ? 'hidden' : ''}>
           <AuctionRoom />
         </div>
       )}
       {gameState === GameState.LEAGUE && <LeagueView />}
-      {gameState === GameState.SQUAD_PLANNER && <SquadPlanner />}
-      {gameState === GameState.PLAYERS && <PlayersView />}
-      {gameState === GameState.TEAMS && <TeamsView />}
+      {false && <SquadPlanner />}
+      
+      
+      
       {gameState === GameState.PRE_MATCH && <PreMatch />}
       {gameState === GameState.MATCH_SIMULATION && <LiveMatchCenter />}
 
       {![
         GameState.LANDING,
-
+        GameState.TEAM_SELECTION,
+        GameState.BOARD_SELECTION,
+        GameState.ARENA_DASHBOARD,
+        GameState.PLAYING_XI_BUILDER,
         GameState.AUCTION,
         GameState.LEAGUE,
-        GameState.SQUAD_PLANNER,
-        GameState.PLAYERS,
-        GameState.TEAMS,
+        
+        
+        
+        
         GameState.PRE_MATCH,
         GameState.MATCH_SIMULATION,
       ].includes(gameState) && (

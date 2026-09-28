@@ -8,7 +8,7 @@ import { getPlayerImage, handlePlayerImageError } from '../lib/playerImages';
 import JerseyPlayerImage from './JerseyPlayerImage';
 
 export default function SquadPlanner() {
-  const { franchises, selectedFranchiseId, goBack, addToSquad, removeFromSquad, addToShortlist, removeFromShortlist, setGameState } = useGameStore();
+  const { franchises, selectedFranchiseId, players, goBack, addToSquad, removeFromSquad, addToShortlist, removeFromShortlist, setGameState } = useGameStore();
   const [playingXI, setPlayingXI] = useState<string[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [roleFilter, setRoleFilter] = useState<string>('All');
@@ -30,9 +30,9 @@ export default function SquadPlanner() {
     );
   }
 
-  const squadPlayers = franchise.squad.map(id => INITIAL_PLAYER_POOL.find(p => p.id === id)).filter(Boolean);
+  const squadPlayers = franchise.squad.map(id => players.find(p => p.id === id)).filter(Boolean);
   
-  const filteredAvailablePlayers = INITIAL_PLAYER_POOL.filter(player => {
+  const filteredAvailablePlayers = players.filter(player => {
     const matchesSearch = player.name.toLowerCase().includes(searchQuery.toLowerCase());
     const matchesRole = roleFilter === 'All' || player.role === roleFilter;
     const notInSquad = !franchise.squad.includes(player.id);

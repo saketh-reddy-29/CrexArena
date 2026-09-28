@@ -17,6 +17,12 @@ export enum WeatherCondition {
   DEW = 'Dew'
 }
 
+export enum MatchFormat {
+  T20 = 'T20',
+  ODI = 'ODI',
+  TEST = 'TEST'
+}
+
 export enum MatchStatus {
   UPCOMING = 'Upcoming',
   LIVE = 'Live',
@@ -111,6 +117,8 @@ export interface PlayerMatchStats {
   fours: number;
   sixes: number;
   wickets: number;
+  isOut?: boolean;
+  dismissalType?: string;
   overs: number;
   runsConceded: number;
   dots: number;
@@ -168,6 +176,7 @@ export interface Fixture {
   team1Id: string;
   team2Id: string;
   status: MatchStatus;
+  format?: MatchFormat;
   scorecard?: MatchScorecard;
   conditions?: MatchConditions;
   isPlayoff?: boolean;

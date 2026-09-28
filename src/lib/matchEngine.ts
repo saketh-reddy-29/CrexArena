@@ -14,6 +14,8 @@ import {
   ImpactPlayerSubstitution,
   StrategicTimeout,
 } from '../types/match';
+import { calculateEffectiveRating } from './ratingEngine';
+import { ArenaFormat } from '../stores/useGameStore';
 
 // ═══════════════════════════════════════════════════════════════════════
 //  IPL Match Engine — Real IPL Rules
@@ -34,9 +36,14 @@ import {
 // ═══════════════════════════════════════════════════════════════════════
 
 export class MatchEngine {
-  static readonly OVERS_PER_MATCH = 20;
+  static getOversPerMatch(format?: string): number {
+    return format === 'ODI' ? 50 : 20;
+  }
   static readonly BALLS_PER_OVER = 6;
-  static readonly MAX_OVERS_PER_BOWLER = 4;
+  static getMaxOversPerBowler(format?: string): number {
+    if (format === 'TEST') return Infinity;
+    return format === 'ODI' ? 10 : 4;
+  }
   static readonly MIN_BOWLERS = 5;
   static readonly MAX_DRS_REVIEWS = 2;
   static readonly MAX_BOUNCERS_PER_OVER = 2;
@@ -65,9 +72,21 @@ export class MatchEngine {
 
   // ─── PowerPlay Phase ─────────────────────────────────────────────
 
-  static getPowerPlayPhase(overs: number): PowerPlayPhase {
-    if (overs < 6) return PowerPlayPhase.MANDATORY;
-    if (overs < 16) return PowerPlayPhase.MIDDLE;
+  static getPowerPlayPhase(overs: number, format?: string): PowerPlayPhase {
+    if (format === 'TEST') {
+      // In tests, field can be attacking or defensive, but there are no strict death overs
+      if (overs < 15) return PowerPlayPhase.MANDATORY;
+      if (overs > 80 && overs < 90) return PowerPlayPhase.DEATH; // New ball due
+      return PowerPlayPhase.MIDDLE;
+    }
+    if (format === 'ODI') {
+      if (overs < 10) return PowerPlayPhase.MANDATORY; // 2 outside
+      if (overs < 40) return PowerPlayPhase.MIDDLE; // 4 outside
+      return PowerPlayPhase.DEATH; // 5 outside
+    }
+    // T20 Default
+    if (overs < 6) return PowerPlayPhase.MANDATORY; // 2 outside
+    if (overs < 16) return PowerPlayPhase.MIDDLE; // up to 5 outside
     return PowerPlayPhase.DEATH;
   }
 
@@ -233,6 +252,7 @@ export class MatchEngine {
     recentOutcomes?: string[],
     isFreeHit: boolean = false,
     bouncersThisOver: number = 0,
+    format?: string,
   ): BallOutcome {
     if (!batsman || !bowler) {
       return { runs: 0, isWicket: false, isExtra: false, batsmanId: batsman?.id || 'unknown', bowlerId: bowler?.id || 'unknown', commentary: "Match interruption: Missing player data." };
@@ -240,7 +260,9 @@ export class MatchEngine {
 
     const overNumber = Math.floor(overs);
     const ballInInnings = Math.round(overs * this.BALLS_PER_OVER);
-    const phase = this.getPowerPlayPhase(overs);
+    const phase = this.getPowerPlayPhase(overs, format);
+    const arenaFormat: ArenaFormat = (format as ArenaFormat) || 'T20';
+
     const isPowerplay = phase === PowerPlayPhase.MANDATORY;
     const isMiddleOvers = phase === PowerPlayPhase.MIDDLE;
     const isDeathOvers = phase === PowerPlayPhase.DEATH;
@@ -248,8 +270,11 @@ export class MatchEngine {
     const isSpin = this.isSpinBowler(bowler);
     const archetype = this.getBatterArchetype(batsman);
 
-    const batterSkill = batsman.stats?.batting || (batsman.role === 'Bowler' ? 22 : 68);
-    const bowlerSkill = bowler.stats?.bowling || (bowler.role === 'Batsman' ? 18 : 72);
+    const batterEff = calculateEffectiveRating(batsman, arenaFormat);
+    const bowlerEff = calculateEffectiveRating(bowler, arenaFormat);
+
+    const batterSkill = batterEff.batting;
+    const bowlerSkill = bowlerEff.bowling;
     const matchupSkill = isSpin ? this.getSpinSkill(batsman) : this.getPaceSkill(batsman);
     const aggression = batsman.aggression ?? (archetype === 'finisher' ? 92 : archetype === 'anchor' ? 64 : 76);
     const temperament = batsman.temperament ?? (archetype === 'anchor' ? 90 : archetype === 'finisher' ? 62 : 76);
@@ -299,13 +324,17 @@ export class MatchEngine {
 
     // ── Attack intent ──
     let attack = 0.5;
-    if (requiredRate > 0) {
+    if (arenaFormat === 'TEST') {
+      attack = 0.35; // Test batsmen are naturally more defensive
+      if (isPowerplay) attack = 0.45;
+      if (isDeathOvers) attack = 0.30; // New ball -> more caution
+    } else if (requiredRate > 0) {
       if (requiredRate > 12) attack = 0.85;
       else if (requiredRate > 9) attack = 0.7;
       else if (requiredRate < 6) attack = 0.4;
-    } else if (overNumber >= 16) {
+    } else if (isDeathOvers) {
       attack = 0.75;
-    } else if (overNumber < 6) {
+    } else if (isPowerplay) {
       attack = 0.65;
     }
 
@@ -393,7 +422,10 @@ export class MatchEngine {
     let three = isPowerplay ? 1.2 : isMiddleOvers ? 1.5 : 2.2;
     let four = isPowerplay ? 13 : isMiddleOvers ? 7 : 14;
     let six = isPowerplay ? 5 : isMiddleOvers ? 3 : 8;
-    let wicket = isPowerplay ? 4.2 : isMiddleOvers ? 3.8 : 6.0;
+    let wicket = isPowerplay ? 2.5 : isMiddleOvers ? 2.2 : 4.0;
+    if (arenaFormat === 'TEST') {
+      wicket *= 0.6; // Test matches have much lower per-ball wicket probability
+    }
 
     // PowerPlay: fewer fielders outside → more boundaries but also catches in close
     if (isPowerplay) {
@@ -475,7 +507,7 @@ export class MatchEngine {
       [3, this.clamp(three, 0.3, 3.5)],
       [4, this.clamp(four, 3, isDeathOvers ? 20 : 16)],
       [6, this.clamp(six, 0.8, isDeathOvers ? 14 : 9)],
-      [-1, this.clamp(wicket, isFreeHit ? 0.1 : 1.5, isDeathOvers ? 9 : 7.5)]
+      [-1, this.clamp(wicket, isFreeHit ? 0.1 : 0.8, isDeathOvers ? 5.5 : 4.0)]
     ]);
 
     // ═══ WICKET ═══
@@ -933,10 +965,10 @@ export class MatchEngine {
 
   // ─── Bowler Validation ───────────────────────────────────────────
 
-  static canBowlerBowl(bowlerStats: PlayerMatchStats | undefined): boolean {
+  static canBowlerBowl(bowlerStats: PlayerMatchStats | undefined, format?: string): boolean {
     if (!bowlerStats) return true;
     const totalOvers = (bowlerStats.overs || 0) + ((bowlerStats.legalBallsThisOver || 0) >= 6 ? 1 : 0);
-    return totalOvers < this.MAX_OVERS_PER_BOWLER;
+    return totalOvers < this.getMaxOversPerBowler(format);
   }
 
   static getAvailableBowlers(

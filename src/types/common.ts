@@ -15,11 +15,22 @@ export interface Player {
   aggression?: number;
   temperament?: number;
   stamina?: number;
-  form?: number;
+  baseAbility: number; // Permanent base ability rating (long term)
+  form: number; // Dynamic form rating (0-100)
   intendedTeamId?: string;
   stats: {
     batting: number;
     bowling: number;
     fielding: number;
+  };
+  careerStats: {
+    matches: number;
+    runs: number;
+    wickets: number;
+    ballsFaced: number;
+    ballsBowled: number;
+    runsConceded: number;
+    dismissals: number;
+    catches: number;
   };
 }
