@@ -144,11 +144,17 @@ export class DeliveryEngine {
     };
   }
 
+  private safeNumber(val: any, fallback: number): number {
+    const num = Number(val);
+    return Number.isFinite(num) && !Number.isNaN(num) ? num : fallback;
+  }
+
   private adjustRunWeights(outcomes: {runs: number, weight: number}[], batter: any, bowler: any, format: string, phase: string) {
-      const power = batter.power || 50;
-      const aggression = batter.aggression || 50;
-      const technique = batter.technique || 50;
-      const bowlingQuality = bowler.rating || 50;
+      const power = this.safeNumber(batter.attributes?.power ?? batter.power, 50);
+      const aggression = this.safeNumber(batter.attributes?.aggression ?? batter.aggression, 50);
+      const technique = this.safeNumber(batter.attributes?.technique ?? batter.technique, 50);
+      
+      const bowlingQuality = this.safeNumber(bowler.attributes?.bowlingRating ?? bowler.rating, 50);
 
       const six = outcomes.find(o => o.runs === 6);
       const four = outcomes.find(o => o.runs === 4);
@@ -161,11 +167,15 @@ export class DeliveryEngine {
 
       if (format === "TEST") {
           sixMultiplier *= 0.20;
-          if (phase === "NEW_BALL") sixMultiplier *= 0.35;
       } else if (format === "ODI") {
           sixMultiplier *= 0.65;
       } else if (format === "T20" || format === "IPL") {
           sixMultiplier *= 1.20;
+      }
+
+      // Early Test/new-ball caution
+      if (format === "TEST" && phase === "NEW_BALL") {
+          sixMultiplier *= 0.35;
       }
 
       six.weight = Math.max(0.01, six.weight * sixMultiplier);
@@ -185,7 +195,9 @@ export class DeliveryEngine {
 
   private selectWeightedOutcome(outcomes: {runs: number, weight: number}[]) {
       const valid = outcomes.filter(o => Number.isFinite(o.weight) && o.weight > 0);
-      if (valid.length === 0) return { runs: 0, weight: 1 };
+      if (valid.length === 0) {
+        throw new Error("No valid run outcomes");
+      }
 
       const totalWeight = valid.reduce((sum, o) => sum + o.weight, 0);
       let roll = Math.random() * totalWeight;
