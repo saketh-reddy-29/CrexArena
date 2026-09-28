@@ -72,15 +72,35 @@ export class DeliveryEngine {
       pOne += 0.05;
       pTwo += 0.02;
     } else if (format === 'TEST') {
-      pDot += 0.15;
+      const overs = inningsState.balls / 6;
+      const testPhase = this.getTestPhase(overs);
+      const ballsFaced = batter.ballsFaced || 0;
+      const settledness = Math.min(1, ballsFaced * 0.03);
+
+      // Base Test adjustments
+      pDot += 0.10;
       pOne -= 0.05;
       pFour -= 0.05;
-      pSix -= 0.04;
-      pWicket -= 0.01;
-      
-      // Fatigue in tests
-      if (batter.ballsFaced > 150) {
-          pWicket += 0.01;
+      pSix *= (batter.power ? batter.power / 100 : 0.5); // Six probability depends on power
+
+      if (testPhase === 'NEW_BALL') {
+          pDot += 0.10;
+          pOne += 0.03;
+          pTwo -= 0.02;
+          pFour -= 0.07;
+          pSix *= 0.35; // Extreme six penalty
+          pWicket += 0.015; // New ball threat
+      } else if (testPhase === 'SETTLING') {
+          pDot += 0.05;
+          pOne += 0.02;
+      }
+
+      // Settled batters are harder to dismiss
+      pWicket *= (1 - (settledness * 0.25));
+
+      // Fatigue / concentration loss in long innings
+      if (ballsFaced > 150) {
+          pWicket += 0.015; // slight concentration drop
       }
     }
 
@@ -160,5 +180,12 @@ export class DeliveryEngine {
     if (rand < 0.85) return 'CAUGHT';
     if (rand < 0.90) return 'RUN_OUT';
     return 'STUMPED';
+  }
+
+  private getTestPhase(overs: number) {
+      if (overs < 10) return "NEW_BALL";
+      if (overs < 30) return "SETTLING";
+      if (overs < 70) return "MIDDLE";
+      return "OLD_BALL";
   }
 }
