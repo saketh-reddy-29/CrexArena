@@ -29,82 +29,66 @@ export class DeliveryEngine {
     // 3. Advantage calculation
     const advantage = battingScore - bowlingScore; // e.g. -3 (Bowler has small advantage)
 
-    // 4. Base Run Probabilities
-    let pDot = 0.35;
-    let pOne = 0.30;
-    let pTwo = 0.08;
-    let pThree = 0.01;
-    let pFour = 0.15;
-    let pSix = 0.05;
+    // 4. Base Run Probabilities per format
+    let outcomes: {runs: number, weight: number}[] = [];
+    if (format === 'T20' || format === 'IPL') {
+      outcomes = [
+        { runs: 0, weight: 35 },
+        { runs: 1, weight: 30 },
+        { runs: 2, weight: 10 },
+        { runs: 3, weight: 2 },
+        { runs: 4, weight: 17 },
+        { runs: 6, weight: 6 }
+      ];
+    } else if (format === 'ODI') {
+      outcomes = [
+        { runs: 0, weight: 42 },
+        { runs: 1, weight: 32 },
+        { runs: 2, weight: 10 },
+        { runs: 3, weight: 1 },
+        { runs: 4, weight: 13 },
+        { runs: 6, weight: 2 }
+      ];
+    } else { // TEST
+      outcomes = [
+        { runs: 0, weight: 50 },
+        { runs: 1, weight: 30 },
+        { runs: 2, weight: 7 },
+        { runs: 3, weight: 1 },
+        { runs: 4, weight: 11 },
+        { runs: 6, weight: 0.2 }
+      ];
+    }
+
     let pWicket = 0.03;
     let pExtra = 0.03;
 
-    // 5. Batter quality modifies distribution
-    const batterFactor = (battingScore - 50) / 50; // -1 to +1
-    pDot -= batterFactor * 0.04;
-    pOne += batterFactor * 0.015;
-    pTwo += batterFactor * 0.01;
-    pFour += batterFactor * 0.02;
-    pSix += batterFactor * 0.01;
-    pWicket -= batterFactor * 0.005;
+    // 5. Adjust run weights
+    const phase = format === 'TEST' ? this.getTestPhase(inningsState.balls / 6) : 'MIDDLE';
+    outcomes = this.adjustRunWeights(outcomes, batter, bowler, format, phase);
 
-    // 6. Bowler quality modifies it
-    const bowlingFactor = (bowlingScore - 50) / 50; // -1 to +1
-    pDot += bowlingFactor * 0.04;
-    pFour -= bowlingFactor * 0.02;
-    pSix -= bowlingFactor * 0.01;
+    // 6. Adjust wicket probability based on match situation and players
+    const batterFactor = (battingScore - 50) / 50; 
+    const bowlingFactor = (bowlingScore - 50) / 50; 
+    
+    pWicket -= batterFactor * 0.005;
     pWicket += bowlingFactor * 0.015;
 
-    // 7. Format modifiers
     let attackingIntent = 0;
-    
     if (format === 'T20' || format === 'IPL') {
-      pFour += 0.05;
-      pSix += 0.05;
       pWicket += 0.02;
-      pDot -= 0.05;
-      
-      // Situation modifiers for short format
       if (inningsState.balls > matchMaxBalls * 0.75) {
         attackingIntent += 0.10; // Death overs
       }
-    } else if (format === 'ODI') {
-      pOne += 0.05;
-      pTwo += 0.02;
     } else if (format === 'TEST') {
-      const overs = inningsState.balls / 6;
-      const testPhase = this.getTestPhase(overs);
+      pWicket -= 0.01;
       const ballsFaced = batter.ballsFaced || 0;
       const settledness = Math.min(1, ballsFaced * 0.03);
-
-      // Base Test adjustments
-      pDot += 0.10;
-      pOne -= 0.05;
-      pFour -= 0.05;
-      pSix *= (batter.power ? batter.power / 100 : 0.5); // Six probability depends on power
-
-      if (testPhase === 'NEW_BALL') {
-          pDot += 0.10;
-          pOne += 0.03;
-          pTwo -= 0.02;
-          pFour -= 0.07;
-          pSix *= 0.35; // Extreme six penalty
-          pWicket += 0.015; // New ball threat
-      } else if (testPhase === 'SETTLING') {
-          pDot += 0.05;
-          pOne += 0.02;
-      }
-
-      // Settled batters are harder to dismiss
+      if (phase === 'NEW_BALL') pWicket += 0.015;
       pWicket *= (1 - (settledness * 0.25));
-
-      // Fatigue / concentration loss in long innings
-      if (ballsFaced > 150) {
-          pWicket += 0.015; // slight concentration drop
-      }
+      if (ballsFaced > 150) pWicket += 0.015;
     }
 
-    // 8. Match Situation Intent
     if (target) {
         const oversRemaining = (matchMaxBalls - inningsState.balls) / 6;
         const runsRequired = target - inningsState.runs;
@@ -117,50 +101,37 @@ export class DeliveryEngine {
     }
 
     if (attackingIntent > 0) {
-        pFour += attackingIntent * 0.15;
-        pSix += attackingIntent * 0.10;
         pWicket += attackingIntent * 0.10;
-        pDot -= attackingIntent * 0.10;
+        // Increase 4 and 6 weights artificially based on intent
+        const four = outcomes.find(o => o.runs === 4);
+        const six = outcomes.find(o => o.runs === 6);
+        if (four) four.weight *= (1 + attackingIntent * 1.5);
+        if (six) six.weight *= (1 + attackingIntent * 2.0);
     }
 
-    // 9. Normalize probabilities
-    pWicket = Math.max(0.01, Math.min(0.15, pWicket)); // Cap wicket probability
-    
+    // 7. Cap probabilities
+    pWicket = Math.max(0.01, Math.min(0.15, pWicket)); 
+    this.capSixProbability(outcomes, format);
+
     let isWicket = false;
     let runs = 0;
     let extras = 0;
 
-    // 10. Check Extras First
+    // 8. Check Extras First
     const extraRoll = Math.random();
     if (extraRoll < pExtra) {
         extras = 1;
-        // Wides/NBs don't count as a legal ball in the UI usually, but we handle score here.
         return { runs: 0, extras: 1, isWicket: false, batterId: batter.id, bowlerId: bowler.id };
     }
 
-    // 11. Check Wicket
+    // 9. Check Wicket
     const wicketRoll = Math.random();
     if (wicketRoll < pWicket) {
         isWicket = true;
     } else {
-        // 12. Run Model (Only if not a wicket)
-        // Re-normalize run probabilities so they add up to 1
-        const totalRunProb = Math.max(0.01, pDot + pOne + pTwo + pThree + pFour + pSix);
-        const normDot = pDot / totalRunProb;
-        const normOne = pOne / totalRunProb;
-        const normTwo = pTwo / totalRunProb;
-        const normThree = pThree / totalRunProb;
-        const normFour = pFour / totalRunProb;
-        // normSix is remainder
-
-        const runRoll = Math.random();
-        
-        if (runRoll < normDot) runs = 0;
-        else if (runRoll < normDot + normOne) runs = 1;
-        else if (runRoll < normDot + normOne + normTwo) runs = 2;
-        else if (runRoll < normDot + normOne + normTwo + normThree) runs = 3;
-        else if (runRoll < normDot + normOne + normTwo + normThree + normFour) runs = 4;
-        else runs = 6;
+        // 10. Select Run Outcome
+        const outcome = this.selectWeightedOutcome(outcomes);
+        runs = outcome.runs;
     }
 
     return {
@@ -171,6 +142,59 @@ export class DeliveryEngine {
       batterId: batter.id,
       bowlerId: bowler.id
     };
+  }
+
+  private adjustRunWeights(outcomes: {runs: number, weight: number}[], batter: any, bowler: any, format: string, phase: string) {
+      const power = batter.power || 50;
+      const aggression = batter.aggression || 50;
+      const technique = batter.technique || 50;
+      const bowlingQuality = bowler.rating || 50;
+
+      const six = outcomes.find(o => o.runs === 6);
+      const four = outcomes.find(o => o.runs === 4);
+      if (!six || !four) return outcomes;
+
+      let sixMultiplier = 1;
+      sixMultiplier += (power - 50) / 150;
+      sixMultiplier += (aggression - 50) / 200;
+      sixMultiplier -= (bowlingQuality - 50) / 250;
+
+      if (format === "TEST") {
+          sixMultiplier *= 0.20;
+          if (phase === "NEW_BALL") sixMultiplier *= 0.35;
+      } else if (format === "ODI") {
+          sixMultiplier *= 0.65;
+      } else if (format === "T20" || format === "IPL") {
+          sixMultiplier *= 1.20;
+      }
+
+      six.weight = Math.max(0.01, six.weight * sixMultiplier);
+      four.weight *= 1 + (technique - 50) / 300;
+
+      return outcomes;
+  }
+
+  private capSixProbability(outcomes: {runs: number, weight: number}[], format: string) {
+      const six = outcomes.find(o => o.runs === 6);
+      if (!six) return;
+
+      if (format === "TEST") six.weight = Math.min(six.weight, 0.5);
+      else if (format === "ODI") six.weight = Math.min(six.weight, 3);
+      else if (format === "T20" || format === "IPL") six.weight = Math.min(six.weight, 8);
+  }
+
+  private selectWeightedOutcome(outcomes: {runs: number, weight: number}[]) {
+      const valid = outcomes.filter(o => Number.isFinite(o.weight) && o.weight > 0);
+      if (valid.length === 0) return { runs: 0, weight: 1 };
+
+      const totalWeight = valid.reduce((sum, o) => sum + o.weight, 0);
+      let roll = Math.random() * totalWeight;
+
+      for (const outcome of valid) {
+          roll -= outcome.weight;
+          if (roll <= 0) return outcome;
+      }
+      return valid[0];
   }
 
   private determineWicketType(bowler: any) {
