@@ -45,6 +45,7 @@ export default function LandingPage() {
   const { arenas, loadArena } = useArenaStore();
 
   const handleSelectFormat = (format: ArenaFormat) => {
+    resetGame();
     setFormat(format);
     setGameState(GameState.TEAM_SELECTION);
   };

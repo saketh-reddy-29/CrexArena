@@ -116,7 +116,11 @@ export default function PlayerStatsView() {
             <tbody className="divide-y divide-zinc-800/50">
               {statsList.length > 0 ? (
                 statsList.map((stat, idx) => (
-                  <tr key={stat.playerId} className="hover:bg-zinc-800/30 transition-colors group">
+                  <tr 
+                    key={stat.playerId} 
+                    className="hover:bg-zinc-800/30 transition-colors group cursor-pointer"
+                    onClick={() => useGameStore.getState().setViewedPlayer(stat.playerId)}
+                  >
                     <td className="p-4 pl-6">
                       <div className="flex items-center gap-3">
                         <span className="text-[10px] font-bold text-zinc-600 w-4">{idx + 1}</span>

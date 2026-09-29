@@ -130,6 +130,7 @@ interface GameStore {
   liveMatchState: Record<string, any> | null;
   selectedFormat: ArenaFormat | null;
   activeTab: ArenaTab;
+  viewedPlayerId: string | null;
 
   setGameState: (state: GameState) => void;
   setActiveTab: (tab: ArenaTab) => void;
@@ -138,6 +139,7 @@ interface GameStore {
   setSelectedSquadIds: (ids: string[]) => void;
   setPlayingXIIds: (ids: string[]) => void;
   selectFranchise: (id: string) => void;
+  setViewedPlayer: (id: string | null) => void;
   updatePurse: (franchiseId: string, amount: number) => void;
   addToSquad: (franchiseId: string, playerId: string) => void;
   removeFromSquad: (franchiseId: string, playerId: string) => void;
@@ -154,6 +156,7 @@ interface GameStore {
 
   // Match Actions
   initializeIntlFranchises: () => void;
+  initializeIPLFranchises: () => void;
   generateSeasonFixtures: () => void;
   updateMatchResult: (matchId: string, scorecard: MatchScorecard) => void;
   setCurrentMatch: (matchId: string | null) => void;
@@ -187,6 +190,7 @@ export const useGameStore = create<GameStore>()(
   playingXIIds: [],
   liveMatchState: null,
   activeTab: 'OVERVIEW',
+  viewedPlayerId: null,
   
   // Actions
   setFormat: (format) => set({ selectedFormat: format }),
@@ -262,6 +266,7 @@ export const useGameStore = create<GameStore>()(
     unsoldPlayerIds: [...state.unsoldPlayerIds, playerId],
     currentAuctionPlayerId: null
   })),
+  setViewedPlayer: (id) => set({ viewedPlayerId: id }),
 
   resetGame: () => set({
     gameState: GameState.LANDING,
@@ -282,6 +287,7 @@ export const useGameStore = create<GameStore>()(
     playingXIIds: [],
     liveMatchState: null,
     activeTab: 'OVERVIEW',
+    viewedPlayerId: null,
   }),
 
   generatePlayoffFixtures: () => set((state) => {
@@ -330,6 +336,9 @@ export const useGameStore = create<GameStore>()(
       };
     });
     return { franchises: newFranchises };
+  }),
+  initializeIPLFranchises: () => set((state) => {
+    return { franchises: INITIAL_FRANCHISES };
   }),
   generateSeasonFixtures: () => set((state) => {
     // Generate full double round-robin
