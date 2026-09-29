@@ -47,9 +47,9 @@ export default function PlayerProfileModal({ player, franchiseId, onClose }: Pla
         initial={{ opacity: 0, scale: 0.9, y: 20 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
         exit={{ opacity: 0, scale: 0.9, y: 20 }}
-        className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-[101] w-[90vw] max-w-[400px]"
+        className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-[101] w-[90vw] max-w-[400px] max-h-[90vh] flex flex-col"
       >
-        <div className="bg-[#0a0a0a] rounded-3xl overflow-hidden border border-white/10 shadow-[0_0_50px_rgba(0,0,0,0.8)] relative">
+        <div className="bg-[#0a0a0a] rounded-3xl overflow-hidden border border-white/10 shadow-[0_0_50px_rgba(0,0,0,0.8)] relative flex flex-col max-h-[90vh]">
           <button
             onClick={onClose}
             className="absolute top-4 right-4 z-50 w-8 h-8 flex items-center justify-center rounded-full bg-black/50 backdrop-blur-md border border-white/10 text-white/70 hover:text-white transition-colors"
@@ -57,7 +57,7 @@ export default function PlayerProfileModal({ player, franchiseId, onClose }: Pla
             <X className="w-4 h-4" />
           </button>
 
-          <div className="relative h-[280px] bg-gradient-to-b from-[#1a2333] to-[#0a0a0a]">
+          <div className="relative h-[200px] sm:h-[280px] shrink-0 bg-gradient-to-b from-[#1a2333] to-[#0a0a0a]">
             <JerseyPlayerImage
               player={player}
               franchiseId={franchiseId}
@@ -67,7 +67,7 @@ export default function PlayerProfileModal({ player, franchiseId, onClose }: Pla
             <div className="absolute inset-x-0 bottom-0 h-32 bg-gradient-to-t from-[#0a0a0a] to-transparent z-10" />
           </div>
 
-          <div className="px-6 pb-6 relative z-20 -mt-8 flex flex-col gap-4">
+          <div className="px-5 sm:px-6 pb-5 sm:pb-6 relative z-20 -mt-8 flex flex-col gap-3 sm:gap-4 flex-1 min-h-0 overflow-y-auto custom-scrollbar">
             <div className="flex items-center gap-2">
               <div className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-white/5 border border-white/10 backdrop-blur-md shadow-xl">
                 <Star className="w-3.5 h-3.5 text-amber-400 fill-amber-400 drop-shadow-md" />
@@ -86,14 +86,14 @@ export default function PlayerProfileModal({ player, franchiseId, onClose }: Pla
             </div>
 
             <div>
-              <h2 className="text-3xl font-black text-white tracking-tight leading-none mb-1">{player.name}</h2>
-              <div className="text-cyan-400 font-bold tracking-widest text-[11px] uppercase mt-1">
+              <h2 className="text-2xl sm:text-3xl font-black text-white tracking-tight leading-none mb-1">{player.name}</h2>
+              <div className="text-cyan-400 font-bold tracking-widest text-[10px] sm:text-[11px] uppercase mt-1">
                 Base Price: ₹{(player.basePrice / 10000000).toFixed(2)} Cr
               </div>
             </div>
 
             {/* Format Tabs */}
-            <div className="flex items-center gap-1 bg-[#111827] p-1 rounded-xl border border-white/5">
+            <div className="flex items-center gap-1 bg-[#111827] p-1 rounded-xl border border-white/5 shrink-0">
               {(['TEST', 'ODI', 'T20', 'IPL'] as ArenaFormat[]).map(fmt => (
                 <button
                   key={fmt}
@@ -108,7 +108,7 @@ export default function PlayerProfileModal({ player, franchiseId, onClose }: Pla
               ))}
             </div>
 
-            <div className="bg-[#111827] rounded-xl p-4 sm:p-5 border border-white/10 shadow-inner flex flex-col gap-4 max-h-[45vh] overflow-y-auto custom-scrollbar">
+            <div className="bg-[#111827] rounded-xl p-3 sm:p-5 border border-white/10 shadow-inner flex flex-col gap-3 sm:gap-4 shrink-0">
               {(() => {
                 const details = getFormatSpecificProfile(player, activeFormat);
                 return (
