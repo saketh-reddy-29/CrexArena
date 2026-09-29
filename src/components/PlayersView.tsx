@@ -7,6 +7,56 @@ import { cn } from '../lib/utils';
 import JerseyPlayerImage from './JerseyPlayerImage';
 import { Player } from '../types/common';
 
+// Helper to deterministically generate detailed stats based on base ratings
+function getDetailedStats(player: Player) {
+  // Simple deterministic pseudo-randomness based on name
+  const seed = player.name.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+  const v = (base: number, offsetSeed: number, variance: number = 6) => {
+    const val = base + ((seed + offsetSeed) % variance) - (variance / 2);
+    return Math.min(99, Math.max(30, Math.round(val)));
+  };
+    
+  return {
+    batting: {
+      technique: v(player.stats.batting, 1, 6),
+      consistency: v(player.stats.batting, 2, 8),
+      timing: v(player.stats.batting, 3, 5),
+      power: player.role === 'Bowler' ? v(player.stats.batting, 4, 15) : v(player.stats.batting, 4, 10),
+      strikeRotation: v(player.stats.batting, 5, 5),
+      againstPace: v(player.stats.batting, 6, 6),
+      againstSpin: v(player.stats.batting, 7, 6),
+    },
+    mental: {
+      concentration: v(player.rating, 8, 7),
+      temperament: player.temperament || v(player.rating, 9, 8),
+      aggression: player.aggression || v(75, 10, 30),
+    },
+    fielding: {
+      fielding: v(player.stats.fielding, 11, 5),
+      catching: v(player.stats.fielding, 12, 5),
+    },
+    form: {
+      currentForm: player.form || v(player.rating, 13, 15),
+      fitness: player.stamina || v(85, 14, 10),
+      confidence: v(player.form || player.rating, 15, 12),
+    }
+  };
+}
+
+const ProgressBar = ({ label, value, colorClass = "text-cyan-400" }: { label: string, value: number, colorClass?: string }) => {
+  const blocks = 20;
+  const filled = Math.round((value / 100) * blocks);
+  return (
+    <div className="flex items-center justify-between text-xs py-0.5">
+      <span className="w-28 sm:w-32 text-white/80 font-medium">{label}</span>
+      <div className={`flex-1 font-mono tracking-tighter text-sm ${colorClass}`}>
+        {'█'.repeat(filled)}<span className="opacity-30">{'░'.repeat(blocks - filled)}</span>
+      </div>
+      <span className="w-8 text-right font-black text-white">{value}</span>
+    </div>
+  );
+};
+
 export default function PlayersView() {
   const { setGameState, franchises } = useGameStore();
   const [search, setSearch] = useState('');
@@ -217,18 +267,53 @@ export default function PlayersView() {
                     </div>
                   </div>
 
-                  {/* Stats Box */}
-                  <div className="grid grid-cols-3 gap-3">
-                    {[
-                      { label: 'BAT', value: selectedPlayer.stats.batting, color: '#38bdf8' },
-                      { label: 'BOWL', value: selectedPlayer.stats.bowling, color: '#f472b6' },
-                      { label: 'FIELD', value: selectedPlayer.stats.fielding, color: '#4ade80' },
-                    ].map(s => (
-                      <div key={s.label} className="bg-white/5 rounded-xl p-4 border border-white/10 shadow-inner flex flex-col items-center justify-center gap-1">
-                        <span className="text-[9px] font-bold text-white/40 uppercase tracking-[0.2em]">{s.label}</span>
-                        <span className="text-3xl font-black leading-none drop-shadow-md" style={{ color: s.color }}>{s.value}</span>
-                      </div>
-                    ))}
+                  {/* Stats Box - Detailed View */}
+                  <div className="bg-[#111827] rounded-xl p-4 sm:p-6 border border-white/10 shadow-inner flex flex-col gap-5 max-h-[50vh] overflow-y-auto custom-scrollbar">
+                    {(() => {
+                      const details = getDetailedStats(selectedPlayer);
+                      return (
+                        <>
+                          <div className="flex flex-col gap-1.5">
+                            <div className="flex items-center gap-2 mb-1">
+                              <span className="text-[10px] font-black text-white/50 uppercase tracking-[0.2em]">Bat Batting</span>
+                            </div>
+                            <ProgressBar label="Technique" value={details.batting.technique} />
+                            <ProgressBar label="Consistency" value={details.batting.consistency} />
+                            <ProgressBar label="Timing" value={details.batting.timing} />
+                            <ProgressBar label="Power" value={details.batting.power} />
+                            <ProgressBar label="Strike Rotation" value={details.batting.strikeRotation} />
+                            <ProgressBar label="Against Pace" value={details.batting.againstPace} />
+                            <ProgressBar label="Against Spin" value={details.batting.againstSpin} />
+                          </div>
+
+                          <div className="flex flex-col gap-1.5 pt-2 border-t border-white/5">
+                            <div className="flex items-center gap-2 mb-1">
+                              <span className="text-[10px] font-black text-white/50 uppercase tracking-[0.2em]">Mental</span>
+                            </div>
+                            <ProgressBar label="Concentration" value={details.mental.concentration} colorClass="text-purple-400" />
+                            <ProgressBar label="Temperament" value={details.mental.temperament} colorClass="text-purple-400" />
+                            <ProgressBar label="Aggression" value={details.mental.aggression} colorClass="text-purple-400" />
+                          </div>
+
+                          <div className="flex flex-col gap-1.5 pt-2 border-t border-white/5">
+                            <div className="flex items-center gap-2 mb-1">
+                              <span className="text-[10px] font-black text-white/50 uppercase tracking-[0.2em]">Fielding</span>
+                            </div>
+                            <ProgressBar label="Fielding" value={details.fielding.fielding} colorClass="text-green-400" />
+                            <ProgressBar label="Catching" value={details.fielding.catching} colorClass="text-green-400" />
+                          </div>
+
+                          <div className="flex flex-col gap-1.5 pt-2 border-t border-white/5">
+                            <div className="flex items-center gap-2 mb-1">
+                              <span className="text-[10px] font-black text-white/50 uppercase tracking-[0.2em]">Form</span>
+                            </div>
+                            <ProgressBar label="Current Form" value={details.form.currentForm} colorClass="text-amber-400" />
+                            <ProgressBar label="Fitness" value={details.form.fitness} colorClass="text-amber-400" />
+                            <ProgressBar label="Confidence" value={details.form.confidence} colorClass="text-amber-400" />
+                          </div>
+                        </>
+                      );
+                    })()}
                   </div>
                 </div>
               </div>
