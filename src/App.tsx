@@ -17,13 +17,24 @@ import TeamSelection from './components/TeamSelection';
 import BoardSelection from './components/BoardSelection';
 import ArenaHub from './components/ArenaHub';
 import PlayingXIBuilder from './components/PlayingXIBuilder';
+import PlayerProfileModal from './components/PlayerProfileModal';
 import { useGameStore, GameState } from './stores/useGameStore';
 
 export default function App() {
-  const gameState = useGameStore((state) => state.gameState);
+  const { gameState, viewedPlayerId, setViewedPlayer, players, franchises } = useGameStore();
+  
+  const viewedPlayer = viewedPlayerId ? players.find(p => p.id === viewedPlayerId) : null;
+  const viewedPlayerFranchise = viewedPlayer ? franchises.find(f => f.squad.includes(viewedPlayer.id))?.id : undefined;
 
   return (
     <main className="min-h-screen bg-zinc-950">
+      {viewedPlayer && (
+        <PlayerProfileModal 
+          player={viewedPlayer} 
+          franchiseId={viewedPlayerFranchise} 
+          onClose={() => setViewedPlayer(null)} 
+        />
+      )}
       {gameState === GameState.LANDING && <LandingPage />}
       {gameState === GameState.TEAM_SELECTION && <TeamSelection />}
       {gameState === GameState.BOARD_SELECTION && <BoardSelection />}

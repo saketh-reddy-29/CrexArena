@@ -7,7 +7,7 @@ import JerseyPlayerImage from './JerseyPlayerImage';
 import { getIntlTeamLogoUrl } from '../data/crexIntlTeams';
 
 export default function BoardSelection() {
-  const { players, selectedFranchiseId, franchises, setGameState, setSelectedSquadIds, goBack } = useGameStore();
+  const { players, selectedFranchiseId, franchises, setGameState, setSelectedSquadIds, goBack, setViewedPlayer } = useGameStore();
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
 
   const team = franchises.find(f => f.id === selectedFranchiseId);
@@ -154,6 +154,7 @@ export default function BoardSelection() {
                 <div 
                   key={player.id}
                   onClick={() => togglePlayer(player.id)}
+                  onDoubleClick={() => setViewedPlayer(player.id)}
                   className={cn(
                     "flex flex-col p-3 rounded-2xl border-2 transition-all cursor-pointer relative overflow-hidden group",
                     isSelected 

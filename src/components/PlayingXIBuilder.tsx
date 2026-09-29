@@ -5,12 +5,10 @@ import { Shield, ChevronRight, User, ArrowLeft, Target, AlertCircle } from 'luci
 import { cn } from '../lib/utils';
 import JerseyPlayerImage from './JerseyPlayerImage';
 import { calculateEffectiveRating } from '../lib/ratingEngine';
-import PlayerProfileModal from './PlayerProfileModal';
 
 export default function PlayingXIBuilder() {
-  const { players, selectedSquadIds, selectedFormat, selectedFranchiseId, setGameState, setPlayingXIIds } = useGameStore();
+  const { players, selectedSquadIds, selectedFormat, selectedFranchiseId, setGameState, setPlayingXIIds, setViewedPlayer } = useGameStore();
   const [playingXI, setPlayingXI] = useState<string[]>([]);
-  const [selectedPlayerProfile, setSelectedPlayerProfile] = useState<string | null>(null);
 
   const squadPlayers = players.filter(p => selectedSquadIds.includes(p.id));
 
@@ -143,7 +141,7 @@ export default function PlayingXIBuilder() {
                     className="w-12 h-12 shrink-0 cursor-pointer"
                     onClick={(e) => {
                       e.stopPropagation();
-                      setSelectedPlayerProfile(player.id);
+                      setViewedPlayer(player.id);
                     }}
                   >
                     <JerseyPlayerImage 
@@ -154,7 +152,7 @@ export default function PlayingXIBuilder() {
                   </div>
                   <div className="flex-1 min-w-0" onClick={(e) => {
                     e.stopPropagation();
-                    setSelectedPlayerProfile(player.id);
+                    setViewedPlayer(player.id);
                   }}>
                     <h3 className="text-sm font-bold truncate leading-tight mb-1 hover:text-cyan-400 transition-colors">{player.name}</h3>
                     <div className="flex items-center gap-2 text-[10px] font-medium text-white/50 uppercase tracking-wider">
@@ -267,13 +265,6 @@ export default function PlayingXIBuilder() {
         </div>
 
       </div>
-
-      {/* Player Profile Modal */}
-      <PlayerProfileModal 
-        player={selectedPlayerProfile ? players.find(p => p.id === selectedPlayerProfile) || null : null}
-        franchiseId={selectedPlayerProfile && playingXI.includes(selectedPlayerProfile) ? selectedFranchiseId : undefined}
-        onClose={() => setSelectedPlayerProfile(null)}
-      />
     </div>
   );
 }

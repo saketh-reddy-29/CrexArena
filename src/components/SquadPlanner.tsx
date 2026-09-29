@@ -6,16 +6,14 @@ import { Shield, Globe, ArrowLeft, Trash2, Zap, Users, Search, Plus, Lock, Check
 import { cn } from '../lib/utils';
 import { getPlayerImage, handlePlayerImageError } from '../lib/playerImages';
 import JerseyPlayerImage from './JerseyPlayerImage';
-import PlayerProfileModal from './PlayerProfileModal';
 
 export default function SquadPlanner() {
-  const { franchises, selectedFranchiseId, players, goBack, addToSquad, removeFromSquad, addToShortlist, removeFromShortlist, setGameState, setActiveTab } = useGameStore();
+  const { franchises, selectedFranchiseId, players, goBack, addToSquad, removeFromSquad, addToShortlist, removeFromShortlist, setGameState, setActiveTab, setViewedPlayer } = useGameStore();
   const [playingXI, setPlayingXI] = useState<string[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [roleFilter, setRoleFilter] = useState<string>('All');
   const [sortBy, setSortBy] = useState<'default' | 'rating' | 'name'>('default');
   const [viewTab, setViewTab] = useState<'squad' | 'scout'>('squad');
-  const [selectedPlayerProfile, setSelectedPlayerProfile] = useState<string | null>(null);
 
   const franchise = franchises.find(f => f.id === selectedFranchiseId);
 
@@ -143,7 +141,7 @@ export default function SquadPlanner() {
                                 <span className="w-5 text-center text-[10px] font-bold text-white/20">{idx + 1}</span>
                                 <div 
                                   className="w-8 h-8 rounded-lg overflow-hidden bg-zinc-950 border border-zinc-800 shrink-0 cursor-pointer"
-                                  onClick={() => setSelectedPlayerProfile(player.id)}
+                                  onClick={() => setViewedPlayer(player.id)}
                                 >
                                   <JerseyPlayerImage 
                                     player={player}
@@ -152,7 +150,7 @@ export default function SquadPlanner() {
                                     imageClassName="w-full h-full"
                                   />
                                 </div>
-                                <div className="flex-1 min-w-0 cursor-pointer" onClick={() => setSelectedPlayerProfile(player.id)}>
+                                <div className="flex-1 min-w-0 cursor-pointer" onClick={() => setViewedPlayer(player.id)}>
                                   <div className="text-xs font-semibold truncate hover:text-cyan-400 transition-colors">{player.name}</div>
                                   <div className="flex items-center gap-2 text-[9px] text-white/30">
                                     <span>{player.role}</span>
@@ -295,7 +293,7 @@ export default function SquadPlanner() {
                           >
                             <div 
                               className="w-8 h-8 rounded-lg overflow-hidden bg-zinc-950 border border-zinc-800 shrink-0 cursor-pointer"
-                              onClick={() => setSelectedPlayerProfile(player.id)}
+                              onClick={() => setViewedPlayer(player.id)}
                             >
                               <JerseyPlayerImage 
                                 player={player}
@@ -304,7 +302,7 @@ export default function SquadPlanner() {
                                 imageClassName="w-full h-full"
                               />
                             </div>
-                            <div className="flex-1 min-w-0 cursor-pointer" onClick={() => setSelectedPlayerProfile(player.id)}>
+                            <div className="flex-1 min-w-0 cursor-pointer" onClick={() => setViewedPlayer(player.id)}>
                               <div className="text-xs font-semibold truncate hover:text-cyan-400 transition-colors">{player.name}</div>
                               <div className="flex items-center gap-2 text-[9px] text-white/30">
                                 <span>{player.role}</span>
@@ -383,13 +381,6 @@ export default function SquadPlanner() {
           </div>
         </div>
       </main>
-      
-      {/* Player Profile Modal */}
-      <PlayerProfileModal 
-        player={selectedPlayerProfile ? players.find(p => p.id === selectedPlayerProfile) || null : null}
-        franchiseId={selectedPlayerProfile && playingXI.includes(selectedPlayerProfile) ? selectedFranchiseId : undefined}
-        onClose={() => setSelectedPlayerProfile(null)}
-      />
     </div>
   );
 }

@@ -8,7 +8,6 @@ import SquadPlanner from './SquadPlanner';
 import AuctionRoom from './AuctionRoom';
 import PlayerStatsView from './stats/PlayerStatsView';
 import TeamStatsView from './stats/TeamStatsView';
-import PlayerProfileModal from './PlayerProfileModal';
 import { cn } from '../lib/utils';
 
 export default function ArenaHub() {
@@ -109,14 +108,6 @@ export default function ArenaHub() {
   return (
     <div className="min-h-screen flex flex-col bg-zinc-950 text-white font-sans overflow-hidden">
       
-      {viewedPlayer && (
-        <PlayerProfileModal 
-          player={viewedPlayer} 
-          franchiseId={viewedPlayerFranchise} 
-          onClose={() => setViewedPlayer(null)} 
-        />
-      )}
-
       {/* Top Header */}
       <header className="bg-zinc-950 border-b border-zinc-800 shrink-0">
         <div className="max-w-7xl mx-auto px-4 sm:px-6">
