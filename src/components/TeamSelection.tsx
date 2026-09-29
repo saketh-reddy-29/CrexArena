@@ -8,6 +8,7 @@ import { INITIAL_PLAYER_POOL } from '../data/players';
 import JerseyPlayerImage from './JerseyPlayerImage';
 import { INTL_TEAMS_DATA } from '../data/intlPlayers';
 import { getIntlTeamLogoUrl } from '../data/crexIntlTeams';
+import PlayerProfileModal from './PlayerProfileModal';
 
 export default function TeamSelection() {
   const { franchises, selectFranchise, setGameState, updatePurse, addToSquad, selectedFormat, goBack } = useGameStore();
@@ -15,6 +16,7 @@ export default function TeamSelection() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [showRetention, setShowRetention] = useState(false);
   const [selectedRetentions, setSelectedRetentions] = useState<string[]>([]);
+  const [selectedPlayerProfile, setSelectedPlayerProfile] = useState<string | null>(null);
   
   const isIPL = selectedFormat === 'IPL';
   const selectedFranchise = isIPL ? franchises.find(f => f.id === selectedId) : null;
@@ -310,7 +312,13 @@ export default function TeamSelection() {
                                             isSelected ? "border-white bg-white/5" : "border-zinc-800 bg-zinc-900 hover:border-zinc-600"
                                         )}
                                     >
-                                        <div className="w-12 h-12 sm:w-14 sm:h-14 rounded-lg bg-zinc-950 overflow-hidden border border-zinc-800 shrink-0">
+                                        <div 
+                                          className="w-12 h-12 sm:w-14 sm:h-14 rounded-lg bg-zinc-950 overflow-hidden border border-zinc-800 shrink-0 cursor-pointer"
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            setSelectedPlayerProfile(player.id);
+                                          }}
+                                        >
                                             <JerseyPlayerImage 
                                                 player={player} 
                                                 franchiseId={selectedId}
@@ -318,8 +326,11 @@ export default function TeamSelection() {
                                                 imageClassName="w-full h-full" 
                                             />
                                         </div>
-                                        <div className="flex-1 min-w-0">
-                                            <h3 className="text-sm font-bold truncate">{player.name}</h3>
+                                        <div className="flex-1 min-w-0" onClick={(e) => {
+                                            e.stopPropagation();
+                                            setSelectedPlayerProfile(player.id);
+                                        }}>
+                                            <h3 className="text-sm font-bold truncate hover:text-cyan-400 transition-colors">{player.name}</h3>
                                             <div className="flex items-center gap-2 text-[10px] text-white/40 font-medium mt-0.5">
                                                 <span className="px-1.5 py-0.5 rounded bg-white/5 text-[9px] font-bold uppercase">{player.role}</span>
                                                 <span className="flex items-center gap-1">
@@ -364,6 +375,13 @@ export default function TeamSelection() {
             </motion.div>
         )}
       </AnimatePresence>
+
+      {/* Player Profile Modal */}
+      <PlayerProfileModal 
+        player={selectedPlayerProfile ? INITIAL_PLAYER_POOL.find(p => p.id === selectedPlayerProfile) || null : null}
+        franchiseId={selectedId || undefined}
+        onClose={() => setSelectedPlayerProfile(null)}
+      />
     </div>
   );
 }

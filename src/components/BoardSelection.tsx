@@ -91,7 +91,7 @@ export default function BoardSelection() {
       useGameStore.getState().initializeIntlFranchises();
       useGameStore.getState().generateSeasonFixtures();
       // We will route to Arena Dashboard
-      setGameState(GameState.ARENA_DASHBOARD);
+      setGameState(GameState.ARENA_HUB);
     }
   };
 

@@ -15,7 +15,7 @@ import PreMatch from './components/PreMatch';
 import QuickMatchSetup from './components/QuickMatchSetup';
 import TeamSelection from './components/TeamSelection';
 import BoardSelection from './components/BoardSelection';
-import ArenaDashboard from './components/ArenaDashboard';
+import ArenaHub from './components/ArenaHub';
 import PlayingXIBuilder from './components/PlayingXIBuilder';
 import { useGameStore, GameState } from './stores/useGameStore';
 
@@ -27,18 +27,8 @@ export default function App() {
       {gameState === GameState.LANDING && <LandingPage />}
       {gameState === GameState.TEAM_SELECTION && <TeamSelection />}
       {gameState === GameState.BOARD_SELECTION && <BoardSelection />}
-      {gameState === GameState.ARENA_DASHBOARD && <ArenaDashboard />}
+      {gameState === GameState.ARENA_HUB && <ArenaHub />}
       {gameState === GameState.PLAYING_XI_BUILDER && <PlayingXIBuilder />}
-
-      {(gameState === GameState.AUCTION || false) && (
-        <div className={gameState !== GameState.AUCTION ? 'hidden' : ''}>
-          <AuctionRoom />
-        </div>
-      )}
-      {gameState === GameState.LEAGUE && <LeagueView />}
-      {false && <SquadPlanner />}
-      
-      
       
       {gameState === GameState.PRE_MATCH && <PreMatch />}
       {gameState === GameState.MATCH_SIMULATION && <LiveMatchCenter />}
@@ -47,14 +37,8 @@ export default function App() {
         GameState.LANDING,
         GameState.TEAM_SELECTION,
         GameState.BOARD_SELECTION,
-        GameState.ARENA_DASHBOARD,
+        GameState.ARENA_HUB,
         GameState.PLAYING_XI_BUILDER,
-        GameState.AUCTION,
-        GameState.LEAGUE,
-        
-        
-        
-        
         GameState.PRE_MATCH,
         GameState.MATCH_SIMULATION,
       ].includes(gameState) && (

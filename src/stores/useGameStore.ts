@@ -13,14 +13,17 @@ export enum GameState {
   LANDING = 'landing',
   FORMAT_SELECTION = 'format_selection',
   TEAM_SELECTION = 'team_selection',
-  ARENA_DASHBOARD = 'arena_dashboard',
+  ARENA_DASHBOARD = 'arena_dashboard', // legacy, transitioning to ARENA_HUB
+  ARENA_HUB = 'arena_hub',
   AUCTION = 'auction',
-  LEAGUE = 'league',
-  BOARD_SELECTION = 'board_selection',
-  PLAYING_XI_BUILDER = 'playing_xi_builder',
+  LEAGUE = 'league', // legacy
+  BOARD_SELECTION = 'board_selection', // legacy
+  PLAYING_XI_BUILDER = 'playing_xi_builder', // Can stay separate or be a tab
   MATCH_SIMULATION = 'match_simulation',
   PRE_MATCH = 'pre_match',
 }
+
+export type ArenaTab = 'OVERVIEW' | 'MATCHES' | 'TEAMS' | 'TABLE' | 'PLAYERS' | 'PLAYER_STATS' | 'TEAM_STATS' | 'AUCTION' | 'SQUAD' | 'PLAYOFFS' | 'SERIES';
 
 export type ArenaFormat = 'IPL' | 'T20' | 'ODI' | 'TEST';
 export type TeamStrategy = 'Aggressive' | 'Balanced' | 'Value';
@@ -114,7 +117,7 @@ interface GameStore {
   auctionHistory: { playerId: string; soldTo: string; price: number }[];
   bidLog: BidEntry[];
   unsoldPlayerIds: string[];
-  previousGameState: GameState | null;
+  stateHistory: GameState[];
   
   // Match Engine State
   fixtures: Fixture[];
@@ -126,8 +129,10 @@ interface GameStore {
   playingXIIds: string[];       // locked 11-man playing XI
   liveMatchState: Record<string, any> | null;
   selectedFormat: ArenaFormat | null;
+  activeTab: ArenaTab;
 
   setGameState: (state: GameState) => void;
+  setActiveTab: (tab: ArenaTab) => void;
   setFormat: (format: ArenaFormat) => void;
   goBack: () => void;
   setSelectedSquadIds: (ids: string[]) => void;
@@ -172,7 +177,7 @@ export const useGameStore = create<GameStore>()(
   auctionHistory: [],
   bidLog: [],
   unsoldPlayerIds: [],
-  previousGameState: null,
+  stateHistory: [],
   fixtures: [],
   standings: [],
   currentMatchId: null,
@@ -181,14 +186,25 @@ export const useGameStore = create<GameStore>()(
   selectedSquadIds: [],
   playingXIIds: [],
   liveMatchState: null,
+  activeTab: 'OVERVIEW',
   
   // Actions
   setFormat: (format) => set({ selectedFormat: format }),
-  setGameState: (state) => set((prev) => ({ 
-    previousGameState: prev.gameState,
-    gameState: state 
-  })),
-  goBack: () => set((s) => ({ gameState: s.previousGameState || GameState.LANDING })),
+  setActiveTab: (tab) => set({ activeTab: tab }),
+  setGameState: (state) => set((prev) => {
+    // Prevent pushing duplicate states to history
+    if (prev.gameState === state) return {};
+    return { 
+      stateHistory: [...prev.stateHistory, prev.gameState].slice(-10), // Keep last 10 states
+      gameState: state 
+    };
+  }),
+  goBack: () => set((prev) => {
+    if (prev.stateHistory.length === 0) return { gameState: GameState.LANDING };
+    const newHistory = [...prev.stateHistory];
+    const prevState = newHistory.pop()!;
+    return { gameState: prevState, stateHistory: newHistory };
+  }),
   setCurrentMatch: (matchId) => set({ currentMatchId: matchId }),
   setCurrentMatchToss: (toss) => set({ currentMatchToss: toss }),
   saveLiveMatchState: (matchState) => set({ liveMatchState: matchState }),
@@ -249,7 +265,7 @@ export const useGameStore = create<GameStore>()(
 
   resetGame: () => set({
     gameState: GameState.LANDING,
-    previousGameState: null,
+    stateHistory: [],
     selectedFranchiseId: null,
     franchises: INITIAL_FRANCHISES,
     players: INITIAL_PLAYER_POOL,
@@ -265,6 +281,7 @@ export const useGameStore = create<GameStore>()(
     selectedSquadIds: [],
     playingXIIds: [],
     liveMatchState: null,
+    activeTab: 'OVERVIEW',
   }),
 
   generatePlayoffFixtures: () => set((state) => {

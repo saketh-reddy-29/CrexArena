@@ -101,7 +101,7 @@ function RulesBar({ format }: { format: string }) {
 }
 
 export default function ArenaDashboard() {
-  const { setGameState, selectedFormat, selectedFranchiseId, franchises, players, selectedSquadIds, fixtures, standings } = useGameStore();
+  const { setGameState, setActiveTab, selectedFormat, selectedFranchiseId, franchises, players, selectedSquadIds, fixtures, standings } = useGameStore();
   const fmt = FORMAT_CONFIG[selectedFormat || 'T20'] || FORMAT_CONFIG.T20;
   const isIPL  = selectedFormat === 'IPL';
   const isTest = selectedFormat === 'TEST';
@@ -149,18 +149,7 @@ export default function ArenaDashboard() {
         <div className="absolute bottom-0 left-0 w-[500px] h-[500px] rounded-full bg-zinc-900/20 blur-[100px]" />
       </div>
 
-      <div className="max-w-4xl mx-auto px-4 sm:px-6 pt-8 relative z-10">
-
-        {/* Header */}
-        <div className="flex items-center justify-between mb-8">
-          <button onClick={() => setGameState(GameState.LANDING)} className="flex items-center gap-2 text-zinc-400 hover:text-white transition-colors">
-            <ArrowLeft className="w-4 h-4" />
-            <span className="text-sm font-bold uppercase tracking-wider">Exit Arena</span>
-          </button>
-          <span className={`text-[10px] font-black uppercase tracking-widest px-3 py-1.5 rounded-full border ${fmt.accentText} ${fmt.accentBorder} bg-zinc-900/80`}>
-            {fmt.badge}
-          </span>
-        </div>
+      <div className="max-w-4xl mx-auto px-4 sm:px-6 pt-6 relative z-10">
 
         {/* Team Hero */}
         <div className={`rounded-3xl border p-8 mb-6 relative overflow-hidden ${fmt.accentBorder} bg-gradient-to-br ${fmt.accent}`}>
@@ -277,18 +266,18 @@ export default function ArenaDashboard() {
         <div>
           <h3 className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest mb-4 ml-1">Quick Access</h3>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            <button onClick={() => setGameState(GameState.LEAGUE)} className="p-5 bg-zinc-900 border border-zinc-800 hover:border-zinc-700 hover:bg-zinc-800/50 rounded-2xl flex flex-col gap-3 transition-all text-left group hover:scale-[1.02]">
+            <button onClick={() => setActiveTab(isTest ? 'SERIES' : 'MATCHES')} className="p-5 bg-zinc-900 border border-zinc-800 hover:border-zinc-700 hover:bg-zinc-800/50 rounded-2xl flex flex-col gap-3 transition-all text-left group hover:scale-[1.02]">
               <Calendar className="w-6 h-6 text-indigo-400 group-hover:scale-110 transition-transform" />
-              <div><div className="font-bold text-sm">Schedule</div><div className="text-[10px] text-zinc-500 mt-0.5">Standings</div></div>
+              <div><div className="font-bold text-sm">Schedule</div><div className="text-[10px] text-zinc-500 mt-0.5">Matches & Table</div></div>
             </button>
             {!isIPL && (
-              <button onClick={() => setGameState(GameState.BOARD_SELECTION)} className="p-5 bg-zinc-900 border border-zinc-800 hover:border-zinc-700 hover:bg-zinc-800/50 rounded-2xl flex flex-col gap-3 transition-all text-left group hover:scale-[1.02]">
+              <button onClick={() => setActiveTab('SQUAD')} className="p-5 bg-zinc-900 border border-zinc-800 hover:border-zinc-700 hover:bg-zinc-800/50 rounded-2xl flex flex-col gap-3 transition-all text-left group hover:scale-[1.02]">
                 <Users className="w-6 h-6 text-emerald-400 group-hover:scale-110 transition-transform" />
-                <div><div className="font-bold text-sm">Manage Squad</div><div className="text-[10px] text-zinc-500 mt-0.5">15-man selection</div></div>
+                <div><div className="font-bold text-sm">Squad</div><div className="text-[10px] text-zinc-500 mt-0.5">Manage squad</div></div>
               </button>
             )}
             {isIPL && (
-              <button onClick={() => setGameState(GameState.AUCTION)} className="p-5 bg-zinc-900 border border-zinc-800 hover:border-zinc-700 hover:bg-zinc-800/50 rounded-2xl flex flex-col gap-3 transition-all text-left group hover:scale-[1.02]">
+              <button onClick={() => setActiveTab('AUCTION')} className="p-5 bg-zinc-900 border border-zinc-800 hover:border-zinc-700 hover:bg-zinc-800/50 rounded-2xl flex flex-col gap-3 transition-all text-left group hover:scale-[1.02]">
                 <Zap className="w-6 h-6 text-yellow-400 group-hover:scale-110 transition-transform" />
                 <div><div className="font-bold text-sm">Auction Room</div><div className="text-[10px] text-zinc-500 mt-0.5">Buy players</div></div>
               </button>
@@ -297,9 +286,9 @@ export default function ArenaDashboard() {
               <Shield className="w-6 h-6 text-blue-400 group-hover:scale-110 transition-transform" />
               <div><div className="font-bold text-sm">Playing XI</div><div className="text-[10px] text-zinc-500 mt-0.5">Pick your 11</div></div>
             </button>
-            <button className="p-5 bg-zinc-900 border border-zinc-800 rounded-2xl flex flex-col gap-3 text-left opacity-40 cursor-not-allowed">
-              <BarChart3 className="w-6 h-6 text-orange-400" />
-              <div><div className="font-bold text-sm">Team Stats</div><div className="text-[10px] text-zinc-500 mt-0.5">Coming soon</div></div>
+            <button onClick={() => setActiveTab('TEAM_STATS')} className="p-5 bg-zinc-900 border border-zinc-800 hover:border-zinc-700 hover:bg-zinc-800/50 rounded-2xl flex flex-col gap-3 transition-all text-left group hover:scale-[1.02]">
+              <BarChart3 className="w-6 h-6 text-orange-400 group-hover:scale-110 transition-transform" />
+              <div><div className="font-bold text-sm">Team Stats</div><div className="text-[10px] text-zinc-500 mt-0.5">Performance data</div></div>
             </button>
           </div>
         </div>

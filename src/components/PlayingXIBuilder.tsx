@@ -5,10 +5,12 @@ import { Shield, ChevronRight, User, ArrowLeft, Target, AlertCircle } from 'luci
 import { cn } from '../lib/utils';
 import JerseyPlayerImage from './JerseyPlayerImage';
 import { calculateEffectiveRating } from '../lib/ratingEngine';
+import PlayerProfileModal from './PlayerProfileModal';
 
 export default function PlayingXIBuilder() {
   const { players, selectedSquadIds, selectedFormat, selectedFranchiseId, setGameState, setPlayingXIIds } = useGameStore();
   const [playingXI, setPlayingXI] = useState<string[]>([]);
+  const [selectedPlayerProfile, setSelectedPlayerProfile] = useState<string | null>(null);
 
   const squadPlayers = players.filter(p => selectedSquadIds.includes(p.id));
 
@@ -92,7 +94,7 @@ export default function PlayingXIBuilder() {
           <div className="max-w-7xl mx-auto flex items-center justify-between">
               <div className="flex items-center gap-4">
                   <button 
-                    onClick={() => setGameState(GameState.ARENA_DASHBOARD)}
+                    onClick={() => setGameState(GameState.ARENA_HUB)}
                     className="w-9 h-9 rounded-lg bg-white/5 border border-white/[.06] flex items-center justify-center hover:bg-white/10 transition-colors"
                   >
                     <ArrowLeft className="w-4 h-4" />
@@ -137,15 +139,24 @@ export default function PlayingXIBuilder() {
                       : "border-zinc-800 bg-zinc-900 hover:border-zinc-700"
                   )}
                 >
-                  <div className="w-12 h-12 shrink-0">
+                  <div 
+                    className="w-12 h-12 shrink-0 cursor-pointer"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setSelectedPlayerProfile(player.id);
+                    }}
+                  >
                     <JerseyPlayerImage 
                         player={player} 
                         franchiseId={selectedFranchiseId}
                         className="w-full h-full bg-zinc-800 rounded-lg"
                     />
                   </div>
-                  <div className="flex-1 min-w-0">
-                    <h3 className="text-sm font-bold truncate leading-tight mb-1">{player.name}</h3>
+                  <div className="flex-1 min-w-0" onClick={(e) => {
+                    e.stopPropagation();
+                    setSelectedPlayerProfile(player.id);
+                  }}>
+                    <h3 className="text-sm font-bold truncate leading-tight mb-1 hover:text-cyan-400 transition-colors">{player.name}</h3>
                     <div className="flex items-center gap-2 text-[10px] font-medium text-white/50 uppercase tracking-wider">
                         <span>{player.role}</span>
                     </div>
@@ -256,6 +267,13 @@ export default function PlayingXIBuilder() {
         </div>
 
       </div>
+
+      {/* Player Profile Modal */}
+      <PlayerProfileModal 
+        player={selectedPlayerProfile ? players.find(p => p.id === selectedPlayerProfile) || null : null}
+        franchiseId={selectedPlayerProfile && playingXI.includes(selectedPlayerProfile) ? selectedFranchiseId : undefined}
+        onClose={() => setSelectedPlayerProfile(null)}
+      />
     </div>
   );
 }

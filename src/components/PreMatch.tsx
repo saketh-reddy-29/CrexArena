@@ -148,7 +148,7 @@ export default function PreMatch() {
       <header className="sticky top-0 z-50 bg-zinc-950/80 backdrop-blur-xl border-b border-zinc-800/60 px-4 py-3 sm:px-6">
         <div className="max-w-4xl mx-auto flex items-center gap-3">
           <button 
-            onClick={() => setGameState(GameState.ARENA_DASHBOARD)}
+            onClick={() => setGameState(GameState.ARENA_HUB)}
             className="w-9 h-9 rounded-lg bg-white/5 border border-white/[.06] flex items-center justify-center hover:bg-white/10 transition-colors shrink-0"
           >
             <ArrowLeft className="w-4 h-4" />

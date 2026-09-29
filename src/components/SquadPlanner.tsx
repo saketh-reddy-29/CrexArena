@@ -6,14 +6,16 @@ import { Shield, Globe, ArrowLeft, Trash2, Zap, Users, Search, Plus, Lock, Check
 import { cn } from '../lib/utils';
 import { getPlayerImage, handlePlayerImageError } from '../lib/playerImages';
 import JerseyPlayerImage from './JerseyPlayerImage';
+import PlayerProfileModal from './PlayerProfileModal';
 
 export default function SquadPlanner() {
-  const { franchises, selectedFranchiseId, players, goBack, addToSquad, removeFromSquad, addToShortlist, removeFromShortlist, setGameState } = useGameStore();
+  const { franchises, selectedFranchiseId, players, goBack, addToSquad, removeFromSquad, addToShortlist, removeFromShortlist, setGameState, setActiveTab } = useGameStore();
   const [playingXI, setPlayingXI] = useState<string[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [roleFilter, setRoleFilter] = useState<string>('All');
   const [sortBy, setSortBy] = useState<'default' | 'rating' | 'name'>('default');
-  const [activeTab, setActiveTab] = useState<'squad' | 'scout'>('squad');
+  const [viewTab, setViewTab] = useState<'squad' | 'scout'>('squad');
+  const [selectedPlayerProfile, setSelectedPlayerProfile] = useState<string | null>(null);
 
   const franchise = franchises.find(f => f.id === selectedFranchiseId);
 
@@ -76,36 +78,17 @@ export default function SquadPlanner() {
   const bowlersInXI = squadPlayers.filter(p => playingXI.includes(p!.id) && p!.role === 'Bowler').length;
 
   return (
-    <div className="min-h-screen bg-zinc-950 text-white font-sans flex flex-col">
-      {/* Header */}
-      <header className="sticky top-0 z-50 bg-zinc-950/90 backdrop-blur-md border-b border-zinc-800/60 px-4 py-3 sm:px-6">
-        <div className="max-w-6xl mx-auto flex items-center gap-3">
-          <button 
-            onClick={() => goBack()}
-            className="w-9 h-9 rounded-lg bg-white/5 border border-white/[.06] flex items-center justify-center hover:bg-white/10 transition-colors shrink-0"
-          >
-            <ArrowLeft className="w-4 h-4" />
-          </button>
-          <div className="flex-1 min-w-0">
-            <h1 className="text-sm font-bold truncate">Squad Planner</h1>
-            <div className="text-[10px] text-white/30 font-medium">{franchise.name} · {formatPrice(franchise.purse)}</div>
-          </div>
-          <div className="w-8 h-8 rounded-lg flex items-center justify-center text-[9px] font-bold border border-white/[.06]" style={{ backgroundColor: franchise.color }}>
-            {franchise.shortName}
-          </div>
-        </div>
-      </header>
-
+    <div className="flex flex-col h-full font-sans">
       {/* Tab bar */}
       <div className="border-b border-white/[.06] px-4 sm:px-6">
         <div className="max-w-6xl mx-auto flex gap-0">
           {(['squad', 'scout'] as const).map(tab => (
             <button 
               key={tab}
-              onClick={() => setActiveTab(tab)}
+              onClick={() => setViewTab(tab)}
               className={cn(
                 "px-4 py-2.5 text-[10px] font-bold uppercase tracking-wider border-b-2 transition-all",
-                activeTab === tab ? "border-white text-white" : "border-transparent text-white/30 hover:text-white/60"
+                viewTab === tab ? "border-white text-white" : "border-transparent text-white/30 hover:text-white/60"
               )}
             >
               {tab === 'squad' ? 'Squad' : 'Scout'}
@@ -120,7 +103,7 @@ export default function SquadPlanner() {
             {/* Main content */}
             <div className="lg:col-span-8">
               <AnimatePresence mode="wait">
-                {activeTab === 'squad' ? (
+                {viewTab === 'squad' ? (
                   <motion.div 
                     key="squad-tab"
                     initial={{ opacity: 0, y: 10 }}
@@ -158,7 +141,10 @@ export default function SquadPlanner() {
                                 className="flex items-center gap-3 p-2.5 rounded-xl bg-zinc-900 border border-zinc-800"
                               >
                                 <span className="w-5 text-center text-[10px] font-bold text-white/20">{idx + 1}</span>
-                                <div className="w-8 h-8 rounded-lg overflow-hidden bg-zinc-950 border border-zinc-800 shrink-0">
+                                <div 
+                                  className="w-8 h-8 rounded-lg overflow-hidden bg-zinc-950 border border-zinc-800 shrink-0 cursor-pointer"
+                                  onClick={() => setSelectedPlayerProfile(player.id)}
+                                >
                                   <JerseyPlayerImage 
                                     player={player}
                                     franchiseId={selectedFranchiseId}
@@ -166,8 +152,8 @@ export default function SquadPlanner() {
                                     imageClassName="w-full h-full"
                                   />
                                 </div>
-                                <div className="flex-1 min-w-0">
-                                  <div className="text-xs font-semibold truncate">{player.name}</div>
+                                <div className="flex-1 min-w-0 cursor-pointer" onClick={() => setSelectedPlayerProfile(player.id)}>
+                                  <div className="text-xs font-semibold truncate hover:text-cyan-400 transition-colors">{player.name}</div>
                                   <div className="flex items-center gap-2 text-[9px] text-white/30">
                                     <span>{player.role}</span>
                                     {player.nationality === 'Overseas' && <Globe className="w-2.5 h-2.5 text-zinc-400" />}
@@ -209,7 +195,10 @@ export default function SquadPlanner() {
                                 : "bg-zinc-900 border-zinc-800"
                             )}
                           >
-                            <div className="w-8 h-8 rounded-lg overflow-hidden bg-zinc-950 border border-zinc-800 shrink-0">
+                            <div 
+                              className="w-8 h-8 rounded-lg overflow-hidden bg-zinc-950 border border-zinc-800 shrink-0 cursor-pointer"
+                              onClick={() => setSelectedPlayerProfile(player!.id)}
+                            >
                               <JerseyPlayerImage 
                                 player={player}
                                 franchiseId={selectedFranchiseId}
@@ -217,8 +206,8 @@ export default function SquadPlanner() {
                                 imageClassName="w-full h-full"
                               />
                             </div>
-                            <div className="flex-1 min-w-0">
-                              <div className="text-xs font-semibold truncate">{player!.name}</div>
+                            <div className="flex-1 min-w-0 cursor-pointer" onClick={() => setSelectedPlayerProfile(player!.id)}>
+                              <div className="text-xs font-semibold truncate hover:text-cyan-400 transition-colors">{player!.name}</div>
                               <div className="flex items-center gap-2 text-[9px] text-white/30">
                                 <span>{player!.role}</span>
                                 <span>·</span>
@@ -304,7 +293,10 @@ export default function SquadPlanner() {
                             key={player.id}
                             className="flex items-center gap-3 p-2.5 rounded-xl bg-zinc-900 border border-zinc-800"
                           >
-                            <div className="w-8 h-8 rounded-lg overflow-hidden bg-zinc-950 border border-zinc-800 shrink-0">
+                            <div 
+                              className="w-8 h-8 rounded-lg overflow-hidden bg-zinc-950 border border-zinc-800 shrink-0 cursor-pointer"
+                              onClick={() => setSelectedPlayerProfile(player.id)}
+                            >
                               <JerseyPlayerImage 
                                 player={player}
                                 franchiseId={franchises.find(f => f.squad.includes(player.id))?.id || null}
@@ -312,8 +304,8 @@ export default function SquadPlanner() {
                                 imageClassName="w-full h-full"
                               />
                             </div>
-                            <div className="flex-1 min-w-0">
-                              <div className="text-xs font-semibold truncate">{player.name}</div>
+                            <div className="flex-1 min-w-0 cursor-pointer" onClick={() => setSelectedPlayerProfile(player.id)}>
+                              <div className="text-xs font-semibold truncate hover:text-cyan-400 transition-colors">{player.name}</div>
                               <div className="flex items-center gap-2 text-[9px] text-white/30">
                                 <span>{player.role}</span>
                                 <span>·</span>
@@ -381,7 +373,7 @@ export default function SquadPlanner() {
 
                 <button 
                   disabled={playingXI.length < 11 || overseasInXI > 4}
-                  onClick={() => setGameState(GameState.LEAGUE)}
+                  onClick={() => setActiveTab('MATCHES')}
                   className="w-full py-3 bg-white hover:bg-zinc-200 text-zinc-950 rounded-xl font-bold text-sm active:scale-95 transition-all disabled:opacity-30 shadow-md"
                 >
                   Confirm Squad
@@ -391,6 +383,13 @@ export default function SquadPlanner() {
           </div>
         </div>
       </main>
+      
+      {/* Player Profile Modal */}
+      <PlayerProfileModal 
+        player={selectedPlayerProfile ? players.find(p => p.id === selectedPlayerProfile) || null : null}
+        franchiseId={selectedPlayerProfile && playingXI.includes(selectedPlayerProfile) ? selectedFranchiseId : undefined}
+        onClose={() => setSelectedPlayerProfile(null)}
+      />
     </div>
   );
 }

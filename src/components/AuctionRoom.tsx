@@ -35,11 +35,12 @@ export default function AuctionRoom() {
     updatePurse, 
     addToSquad, 
     setGameState,
-    bidLog,
-    addBid,
     clearBids,
     simulateFullAuction,
-    auctionHistory
+    auctionHistory,
+    bidLog,
+    addBid,
+    setActiveTab
   } = useGameStore();
   
   const [currentBid, setCurrentBid] = useState(0);
@@ -97,9 +98,9 @@ export default function AuctionRoom() {
       setCountdown(10);
       clearBids();
     } else {
-      setGameState(GameState.LEAGUE);
+      setActiveTab('MATCHES');
     }
-  }, [poolIndex, shuffledPool, clearBids, setGameState]);
+  }, [poolIndex, shuffledPool, clearBids, setActiveTab]);
 
   const handleSold = useCallback(() => {
     if (!currentPlayer) return;
@@ -1009,7 +1010,7 @@ export default function AuctionRoom() {
                     </div>
                   )}
                   <button 
-                    onClick={() => setGameState(GameState.ARENA_DASHBOARD)}
+                    onClick={() => setGameState(GameState.ARENA_HUB)}
                     className="w-full py-2 rounded-lg bg-zinc-900 border border-zinc-800 text-[10px] font-bold uppercase tracking-wider text-zinc-450 hover:text-white hover:border-zinc-700 transition-all flex items-center justify-center gap-1.5"
                   >
                     View Planner <ChevronRight className="w-3 h-3" />

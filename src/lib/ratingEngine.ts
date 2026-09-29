@@ -84,3 +84,60 @@ export function calculateEffectiveRating(player: Player, format: ArenaFormat): P
     fielding: effFielding
   };
 }
+
+export function getFormatSpecificProfile(player: Player, format: ArenaFormat) {
+  const seed = player.name.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+  const v = (base: number, offsetSeed: number, variance: number = 6) => {
+    const val = base + ((seed + offsetSeed) % variance) - (variance / 2);
+    return Math.min(99, Math.max(30, Math.round(val)));
+  };
+
+  const isAggressive = player.strikeRate ? player.strikeRate > 135 : (player.role === 'Batsman' ? true : false);
+  const isPace = player.bowlingStyle?.toLowerCase().includes('fast') || player.bowlingStyle?.toLowerCase().includes('medium');
+  const isSpin = player.bowlingStyle?.toLowerCase().includes('spin');
+
+  let techniqueMod = 0;
+  let powerMod = 0;
+  let concentrationMod = 0;
+  let aggressionMod = 0;
+
+  if (format === 'TEST') {
+    techniqueMod = 10;
+    concentrationMod = 15;
+    powerMod = -10;
+    aggressionMod = -15;
+  } else if (format === 'T20' || format === 'IPL') {
+    techniqueMod = -5;
+    concentrationMod = -10;
+    powerMod = 15;
+    aggressionMod = 15;
+  }
+
+  const baseBat = player.stats?.batting ?? player.attributes?.battingAbility ?? player.rating ?? 50;
+
+  return {
+    batting: {
+      technique: Math.min(99, Math.max(30, v(baseBat, 1, 6) + techniqueMod)),
+      consistency: v(baseBat, 2, 8),
+      timing: v(baseBat, 3, 5),
+      power: Math.min(99, Math.max(30, (player.role === 'Bowler' ? v(baseBat, 4, 15) : v(baseBat, 4, 10)) + powerMod)),
+      strikeRotation: v(baseBat, 5, 5),
+      againstPace: v(baseBat, 6, 6),
+      againstSpin: v(baseBat, 7, 6),
+    },
+    mental: {
+      concentration: Math.min(99, Math.max(30, v(player.rating, 8, 7) + concentrationMod)),
+      temperament: player.temperament || v(player.rating, 9, 8),
+      aggression: Math.min(99, Math.max(30, (player.aggression || v(75, 10, 30)) + aggressionMod)),
+    },
+    fielding: {
+      fielding: v(player.stats?.fielding || 80, 11, 5),
+      catching: v(player.stats?.fielding || 80, 12, 5),
+    },
+    form: {
+      currentForm: player.form || v(player.rating, 13, 15),
+      fitness: player.stamina || v(85, 14, 10),
+      confidence: v(player.form || player.rating, 15, 12),
+    }
+  };
+}
