@@ -273,7 +273,7 @@ export const useGameStore = create<GameStore>()(
     stateHistory: [],
     selectedFranchiseId: null,
     franchises: INITIAL_FRANCHISES,
-    players: INITIAL_PLAYER_POOL,
+    players: [...INITIAL_PLAYER_POOL, ...INTL_PLAYER_POOL],
     auctionHistory: [],
     bidLog: [],
     unsoldPlayerIds: [],
