@@ -60,3 +60,25 @@ export interface TestMatchState {
   currentBattingTeam: string;
   currentBowlingTeam: string;
 }
+
+export interface TestMatchContext {
+  day: number;
+  session: "MORNING" | "AFTERNOON" | "EVENING";
+  innings: number;
+  score: number;
+  wickets: number;
+  overs: number;
+  balls: number;
+  batterBallsFaced: number;
+  batterSettledness: number;
+  ballAge: number;
+  pitchCondition: number;
+  pitchDeterioration: number;
+  bowlerSpellOvers: number;
+  bowlerFatigue: number;
+  batterFatigue: number;
+  batterConcentration: number;
+  requiredRuns?: number;
+  requiredOvers?: number;
+  battingIntent: BattingIntent;
+}

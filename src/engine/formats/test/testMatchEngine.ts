@@ -3,11 +3,11 @@ import { testDayEngine } from './testDayEngine';
 import { testResultEngine } from './testResultEngine';
 
 export class TestMatchEngine {
-  public simulateMatch(initialState: TestMatchState, deliveryEngine: any) {
+  public simulateMatch(initialState: TestMatchState) {
     let matchState = { ...initialState };
     
     while (matchState.result === "IN_PROGRESS" && matchState.day <= 5) {
-      matchState = testDayEngine.simulateDay(matchState, deliveryEngine);
+      matchState = testDayEngine.simulateDay(matchState);
       
       // End of match check
       matchState = testResultEngine.checkMatchResult(matchState);

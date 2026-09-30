@@ -54,7 +54,7 @@ export class MatchEngine {
         currentBowlingTeam: bowlingTeam.name
       };
       
-      const finalTestState = testMatchEngine.simulateMatch(initialTestState, this.deliveryEngine);
+      const finalTestState = testMatchEngine.simulateMatch(initialTestState);
       matchState.status = 'COMPLETED';
       matchState.result = finalTestState.result;
       return matchState;

@@ -5,38 +5,60 @@ import { declarationEngine } from './declarationEngine';
 import { newBallEngine } from './newBallEngine';
 import { pitchDeteriorationEngine } from './pitchDeteriorationEngine';
 import { ballAgeEngine } from './ballAgeEngine';
+import { testDeliveryEngine } from './TestDeliveryEngine';
+import { TestMatchContext, BattingIntent } from './testTypes';
 
 export class TestInningsEngine {
-  public simulateOver(state: TestMatchState, deliveryEngine: any): TestMatchState {
+  public simulateOver(state: TestMatchState): TestMatchState {
     let currentState = { ...state };
     
     // Simulate 6 valid deliveries
+    let overString = "";
     for (let ball = 1; ball <= 6; ball++) {
       currentState.balls++;
       
       const batterMock = {
           id: "batter_mock",
-          power: 80, technique: 85, aggression: 70, ballsFaced: currentState.balls
+          technique: 85, aggression: 70, ballsFaced: currentState.balls
       };
       const bowlerMock = {
           id: "bowler_mock",
           bowlingRating: 85
       };
 
-      const context = {
-          batter: batterMock,
-          bowler: bowlerMock,
-          inningsState: { balls: currentState.balls, runs: currentState.score, wickets: currentState.wickets },
-          target: currentState.target,
-          matchState: currentState
+      const requiredRuns = currentState.target ? currentState.target - currentState.score : undefined;
+      const requiredOvers = currentState.target ? (currentState.timeRemaining / 6) : undefined;
+
+      const matchContext: TestMatchContext = {
+          day: currentState.day,
+          session: currentState.session,
+          innings: currentState.inningsNumber,
+          score: currentState.score,
+          wickets: currentState.wickets,
+          overs: currentState.overs,
+          balls: currentState.balls,
+          batterBallsFaced: batterMock.ballsFaced,
+          batterSettledness: Math.min(100, batterMock.ballsFaced),
+          ballAge: currentState.ball.inningsBallAge,
+          pitchCondition: currentState.pitch.seam,
+          pitchDeterioration: currentState.pitch.deterioration,
+          bowlerSpellOvers: 2,
+          bowlerFatigue: 10,
+          batterFatigue: 5,
+          batterConcentration: Math.min(100, batterMock.ballsFaced * 2),
+          requiredRuns,
+          requiredOvers,
+          battingIntent: "NORMAL" // Will be derived properly in the actual flow or updated dynamically
       };
 
-      const outcome = deliveryEngine.simulateDelivery(context);
+      const outcome = testDeliveryEngine.simulateDelivery(matchContext, batterMock, bowlerMock);
 
       if (outcome.isWicket) {
         currentState.wickets++;
+        overString += "W ";
       } else {
         currentState.score += outcome.runs + (outcome.extras || 0);
+        overString += `${outcome.runs} `;
       }
       
       if (currentState.currentBattingTeam === currentState.team1Name) {
@@ -59,6 +81,7 @@ export class TestInningsEngine {
       }
     }
     
+    console.log(`Over ${currentState.overs + 1}: ${overString.trim()} => Score: ${currentState.score}/${currentState.wickets}`);
     currentState.overs++;
     currentState = newBallEngine.checkNewBall(currentState);
     
