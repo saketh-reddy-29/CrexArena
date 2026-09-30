@@ -7,18 +7,36 @@ import { pitchDeteriorationEngine } from './pitchDeteriorationEngine';
 import { ballAgeEngine } from './ballAgeEngine';
 
 export class TestInningsEngine {
-  public simulateOver(state: TestMatchState): TestMatchState {
+  public simulateOver(state: TestMatchState, deliveryEngine: any): TestMatchState {
     let currentState = { ...state };
     
     // Simulate 6 valid deliveries
     for (let ball = 1; ball <= 6; ball++) {
       currentState.balls++;
       
-      // Simple mock for run scoring / wicket (Will be replaced by delivery engine logic)
-      if (Math.random() < 0.03) {
+      const batterMock = {
+          id: "batter_mock",
+          power: 80, technique: 85, aggression: 70, ballsFaced: currentState.balls
+      };
+      const bowlerMock = {
+          id: "bowler_mock",
+          bowlingRating: 85
+      };
+
+      const context = {
+          batter: batterMock,
+          bowler: bowlerMock,
+          inningsState: { balls: currentState.balls, runs: currentState.score, wickets: currentState.wickets },
+          target: currentState.target,
+          matchState: currentState
+      };
+
+      const outcome = deliveryEngine.simulateDelivery(context);
+
+      if (outcome.isWicket) {
         currentState.wickets++;
       } else {
-        currentState.score += Math.floor(Math.random() * 4);
+        currentState.score += outcome.runs + (outcome.extras || 0);
       }
       
       if (currentState.currentBattingTeam === currentState.team1Name) {

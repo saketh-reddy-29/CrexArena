@@ -6,7 +6,7 @@ export enum TestSession {
 
 export type InningsStatus = "NOT_STARTED" | "IN_PROGRESS" | "DECLARED" | "ALL_OUT" | "COMPLETED";
 export type TestResult = "TEAM_1_WIN" | "TEAM_2_WIN" | "DRAW" | "TIE" | "IN_PROGRESS";
-export type BattingIntent = "SURVIVE" | "DEFEND" | "ROTATE" | "NORMAL" | "ATTACK" | "ACCELERATE";
+export type BattingIntent = "SURVIVAL" | "DEFENSIVE" | "SETTLING" | "NORMAL" | "CONTROLLED_ATTACK" | "ACCELERATE";
 
 export interface WeatherState {
   condition: "SUNNY" | "CLOUDY" | "OVERCAST" | "RAIN";

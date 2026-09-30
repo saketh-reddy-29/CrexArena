@@ -1,5 +1,6 @@
 import { RulesEngine } from '../rules/RulesEngine';
 import { MatchSituationEngine } from './MatchSituationEngine';
+import { testBattingAI } from '../formats/test/testBattingAI';
 
 export class DeliveryEngine {
   private rules: RulesEngine;
@@ -50,14 +51,10 @@ export class DeliveryEngine {
         { runs: 6, weight: 2 }
       ];
     } else { // TEST
-      outcomes = [
-        { runs: 0, weight: 50 },
-        { runs: 1, weight: 30 },
-        { runs: 2, weight: 7 },
-        { runs: 3, weight: 1 },
-        { runs: 4, weight: 11 },
-        { runs: 6, weight: 0.2 }
-      ];
+      const intentScore = testBattingAI.decideIntent(matchState, batter, bowler);
+      // Store intent on context for adjustRunWeights
+      context.intentScore = intentScore;
+      outcomes = testBattingAI.getShotSelection(intentScore);
     }
 
     let pWicket = 0.03;
@@ -65,7 +62,7 @@ export class DeliveryEngine {
 
     // 5. Adjust run weights
     const phase = format === 'TEST' ? this.getTestPhase(inningsState.balls / 6) : 'MIDDLE';
-    outcomes = this.adjustRunWeights(outcomes, batter, bowler, format, phase);
+    outcomes = this.adjustRunWeights(outcomes, batter, bowler, format, phase, context.intentScore);
 
     // 6. Adjust wicket probability based on match situation and players
     const batterFactor = (battingScore - 50) / 50; 
@@ -149,12 +146,18 @@ export class DeliveryEngine {
     return Number.isFinite(num) && !Number.isNaN(num) ? num : fallback;
   }
 
-  private adjustRunWeights(outcomes: {runs: number, weight: number}[], batter: any, bowler: any, format: string, phase: string) {
-      const power = this.safeNumber(batter.attributes?.power ?? batter.power, 50);
+  private adjustRunWeights(outcomes: {runs: number, weight: number}[], batter: any, bowler: any, format: string, phase: string, intentScore?: number) {
+      let power = this.safeNumber(batter.attributes?.power ?? batter.power, 50);
       const aggression = this.safeNumber(batter.attributes?.aggression ?? batter.aggression, 50);
       const technique = this.safeNumber(batter.attributes?.technique ?? batter.technique, 50);
       
       const bowlingQuality = this.safeNumber(bowler.attributes?.bowlingRating ?? bowler.rating, 50);
+
+      if (format === "TEST" && intentScore !== undefined) {
+        // Intent scales effective power
+        const intentMultiplier = Math.max(0.1, intentScore / 50); // Intent 50 = 1x, Intent 10 = 0.2x, Intent 100 = 2x
+        power = power * intentMultiplier;
+      }
 
       const six = outcomes.find(o => o.runs === 6);
       const four = outcomes.find(o => o.runs === 4);
