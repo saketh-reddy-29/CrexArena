@@ -444,7 +444,7 @@ export default function MatchSimulation() {
             winnerId,
             margin: winnerId === winInn.battingTeamId ? `${10 - winInn.wickets} wickets` : `${winInn.runs - loseInn.runs} runs`
         });
-        setGameState(GameState.LEAGUE);
+        setGameState(GameState.ARENA_HUB);
     }, 5000);
   };
 
@@ -462,7 +462,7 @@ export default function MatchSimulation() {
       {/* CREX STYLE HEADER */}
       <div className="bg-[#0f1629]/60 backdrop-blur-md p-4 flex items-center justify-between shadow-lg">
         <div className="flex items-center gap-4">
-            <button onClick={() => setGameState(GameState.LEAGUE)}><ArrowLeft className="w-5 h-5 text-white/60" /></button>
+            <button onClick={() => setGameState(GameState.ARENA_HUB)}><ArrowLeft className="w-5 h-5 text-white/60" /></button>
             <span className="text-sm font-bold opacity-60 uppercase tracking-widest">{team1?.name} vs {team2?.name}</span>
         </div>
         <div className="flex items-center gap-2 px-3 py-1 bg-red-500/20 text-red-400 rounded-full text-[10px] font-black uppercase animate-pulse">

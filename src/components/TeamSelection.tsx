@@ -67,7 +67,8 @@ export default function TeamSelection() {
               }
           });
 
-          setGameState(GameState.AUCTION);
+          useGameStore.getState().setActiveTab('AUCTION');
+          setGameState(GameState.ARENA_HUB);
           if (selectedFormat) {
             const teamName = selectedFranchise?.name || 'My Franchise';
             createArena(`My IPL Career - ${teamName}`, selectedFormat, selectedId);

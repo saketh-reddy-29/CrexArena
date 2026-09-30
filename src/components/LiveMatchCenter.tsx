@@ -809,14 +809,14 @@ export default function LiveMatchCenter() {
             onClick={() => {
               if (inning?.isComplete && inningNo === 2) {
                 saveLiveMatchState(null); // Clear state if match is over
-                setGameState(GameState.LEAGUE);
+                setGameState(GameState.ARENA_HUB);
               } else {
                 saveLiveMatchState({
                   currentMatchId, inningNo, innings, strikerId, nonStrikerId,
                   bowlerId, lastOverBowlerId, battingCursor, pending,
                   pendingBatterEnd, pitch, weather
                 });
-                setGameState(GameState.LEAGUE);
+                setGameState(GameState.ARENA_HUB);
               }
             }} 
             className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-slate-400" aria-label="Back">
@@ -1332,7 +1332,7 @@ export default function LiveMatchCenter() {
               })()}
 
               <button 
-                onClick={() => setGameState(GameState.LEAGUE)}
+                onClick={() => setGameState(GameState.ARENA_HUB)}
                 className="w-full py-4 bg-white text-zinc-950 hover:bg-zinc-200 rounded-xl font-bold tracking-wide transition-all active:scale-95"
               >
                 Return to League

@@ -741,7 +741,8 @@ export const useGameStore = create<GameStore>()(
           franchises: currentFranchises,
           auctionHistory: history,
           unsoldPlayerIds: state.players.filter((player) => !assignedIds.has(player.id)).map((player) => player.id),
-          gameState: GameState.LEAGUE
+          activeTab: 'OVERVIEW',
+          gameState: GameState.ARENA_HUB
       };
   }),
   setCaptain: (franchiseId, captainId) => set((state) => ({

@@ -94,7 +94,10 @@ export default function LandingPage() {
                     loadArena(arena.id);
                     setFormat(arena.format);
                     // Depending on status, transition to relevant screen
-                    if (arena.status === 'AUCTION') setGameState(GameState.AUCTION);
+                    if (arena.status === 'AUCTION') {
+                      useGameStore.getState().setActiveTab('AUCTION');
+                      setGameState(GameState.ARENA_HUB);
+                    }
                     else setGameState(GameState.ARENA_HUB);
                   }}
                   className="bg-zinc-900 text-white rounded-2xl p-5 text-left flex flex-col justify-between shadow-md"
