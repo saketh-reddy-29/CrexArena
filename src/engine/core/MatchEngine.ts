@@ -1,6 +1,8 @@
 import { RulesEngine } from '../rules/RulesEngine';
 import { DeliveryEngine } from './DeliveryEngine';
 import { MatchSituationEngine } from './MatchSituationEngine';
+import { testMatchEngine } from '../formats/test/testMatchEngine';
+import { TestMatchState, TestSession } from '../formats/test/testTypes';
 
 export class MatchEngine {
   private rules: RulesEngine;
@@ -27,6 +29,36 @@ export class MatchEngine {
       status: 'IN_PROGRESS',
       result: null as any
     };
+
+    if (matchState.format === 'TEST') {
+      const initialTestState: TestMatchState = {
+        day: 1,
+        session: TestSession.MORNING,
+        inningsNumber: 1,
+        inningsStatus: "NOT_STARTED",
+        score: 0,
+        wickets: 0,
+        overs: 0,
+        balls: 0,
+        timeRemaining: 5 * 6 * 2 * 60, // approximate
+        oversToday: 0,
+        weather: { condition: "SUNNY", lightLevel: 100 },
+        pitch: { pace: 80, bounce: 80, seam: 60, swing: 50, spin: 40, deterioration: 0, roughness: 0 },
+        ball: { inningsBallAge: 0, oversSinceNewBall: 0, isNewBall: true },
+        result: "IN_PROGRESS",
+        team1Score: 0,
+        team2Score: 0,
+        team1Name: teamA.name,
+        team2Name: teamB.name,
+        currentBattingTeam: battingTeam.name,
+        currentBowlingTeam: bowlingTeam.name
+      };
+      
+      const finalTestState = testMatchEngine.simulateMatch(initialTestState);
+      matchState.status = 'COMPLETED';
+      matchState.result = finalTestState.result;
+      return matchState;
+    }
 
     const maxInnings = this.rules.getMaxInnings();
 

@@ -16,8 +16,8 @@ export class DeliveryEngine {
     // 1. Calculate Situation & Pressure
     const pressure = this.situationEngine.calculatePressure(context);
     const format = this.rules.getConfig().type;
-    const maxOvers = this.rules.getMaxOvers() || 50;
-    const matchMaxBalls = maxOvers * 6;
+    const maxOvers = this.rules.getMaxOvers();
+    const matchMaxBalls = maxOvers ? maxOvers * 6 : Infinity;
 
     // 2. Base Abilities (Fallback to overall rating if deep attributes are missing)
     const batterRating = batter.rating || 50;
