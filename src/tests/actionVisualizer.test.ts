@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { BOWLING_TACTICS_CONFIG, BowlingTactic } from '../components/CricketActionVisualizer';
 
 describe('Cricket Action Visualizer Physics & Trajectory Engine', () => {
   // Cubic Bezier formula verification
@@ -68,5 +69,30 @@ describe('Cricket Action Visualizer Physics & Trajectory Engine', () => {
     expect(getSpeedDuration(2)).toBe(600);
     expect(getSpeedDuration(4)).toBe(300);
     expect(getSpeedDuration(0)).toBe(0);
+  });
+
+  it('validates comprehensive bowler variations and swing physics configuration', () => {
+    const tactics: BowlingTactic[] = [
+      'OUTSWING', 'INSWING', 'REVERSE_SWING', 'SLOWER_BALL',
+      'YORKER', 'BOUNCER', 'OFF_CUTTER', 'LEG_CUTTER',
+      'OFF_BREAK', 'DOOSRA', 'LEG_BREAK', 'GOOGLY',
+      'ARM_BALL', 'TOP_SPINNER', 'CARROM_BALL'
+    ];
+
+    tactics.forEach(tactic => {
+      const config = BOWLING_TACTICS_CONFIG[tactic];
+      expect(config).toBeDefined();
+      expect(config.name).toBeTruthy();
+      expect(config.color).toMatch(/^#[0-9A-Fa-f]{6}$/);
+      expect(Number.isFinite(config.seamAngle)).toBe(true);
+      expect(Number.isFinite(config.swingFactor)).toBe(true);
+      expect(config.bounceMultiplier).toBeGreaterThan(0);
+    });
+
+    // Outswing vs Inswing swing factor directions
+    expect(BOWLING_TACTICS_CONFIG.OUTSWING.swingFactor).toBeLessThan(0);
+    expect(BOWLING_TACTICS_CONFIG.INSWING.swingFactor).toBeGreaterThan(0);
+    expect(BOWLING_TACTICS_CONFIG.BOUNCER.bounceMultiplier).toBeGreaterThan(1.4);
+    expect(BOWLING_TACTICS_CONFIG.YORKER.bounceMultiplier).toBeLessThan(0.5);
   });
 });

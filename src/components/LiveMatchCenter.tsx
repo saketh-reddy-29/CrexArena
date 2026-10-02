@@ -9,7 +9,7 @@ import { MatchEngine } from '../lib/matchEngine';
 import { getPlayerImage, handlePlayerImageError } from '../lib/playerImages';
 import { MatchStatus, PitchType, WeatherCondition, type InningsData, type PlayerMatchStats, DRSResult } from '../types/match';
 import { getIntlTeamLogoUrl } from '../data/crexIntlTeams';
-import CricketActionVisualizer from './CricketActionVisualizer';
+import CricketActionVisualizer, { BowlingTactic, BOWLING_TACTICS_CONFIG } from './CricketActionVisualizer';
 import { ArenaFormat } from '../engine/models/ArenaState';
 
 const IPL_TEAM_LOGOS: Record<string, string> = {
@@ -283,6 +283,7 @@ export default function LiveMatchCenter() {
   const [impactOutgoingId, setImpactOutgoingId] = useState<string | null>(null);
   const [impactIncomingId, setImpactIncomingId] = useState<string | null>(null);
   const [lastVisualizedBall, setLastVisualizedBall] = useState<any>(null);
+  const [selectedBowlingTactic, setSelectedBowlingTactic] = useState<BowlingTactic>('OUTSWING');
 
   const handleImpactSubstitution = () => {
     if (!impactIncomingId || !impactOutgoingId) return;
@@ -981,6 +982,8 @@ export default function LiveMatchCenter() {
             battingTeamName={battingTeam.name}
             bowlingTeamName={bowlingTeam.name}
             isFreeHit={Boolean(inning?.isFreeHitPending)}
+            activeBowlingTactic={selectedBowlingTactic}
+            onTacticChange={setSelectedBowlingTactic}
           />
         </div>
 
@@ -1056,9 +1059,19 @@ export default function LiveMatchCenter() {
               </div>
             )}
             {!pending && canPlayManualBall && (
-              <button onClick={() => setManualBallRequests((v) => v + 1)} className="w-full rounded-lg bg-white py-2.5 text-center text-xs font-black uppercase text-zinc-950 hover:bg-zinc-200 transition-colors">
-                Next Ball ▶
-              </button>
+              <div className="space-y-2">
+                {isMyTeamBowling && (
+                  <div className="flex items-center justify-between text-[10px] bg-zinc-800/60 p-2 rounded-lg border border-white/5">
+                    <span className="font-bold text-white/60">Bowler Tactic:</span>
+                    <span className="font-bold text-amber-300">
+                      {BOWLING_TACTICS_CONFIG[selectedBowlingTactic]?.icon} {BOWLING_TACTICS_CONFIG[selectedBowlingTactic]?.name}
+                    </span>
+                  </div>
+                )}
+                <button onClick={() => setManualBallRequests((v) => v + 1)} className="w-full rounded-lg bg-white py-2.5 text-center text-xs font-black uppercase text-zinc-950 hover:bg-zinc-200 transition-colors shadow-lg">
+                  Next Ball ▶
+                </button>
+              </div>
             )}
           </div>
         )}
