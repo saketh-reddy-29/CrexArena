@@ -695,8 +695,6 @@ export class TestMatchPlaybackController {
         await this.delay(stepDuration);
         if (this.isPaused) break;
       }
-    } else {
-      await this.delay(40);
     }
   }
 
@@ -982,11 +980,13 @@ export class TestMatchPlaybackController {
       // Bowler change
       this.lastOverBowlerId = this.bowlerId;
       const bowlingSquad = this.getSquad(currentInning.bowlingTeamId);
-      const candidates = bowlingSquad.filter((p) => p.id !== this.lastOverBowlerId);
+      const specialistBowlers = bowlingSquad.filter((p) => p.role === 'BOWLER' || p.role === 'ALL_ROUNDER');
+      const pool = specialistBowlers.length >= 3 ? specialistBowlers : bowlingSquad.slice(5);
+      const candidates = pool.filter((p) => p.id !== this.lastOverBowlerId);
 
       // Rotate bowlers between pace and spin
-      const nextBowler = candidates[Math.floor(Math.random() * Math.min(candidates.length, 4))];
-      this.bowlerId = nextBowler?.id || candidates[0]?.id || null;
+      const nextBowler = candidates[Math.floor(Math.random() * candidates.length)];
+      this.bowlerId = nextBowler?.id || candidates[0]?.id || pool[0]?.id || null;
     }
   }
 
@@ -1020,6 +1020,9 @@ export class TestMatchPlaybackController {
         const margin = target ? target - inn4.score - 1 : 0;
         this.matchResult = winTeamId === this.team1.id ? 'TEAM_1_WIN' : 'TEAM_2_WIN';
         this.resultDescription = `${inn4.bowlingTeamName} won by ${margin} runs!`;
+      } else {
+        this.matchResult = 'DRAW';
+        this.resultDescription = 'Match drawn after 5 days of Test cricket.';
       }
     } else if (this.day >= 5) {
       this.matchResult = 'DRAW';

@@ -642,8 +642,6 @@ export class ODIMatchPlaybackController {
         await this.delay(stepDuration);
         if (this.isPaused) break;
       }
-    } else {
-      await this.delay(25);
     }
   }
 
@@ -854,13 +852,15 @@ export class ODIMatchPlaybackController {
       // Bowler change with max 10 overs (60 balls) restriction
       this.lastOverBowlerId = this.bowlerId;
       const bowlingSquad = this.getSquad(currentInning.bowlingTeamId);
-      const candidates = bowlingSquad.filter((p) => {
+      const specialistBowlers = bowlingSquad.filter((p) => p.role === 'BOWLER' || p.role === 'ALL_ROUNDER');
+      const pool = specialistBowlers.length >= 3 ? specialistBowlers : bowlingSquad.slice(5);
+      const candidates = pool.filter((p) => {
         const line = currentInning.bowlers[p.id];
         return p.id !== this.lastOverBowlerId && (line?.balls || 0) < 60;
       });
 
-      const nextBowler = candidates[Math.floor(Math.random() * Math.min(candidates.length, 5))];
-      this.bowlerId = nextBowler?.id || candidates[0]?.id || bowlingSquad[0]?.id || null;
+      const nextBowler = candidates[Math.floor(Math.random() * candidates.length)];
+      this.bowlerId = nextBowler?.id || candidates[0]?.id || pool[0]?.id || null;
     }
   }
 
