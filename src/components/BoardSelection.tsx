@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useGameStore, GameState } from '../stores/useGameStore';
-import { Shield, ChevronRight, User, Users, AlertCircle, ArrowLeft, Star, Target } from 'lucide-react';
+import { Shield, ChevronRight, User, Users, AlertCircle, ArrowLeft, Star, Target, Sparkles, RotateCcw, Search, Check } from 'lucide-react';
 import { cn } from '../lib/utils';
 import JerseyPlayerImage from './JerseyPlayerImage';
 import { getIntlTeamLogoUrl } from '../data/crexIntlTeams';
@@ -9,9 +9,17 @@ import { getIntlTeamLogoUrl } from '../data/crexIntlTeams';
 export default function BoardSelection() {
   const { players, selectedFranchiseId, franchises, setGameState, setSelectedSquadIds, goBack, setViewedPlayer } = useGameStore();
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [roleFilter, setRoleFilter] = useState<string>('All');
+  const [searchQuery, setSearchQuery] = useState<string>('');
 
   const team = franchises.find(f => f.id === selectedFranchiseId);
   const availablePlayers = players.filter(p => p.intendedTeamId === selectedFranchiseId).sort((a, b) => b.rating - a.rating);
+
+  const filteredPlayers = availablePlayers.filter(p => {
+    const matchesRole = roleFilter === 'All' || p.role === roleFilter;
+    const matchesSearch = !searchQuery || p.name.toLowerCase().includes(searchQuery.toLowerCase());
+    return matchesRole && matchesSearch;
+  });
 
   // Toggle selection
   const togglePlayer = (id: string) => {
@@ -20,6 +28,41 @@ export default function BoardSelection() {
       if (prev.length >= 15) return prev;
       return [...prev, id];
     });
+  };
+
+  // Smart Auto-Selection for 15-man Balanced National Squad
+  const handleAutoSelect = () => {
+    const rankPlayer = (p: typeof availablePlayers[0]) => p.rating * 1.5 + (p.form || 80) * 0.5;
+
+    const wk = availablePlayers.filter(p => p.role === 'Wicketkeeper').sort((a, b) => rankPlayer(b) - rankPlayer(a));
+    const batters = availablePlayers.filter(p => p.role === 'Batsman').sort((a, b) => rankPlayer(b) - rankPlayer(a));
+    const allrounders = availablePlayers.filter(p => p.role === 'All-rounder').sort((a, b) => rankPlayer(b) - rankPlayer(a));
+    const bowlers = availablePlayers.filter(p => p.role === 'Bowler').sort((a, b) => rankPlayer(b) - rankPlayer(a));
+
+    const selected: string[] = [];
+
+    // Target perfect 100% balance: 2 WK, 5 Batters, 3 All-rounders, 5 Bowlers = 15
+    wk.slice(0, 2).forEach(p => selected.push(p.id));
+    batters.slice(0, 5).forEach(p => selected.push(p.id));
+    allrounders.slice(0, 3).forEach(p => selected.push(p.id));
+    bowlers.slice(0, 5).forEach(p => selected.push(p.id));
+
+    // Fill any missing slots with highest-ranked unpicked players
+    if (selected.length < 15) {
+      const remaining = availablePlayers
+        .filter(p => !selected.includes(p.id))
+        .sort((a, b) => rankPlayer(b) - rankPlayer(a));
+      for (const p of remaining) {
+        if (selected.length >= 15) break;
+        selected.push(p.id);
+      }
+    }
+
+    setSelectedIds(selected.slice(0, 15));
+  };
+
+  const handleClearSelection = () => {
+    setSelectedIds([]);
   };
 
   const getFormMeter = (form: number) => {
@@ -110,7 +153,7 @@ export default function BoardSelection() {
       </div>
 
       <header className="sticky top-0 z-50 bg-zinc-950/80 backdrop-blur-xl border-b border-zinc-800/60 px-4 py-3 sm:px-6">
-          <div className="max-w-7xl mx-auto flex items-center justify-between">
+          <div className="max-w-7xl mx-auto flex items-center justify-between gap-2 flex-wrap">
               <div className="flex items-center gap-4">
                   <button 
                     onClick={goBack}
@@ -126,8 +169,29 @@ export default function BoardSelection() {
                     </div>
                   </div>
               </div>
-              <div className="flex items-center gap-3">
-                  <div className="flex flex-col items-end">
+              <div className="flex items-center gap-2 sm:gap-3">
+                  {/* Auto Select Button */}
+                  <button
+                    onClick={handleAutoSelect}
+                    className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-amber-500 via-purple-500 to-indigo-500 hover:from-amber-400 hover:to-indigo-400 text-white font-black text-xs shadow-lg shadow-purple-500/20 active:scale-95 transition-all"
+                  >
+                    <Sparkles className="w-3.5 h-3.5 text-amber-200 animate-spin" />
+                    <span>Auto Select 15</span>
+                  </button>
+
+                  {/* Reset / Clear Button */}
+                  {selectedIds.length > 0 && (
+                    <button
+                      onClick={handleClearSelection}
+                      className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-white/5 hover:bg-white/10 text-zinc-400 hover:text-white text-xs font-bold transition-all border border-white/5"
+                      title="Clear Selection"
+                    >
+                      <RotateCcw className="w-3.5 h-3.5" />
+                      <span className="hidden sm:inline">Reset</span>
+                    </button>
+                  )}
+
+                  <div className="flex flex-col items-end pl-2 border-l border-white/10">
                       <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider mb-0.5">Squad Status</span>
                       <span className={cn(
                         "text-lg font-black font-mono",
@@ -144,11 +208,46 @@ export default function BoardSelection() {
         
         {/* Left: Player Pool Grid */}
         <div className="flex-1 flex flex-col min-h-0 overflow-y-auto custom-scrollbar pr-2 pb-24 lg:pb-0">
-          <h2 className="text-sm font-bold text-zinc-400 uppercase tracking-wider mb-4 sticky top-0 bg-zinc-950/90 py-2 z-10 backdrop-blur-sm">
-            Available Players ({availablePlayers.length})
-          </h2>
+          <div className="sticky top-0 bg-zinc-950/95 py-2 z-10 backdrop-blur-md space-y-2.5 mb-3">
+            <div className="flex items-center justify-between gap-2 flex-wrap">
+              <h2 className="text-sm font-bold text-zinc-300 uppercase tracking-wider">
+                Available Players ({filteredPlayers.length})
+              </h2>
+
+              {/* Search Bar */}
+              <div className="relative min-w-[180px]">
+                <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-400" />
+                <input
+                  type="text"
+                  placeholder="Search player..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="w-full bg-zinc-900 border border-zinc-800 rounded-lg pl-8 pr-3 py-1 text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-blue-500"
+                />
+              </div>
+            </div>
+
+            {/* Role Filter Tabs */}
+            <div className="flex items-center gap-1.5 overflow-x-auto custom-scrollbar pb-1">
+              {['All', 'Batsman', 'Wicketkeeper', 'All-rounder', 'Bowler'].map((role) => (
+                <button
+                  key={role}
+                  onClick={() => setRoleFilter(role)}
+                  className={cn(
+                    "px-3 py-1 rounded-full text-[11px] font-bold transition-all shrink-0",
+                    roleFilter === role
+                      ? "bg-blue-600 text-white shadow-sm"
+                      : "bg-zinc-900 text-zinc-400 hover:text-white border border-zinc-800"
+                  )}
+                >
+                  {role === 'All' ? 'All Roles' : role}
+                </button>
+              ))}
+            </div>
+          </div>
+
           <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-3">
-            {availablePlayers.map(player => {
+            {filteredPlayers.map(player => {
               const isSelected = selectedIds.includes(player.id);
               return (
                 <div 
@@ -163,8 +262,8 @@ export default function BoardSelection() {
                   )}
                 >
                   {isSelected && (
-                      <div className="absolute top-2 right-2 w-5 h-5 rounded-full bg-blue-500 flex items-center justify-center z-10">
-                          <Shield className="w-3 h-3 text-white fill-current" />
+                      <div className="absolute top-2 right-2 w-5 h-5 rounded-full bg-blue-500 flex items-center justify-center z-10 shadow-md">
+                          <Check className="w-3.5 h-3.5 text-white stroke-[3]" />
                       </div>
                   )}
                   
@@ -202,10 +301,20 @@ export default function BoardSelection() {
 
         {/* Right: AI Squad Advisor */}
         <div className="w-full lg:w-96 shrink-0 flex flex-col gap-4 relative z-20">
-          <div className="bg-zinc-900 border border-zinc-800 rounded-3xl p-6 sticky top-4">
-            <div className="flex items-center gap-2 mb-6">
+          <div className="bg-zinc-900 border border-zinc-800 rounded-3xl p-6 sticky top-4 shadow-2xl">
+            <div className="flex items-center justify-between mb-6">
+              <div className="flex items-center gap-2">
                 <Target className="w-5 h-5 text-blue-400" />
                 <h2 className="text-lg font-black tracking-tight">AI Squad Advisor</h2>
+              </div>
+              <button
+                onClick={handleAutoSelect}
+                className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-amber-400/10 hover:bg-amber-400/20 text-amber-300 border border-amber-400/30 text-[10px] font-black uppercase transition-all"
+                title="Automatically select 15-man balanced squad"
+              >
+                <Sparkles className="w-3 h-3 text-amber-300" />
+                <span>Auto Pick</span>
+              </button>
             </div>
 
             {/* Overall Rating & Balance */}
@@ -265,7 +374,7 @@ export default function BoardSelection() {
                 </h4>
                 <p className="text-xs opacity-80 leading-relaxed font-medium">
                   {selectedIds.length < 15 
-                    ? "Keep an eye on the composition meters to ensure a balanced squad for the arena." 
+                    ? "Keep an eye on the composition meters or click 'Auto Select' for an instant 100% balanced squad." 
                     : stats.recommendation}
                 </p>
               </div>
