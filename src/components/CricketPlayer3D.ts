@@ -29,10 +29,14 @@ export type PlayerAnimState =
   | 'LOFT'
   | 'ATTACK'
   | 'BOWLING_READY'
+  | 'BOWLER_RUNUP'
   | 'RUN_UP'
+  | 'BOWLER_GATHER'
   | 'GATHER'
   | 'DELIVERY_STRIDE'
+  | 'ARM_ROTATION'
   | 'RELEASE'
+  | 'BALL_RELEASE'
   | 'FOLLOW_THROUGH'
   | 'FIELD_READY'
   | 'RUN_TO_BALL'
@@ -652,14 +656,16 @@ export function createCricketCharacter(config: Player3DConfig): CricketPlayer3DI
 
     // ── 3. BOWLER STATES ──
     else if (state === 'BOWLING_READY') {
-      // Stable at the top of bowling mark
-      spineGroup.rotation.set(0.1, 0, 0);
-      rightShoulder.rotation.set(0.2, 0, 0);
-      leftShoulder.rotation.set(0.2, 0, 0);
+      // Stable at the top of bowling mark: holding ball with both hands in front of chest
+      spineGroup.rotation.set(0.12, 0, 0);
+      rightShoulder.rotation.set(0.45, 0.25, -0.15);
+      rightForearm.rotation.set(0.95, 0, 0);
+      leftShoulder.rotation.set(0.45, -0.25, 0.15);
+      leftForearm.rotation.set(0.95, 0, 0);
       pelvis.position.y = 0.95;
     }
 
-    else if (state === 'RUN_UP') {
+    else if (state === 'RUN_UP' || state === 'BOWLER_RUNUP') {
       // Full athletic sprint strides & arm pumping
       const runCycle = progress * Math.PI * 8;
       const legSwing = Math.sin(runCycle) * 0.75;
@@ -672,31 +678,89 @@ export function createCricketCharacter(config: Player3DConfig): CricketPlayer3DI
 
       leftShoulder.rotation.set(-armSwing, 0, 0);
       rightShoulder.rotation.set(armSwing, 0, 0);
-      spineGroup.rotation.set(0.18, 0, 0); // Forward lean
+      rightForearm.rotation.set(0.5, 0, 0);
+      spineGroup.rotation.set(0.20, 0, 0); // Forward athletic lean
       pelvis.position.y = 0.95 + Math.abs(Math.sin(runCycle)) * 0.12;
     }
 
-    else if (state === 'GATHER' || state === 'DELIVERY_STRIDE' || state === 'RELEASE') {
-      // High gather into explosive 360 overarm windmill rotation
-      const windP = Math.min(1, progress * 2.0);
-      const armRotationAngle = -Math.PI * 0.5 + (windP * Math.PI * 2.1);
+    else if (state === 'GATHER' || state === 'BOWLER_GATHER') {
+      // Bowler bounds into gather: leaps onto back foot, side-on chest, non-bowling arm reaches up high
+      const gP = Math.min(1, progress * 1.8);
+      pelvis.position.y = 1.05 + Math.sin(gP * Math.PI) * 0.15; // Vertical bound
+      spineGroup.rotation.set(0.1, -0.45 * gP, 0); // Side-on turn
+      headGroup.rotation.set(0, 0.45 * gP, 0); // Eyes stay locked on batter
 
-      rightShoulder.rotation.set(armRotationAngle, 0, 0.15);
-      leftShoulder.rotation.set(-armRotationAngle * 0.4, 0, -0.3); // Non-bowling arm pulls down
+      // Back leg lands slightly bent
+      rightHip.rotation.set(-0.35, 0, 0);
+      rightKnee.rotation.set(0.55, 0, 0);
+      leftHip.rotation.set(0.65 * gP, 0, 0); // Front leg raised in air
+      leftKnee.rotation.set(1.1 * gP, 0, 0);
 
-      spineGroup.rotation.set(0.35 * (1 - windP) - 0.25 * windP, 0, 0);
-      leftHip.rotation.set(-0.7, 0, 0); // Front foot plant
-      leftKnee.rotation.set(0.3, 0, 0);
-      rightHip.rotation.set(0.5, 0, 0);
+      // Non-bowling arm aims high at batsman, bowling arm tucked ready
+      leftShoulder.rotation.set(-1.8 * gP, -0.3, 0.3);
+      rightShoulder.rotation.set(0.4, 0.5 * gP, -0.3);
+      rightForearm.rotation.set(1.4, 0, 0);
+    }
+
+    else if (state === 'DELIVERY_STRIDE') {
+      // Front foot plant at crease, hips rotating forward, torso leaning over front knee
+      const strP = Math.min(1, progress * 1.5);
+      pelvis.position.y = 0.88;
+
+      // Front leg braced straight, back leg trailing
+      leftHip.rotation.set(-0.75 * strP, 0, 0);
+      leftKnee.rotation.set(0.15, 0, 0); // Braced front knee
+      rightHip.rotation.set(0.60 * strP, 0, 0);
+      rightKnee.rotation.set(0.40, 0, 0);
+
+      spineGroup.rotation.set(0.25 * strP, -0.2 * (1 - strP), 0);
+      // Non-bowling arm pulls down hard
+      leftShoulder.rotation.set(-1.2 * (1 - strP) + strP * 0.8, -0.2, -0.2);
+      // Bowling arm begins cocking back
+      rightShoulder.rotation.set(-1.5 * strP, 0.2, 0.1);
+      rightForearm.rotation.set(0.3 * (1 - strP), 0, 0);
+    }
+
+    else if (state === 'ARM_ROTATION') {
+      // Full 360-degree overarm windmill rotation
+      const armProg = Math.min(1, Math.max(0, progress));
+      // Sweeps from behind (-PI*0.8) all the way up through vertical (PI*0.95)
+      const armRotationAngle = -Math.PI * 0.8 + (armProg * Math.PI * 1.85);
+
+      rightShoulder.rotation.set(armRotationAngle, 0, 0.12);
+      rightForearm.rotation.set(0.08, 0, 0); // Straight arm (legal delivery)
+      leftShoulder.rotation.set(1.1 * armProg, 0, -0.35); // Non-bowling arm tucked into side
+
+      // Torso arches and snaps forward
+      spineGroup.rotation.set(0.35 + armProg * 0.25, 0, 0);
+      pelvis.position.y = 0.88;
+      leftHip.rotation.set(-0.75, 0, 0);
+      leftKnee.rotation.set(0.20, 0, 0);
+      rightHip.rotation.set(0.65, 0, 0);
+    }
+
+    else if (state === 'RELEASE' || state === 'BALL_RELEASE') {
+      // High arm release at the top of arc, head leaning toward target, hand open
+      rightShoulder.rotation.set(Math.PI * 0.96, 0, 0.08);
+      rightForearm.rotation.set(0.02, 0, 0); // Fully extended vertical arm
+      leftShoulder.rotation.set(0.9, 0, -0.4);
+      spineGroup.rotation.set(0.50, 0, 0); // Flexed over front knee
+      pelvis.position.y = 0.87;
+
+      leftHip.rotation.set(-0.70, 0, 0);
+      leftKnee.rotation.set(0.25, 0, 0);
+      rightHip.rotation.set(0.70, 0, 0);
     }
 
     else if (state === 'FOLLOW_THROUGH') {
-      // Deceleration into follow-through leap
+      // Deceleration into follow-through leap across the crease
       const ftP = Math.min(1, progress * 1.5);
-      spineGroup.rotation.set(0.45 * (1 - ftP), 0.2, 0);
-      rightShoulder.rotation.set(1.2 * (1 - ftP), 0, 0.2);
-      leftHip.rotation.set(0.4 * (1 - ftP), 0, 0);
-      rightHip.rotation.set(-0.3 * (1 - ftP), 0, 0);
+      spineGroup.rotation.set(0.45 * (1 - ftP) + 0.15 * ftP, 0.2, 0);
+      rightShoulder.rotation.set(1.2 * (1 - ftP) + 0.3 * ftP, 0.4, 0.3); // Bowling arm across opposite hip
+      leftShoulder.rotation.set(0.4, -0.2, 0.2);
+      leftHip.rotation.set(0.4 * (1 - ftP) - 0.2 * ftP, 0, 0);
+      rightHip.rotation.set(-0.3 * (1 - ftP) + 0.3 * ftP, 0, 0);
+      pelvis.position.y = 0.88 + Math.sin(ftP * Math.PI) * 0.08;
     }
 
     // ── 4. WICKETKEEPER STATES ──

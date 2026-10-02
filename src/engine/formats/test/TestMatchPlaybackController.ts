@@ -19,6 +19,7 @@ import { safeNumber, safeRating, safeProbability } from '../../utils/safeMath';
 import { fieldStrategyEngine } from '../../strategy/FieldStrategyEngine';
 import { Action3DSequence, adaptDeliveryTo3DSequence } from '../../../components/Delivery3DActionAdapter';
 import { isEligibleBowler, getValidBowlingPool, clampProbability } from '../../rules/bowlerEligibility';
+import { assertPreDelivery } from '../../rules/deliveryAssertions';
 
 export type PlaybackSpeed = 0.75 | 1.0 | 1.25 | 1.5 | 2.0;
 
@@ -608,14 +609,28 @@ export class TestMatchPlaybackController {
       shotAngleDeg,
     };
 
-    // 4. Sequential Step Messages
+    // Pre-delivery assertions (Requirement 19)
+    assertPreDelivery({
+      bowler,
+      striker,
+      totalRuns: runs,
+      batterRuns: runs,
+      extraRuns: 0,
+      trajectory,
+    });
+
+    // 4. Sequential Step Messages (Complete 3D bowling action pipeline)
     const stepMessages = [
-      `BOWLER RUN-UP: ${bowler.name}`,
+      `BOWLER READY: ${bowler.name} at top of mark`,
+      `BOWLER RUN-UP: ${bowler.name} running in...`,
+      `GATHER & STRIDE: Front-foot plant at crease`,
+      `ARM ROTATION: Overarm action`,
       `BALL RELEASE: ${chosenLength.replace('_', ' ')} ${chosenLine.replace('_', ' ')}`,
-      `BALL BOUNCE: ${chosenLength.replace('_', ' ')} pitch contact`,
+      `BALL BOUNCE: Pitch contact`,
       `BATTER ACTION: ${striker.name} plays ${shot.replace('_', ' ')}`,
       `BALL TRAVEL: Moving toward ${targetZone.replace('_', ' ')}`,
       isWicket ? `WICKET: ${wicketType?.replace('_', ' ')}!` : runs >= 4 ? `BOUNDARY: ${runs === 6 ? 'SIX' : 'FOUR'}!` : `FIELDING: ${runs} run${runs === 1 ? '' : 's'}`,
+      `RESULT CONFIRMATION`,
       `SCORECARD UPDATE`,
     ];
 
@@ -700,13 +715,26 @@ export class TestMatchPlaybackController {
 
     this.callbacks.onDeliveryStart?.(delivery, seq);
 
-    // Emit live sequential text feed across duration
+    // Emit live sequential text feed across duration matching the 3D pipeline
     if (!this.isFastSimulating) {
-      const stepDuration = (seq.baseDurationMs / seq.stepMessages?.length || 7) / this.speed;
+      const stepEnums = [
+        'BOWLER_READY',
+        'BOWLER_RUNUP',
+        'BOWLER_GATHER',
+        'DELIVERY_STRIDE',
+        'BALL_RELEASE',
+        'BOUNCE',
+        'BATTER_ACTION',
+        'BALL_TRAVEL',
+        delivery.wicket ? 'WICKET' : delivery.runs >= 4 ? 'BOUNDARY' : 'FIELDING',
+        'RESULT_CONFIRMATION',
+        'SCORECARD_UPDATE',
+      ];
+      const stepDuration = (seq.baseDurationMs / delivery.stepMessages.length) / this.speed;
       for (let i = 0; i < delivery.stepMessages.length; i++) {
         this.currentStepMessage = delivery.stepMessages[i];
         this.callbacks.onDeliveryStep?.(
-          i === 0 ? 'BOWLER_RUNUP' : i === 1 ? 'BALL_FLIGHT' : i === 2 ? 'BOUNCE' : i === 3 ? 'CONTACT' : i === 4 ? 'BALL_TRAVEL' : 'RESULT',
+          stepEnums[i] || 'DELIVERY_ACTION',
           delivery.stepMessages[i]
         );
         await this.delay(stepDuration);

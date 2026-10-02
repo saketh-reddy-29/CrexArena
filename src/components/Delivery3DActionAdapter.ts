@@ -61,14 +61,17 @@ export interface MilestoneEventData {
 export interface Action3DSequence {
   // Timing Breakdown (0.00 to 1.00 normalized)
   phases: {
-    readyEnd: number;        // 0.00 - 0.12
-    runupEnd: number;       // 0.12 - 0.30: Bowler runup sprint
-    releaseEnd: number;     // 0.30 - 0.40: Delivery stride & overarm windmill
-    bounceEnd: number;      // 0.40 - 0.55: Ball flight with swing & pitch bounce
-    contactEnd: number;     // 0.55 - 0.65: Batter reads ball & executes stroke
-    fieldingEnd: number;    // 0.65 - 0.82: Ball travels, fielder sprint / interception / catch / stumps smash
-    emotionEnd: number;     // 0.82 - 0.94: Celebration, Appeal, Bat Raise, Disappointment walk
-    resultEnd: number;      // 0.94 - 1.00: TV Graphics & final score sync
+    readyEnd: number;        // 0.00 - 0.08: Ready & guard
+    runupEnd: number;       // 0.08 - 0.24: Bowler run-up sprint
+    gatherEnd: number;      // 0.24 - 0.30: Bowler gather & bound
+    strideEnd: number;      // 0.30 - 0.35: Delivery stride front foot plant
+    rotationEnd: number;    // 0.35 - 0.40: 360 overarm windmill rotation
+    releaseEnd: number;     // 0.40: Ball release point
+    bounceEnd: number;      // 0.40 - 0.52: Ball flight in air & pitch bounce
+    contactEnd: number;     // 0.52 - 0.60: Batter downswing & bat contact
+    fieldingEnd: number;    // 0.60 - 0.82: Ball travel to target / boundary / stumps & running
+    emotionEnd: number;     // 0.82 - 0.92: Celebration / appeal / reaction
+    resultEnd: number;      // 0.92 - 1.00: TV Graphics & score confirmation
   };
 
   // Base Duration in Milliseconds (Adaptive based on Event Priority)
@@ -515,14 +518,17 @@ export function adaptDeliveryTo3DSequence(
 
   return {
     phases: {
-      readyEnd: 0.05,       // 0.00 - 0.05: Field ready & bowler setup
-      runupEnd: 0.20,       // 0.05 - 0.20: Bowler run-up sprint
-      releaseEnd: 0.26,     // 0.20 - 0.26: Delivery stride & ball release
-      bounceEnd: 0.38,      // 0.26 - 0.38: Ball flight with swing & pitch bounce
-      contactEnd: 0.48,     // 0.38 - 0.48: Batter reads ball & executes stroke
-      fieldingEnd: 0.78,    // 0.48 - 0.78: Post-contact ball travel to target & fielding / running
-      emotionEnd: 0.90,     // 0.78 - 0.90: Emotions, celebrations, bails off, catch appeal
-      resultEnd: 1.00,      // 0.90 - 1.00: TV Graphics & score sync
+      readyEnd: 0.08,       // 0.00 - 0.08: Field & Bowler Ready
+      runupEnd: 0.24,       // 0.08 - 0.24: Bowler athletic run-up sprint
+      gatherEnd: 0.30,      // 0.24 - 0.30: Bowler gather & leap onto back foot
+      strideEnd: 0.35,      // 0.30 - 0.35: Delivery stride front foot plant
+      rotationEnd: 0.40,    // 0.35 - 0.40: 360-deg overarm windmill rotation
+      releaseEnd: 0.40,     // 0.40: Ball release from bowler hand
+      bounceEnd: 0.52,      // 0.40 - 0.52: Ball flight in air & pitch bounce
+      contactEnd: 0.60,     // 0.52 - 0.60: Batter downswing & bat contact
+      fieldingEnd: 0.82,    // 0.60 - 0.82: Ball travel to target / boundary / stumps & running
+      emotionEnd: 0.92,     // 0.82 - 0.92: Celebration / appeal / reaction
+      resultEnd: 1.00,      // 0.92 - 1.00: TV Graphics & score confirmation
     },
     baseDurationMs,
     eventType,

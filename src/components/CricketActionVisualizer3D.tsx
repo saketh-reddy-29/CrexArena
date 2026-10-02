@@ -1024,56 +1024,139 @@ export default function CricketActionVisualizer3D({
       }
     };
 
-    // ── Phase 1: Bowler Run-Up (0.00 - phases.runupEnd) ──
-    if (p < phases.runupEnd) {
-      setCurrentActionState('BOWLER_RUNUP');
-      const pRun = p / phases.runupEnd;
-      const curZ = startBowlerZ + (pRun * (Math.abs(startBowlerZ) - 10.0));
-
+    // ── Phase 1: Bowler & Field Ready (0.00 - phases.readyEnd) ──
+    if (p < phases.readyEnd) {
+      setCurrentActionState('BOWLER_READY');
       if (bowlerChar) {
-        bowlerChar.group.position.z = curZ;
-        bowlerChar.updateAnimation('RUN_UP', pRun);
-      }
-
-      if (bowlerChar) {
+        bowlerChar.group.position.set(-0.5, 0.04, startBowlerZ);
+        bowlerChar.group.rotation.y = 0;
+        bowlerChar.updateAnimation('BOWLING_READY', 0);
         const handPos = bowlerChar.getHandWorldPosition();
         updateBallTransformAndFX(handPos.x, handPos.y, handPos.z);
       }
-
-      if (strikerChar) strikerChar.updateAnimation('BATTING_READY', pRun);
+      if (strikerChar) strikerChar.updateAnimation('BATTING_READY', 0);
       if (keeperChar) keeperChar.updateAnimation('KEEPER_CROUCH', 0);
       fieldersListRef.current.forEach((f) => f.char.updateAnimation('FIELD_READY', 0));
 
       setPlayerDebugStates({
-        bowlerState: 'RUN_UP',
+        bowlerState: 'BOWLING_READY',
         strikerState: 'BATTING_READY',
         keeperState: 'KEEPER_CROUCH',
         targetFielder: null,
       });
     }
 
-    // ── Phase 2: Delivery Stride & Windmill to Bounce (phases.runupEnd - phases.bounceEnd) ──
+    // ── Phase 2: Bowler Run-Up Sprint (phases.readyEnd - phases.runupEnd) ──
+    else if (p < phases.runupEnd) {
+      setCurrentActionState('BOWLER_RUNUP');
+      const pRun = (p - phases.readyEnd) / (phases.runupEnd - phases.readyEnd);
+      const curZ = startBowlerZ + (pRun * (Math.abs(startBowlerZ) - 10.8));
+
+      if (bowlerChar) {
+        bowlerChar.group.position.z = curZ;
+        bowlerChar.updateAnimation('BOWLER_RUNUP', pRun);
+        const handPos = bowlerChar.getHandWorldPosition();
+        updateBallTransformAndFX(handPos.x, handPos.y, handPos.z);
+      }
+
+      if (strikerChar) strikerChar.updateAnimation('BATTING_READY', pRun);
+      if (keeperChar) keeperChar.updateAnimation('KEEPER_CROUCH', 0);
+
+      setPlayerDebugStates({
+        bowlerState: 'BOWLER_RUNUP',
+        strikerState: 'BATTING_READY',
+        keeperState: 'KEEPER_CROUCH',
+        targetFielder: null,
+      });
+    }
+
+    // ── Phase 3: Bowler Gather & Leap (phases.runupEnd - phases.gatherEnd) ──
+    else if (p < phases.gatherEnd) {
+      setCurrentActionState('BOWLER_GATHER');
+      const pGather = (p - phases.runupEnd) / (phases.gatherEnd - phases.runupEnd);
+      const curZ = -10.8 + (pGather * 0.4);
+
+      if (bowlerChar) {
+        bowlerChar.group.position.z = curZ;
+        bowlerChar.updateAnimation('BOWLER_GATHER', pGather);
+        const handPos = bowlerChar.getHandWorldPosition();
+        updateBallTransformAndFX(handPos.x, handPos.y, handPos.z);
+      }
+
+      if (strikerChar) strikerChar.updateAnimation('BATTING_READY', pGather);
+
+      setPlayerDebugStates({
+        bowlerState: 'BOWLER_GATHER',
+        strikerState: 'BATTING_READY',
+        keeperState: 'KEEPER_CROUCH',
+        targetFielder: null,
+      });
+    }
+
+    // ── Phase 4: Delivery Stride (phases.gatherEnd - phases.strideEnd) ──
+    else if (p < phases.strideEnd) {
+      setCurrentActionState('DELIVERY_STRIDE');
+      const pStride = (p - phases.gatherEnd) / (phases.strideEnd - phases.gatherEnd);
+      const curZ = -10.4 + (pStride * 0.4);
+
+      if (bowlerChar) {
+        bowlerChar.group.position.z = curZ;
+        bowlerChar.updateAnimation('DELIVERY_STRIDE', pStride);
+        const handPos = bowlerChar.getHandWorldPosition();
+        updateBallTransformAndFX(handPos.x, handPos.y, handPos.z);
+      }
+
+      if (strikerChar) strikerChar.updateAnimation('BACKLIFT', pStride * 0.5);
+
+      setPlayerDebugStates({
+        bowlerState: 'DELIVERY_STRIDE',
+        strikerState: 'BACKLIFT',
+        keeperState: 'KEEPER_CROUCH',
+        targetFielder: null,
+      });
+    }
+
+    // ── Phase 5: Overarm Windmill Rotation to Release (phases.strideEnd - phases.releaseEnd) ──
+    else if (p < phases.releaseEnd) {
+      setCurrentActionState('ARM_ROTATION');
+      const pRot = (p - phases.strideEnd) / (phases.releaseEnd - phases.strideEnd);
+
+      if (bowlerChar) {
+        bowlerChar.group.position.z = -10.0;
+        bowlerChar.updateAnimation('ARM_ROTATION', pRot);
+        const handPos = bowlerChar.getHandWorldPosition();
+        updateBallTransformAndFX(handPos.x, handPos.y, handPos.z);
+      }
+
+      if (strikerChar) strikerChar.updateAnimation('BACKLIFT', 0.5 + pRot * 0.5);
+
+      setPlayerDebugStates({
+        bowlerState: 'ARM_ROTATION',
+        strikerState: 'BACKLIFT',
+        keeperState: 'KEEPER_CROUCH',
+        targetFielder: null,
+      });
+    }
+
+    // ── Phase 6: Ball Flight from Release to Pitch Bounce (phases.releaseEnd - phases.bounceEnd) ──
     else if (p < phases.bounceEnd) {
       setCurrentActionState('BALL_FLIGHT');
-      const pFlight = (p - phases.runupEnd) / (phases.bounceEnd - phases.runupEnd);
-      const startZ = -9.5;
+      const pFlight = (p - phases.releaseEnd) / (phases.bounceEnd - phases.releaseEnd);
+      const startZ = -9.8;
       const endZ = ballTrajectory.bouncePos.z;
 
       if (bowlerChar) {
-        if (pFlight < 0.4) {
-          bowlerChar.updateAnimation('DELIVERY_STRIDE', pFlight / 0.4);
-        } else {
-          bowlerChar.updateAnimation('FOLLOW_THROUGH', (pFlight - 0.4) / 0.6);
-        }
+        bowlerChar.updateAnimation('FOLLOW_THROUGH', pFlight);
       }
 
-      if (strikerChar) strikerChar.updateAnimation('BACKLIFT', pFlight);
+      if (strikerChar) strikerChar.updateAnimation('BACKLIFT', 1.0);
       if (keeperChar) keeperChar.updateAnimation('KEEPER_CROUCH', pFlight);
 
       const swingCurve = ballTrajectory.swingFactor * Math.sin(pFlight * Math.PI) * 0.14;
       const curX = ballTrajectory.bouncePos.x * pFlight + swingCurve;
       const curZ = startZ + (endZ - startZ) * pFlight;
-      const curY = 1.9 * (1 - pFlight) + 0.04 + Math.sin(pFlight * Math.PI) * 0.8;
+      // Parabolic flight down to pitch height (y = 0.05)
+      const curY = 2.1 * (1 - pFlight) + 0.05 * pFlight + Math.sin(pFlight * Math.PI) * 0.35;
 
       updateBallTransformAndFX(curX, curY, curZ, tacticConfig.seamAngle);
 
@@ -1085,7 +1168,7 @@ export default function CricketActionVisualizer3D({
       });
     }
 
-    // ── Phase 3: Bounce to Bat Contact (phases.bounceEnd - phases.contactEnd) ──
+    // ── Phase 7: Pitch Bounce to Bat Contact (phases.bounceEnd - phases.contactEnd) ──
     else if (p < phases.contactEnd) {
       setCurrentActionState('BOUNCE');
       if (!audioTriggersRef.current.bounce) {
