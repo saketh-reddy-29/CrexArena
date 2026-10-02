@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { BOWLING_TACTICS_CONFIG, BowlingTactic } from '../components/CricketActionVisualizer';
+import { createCricketCharacter, PlayerAnimState } from '../components/CricketPlayer3D';
 
 describe('Cricket Action Visualizer Physics & Trajectory Engine', () => {
   // Cubic Bezier formula verification
@@ -89,10 +90,80 @@ describe('Cricket Action Visualizer Physics & Trajectory Engine', () => {
       expect(config.bounceMultiplier).toBeGreaterThan(0);
     });
 
-    // Outswing vs Inswing swing factor directions
     expect(BOWLING_TACTICS_CONFIG.OUTSWING.swingFactor).toBeLessThan(0);
     expect(BOWLING_TACTICS_CONFIG.INSWING.swingFactor).toBeGreaterThan(0);
     expect(BOWLING_TACTICS_CONFIG.BOUNCER.bounceMultiplier).toBeGreaterThan(1.4);
     expect(BOWLING_TACTICS_CONFIG.YORKER.bounceMultiplier).toBeLessThan(0.5);
+  });
+
+  it('constructs complete 3D rigged cricket character and executes skeletal animations', () => {
+    // 1. Batter character with bat and pads
+    const batterChar = createCricketCharacter({
+      id: 'batter-test',
+      name: 'Virat Kohli',
+      role: 'BATTER',
+      teamName: 'India',
+      teamAccentColorHex: 0x2563EB,
+      hasBat: true,
+      hasPads: true,
+      hasHelmet: true,
+    });
+
+    expect(batterChar.group).toBeDefined();
+    expect(batterChar.joints.pelvis).toBeDefined();
+    expect(batterChar.joints.torso).toBeDefined();
+    expect(batterChar.joints.bat).toBeDefined();
+    expect(batterChar.joints.ballSocket).toBeDefined();
+
+    // 2. Test animations
+    const testStates: PlayerAnimState[] = [
+      'BATTING_READY',
+      'BACKLIFT',
+      'COVER_DRIVE',
+      'SQUARE_CUT',
+      'PULL_SHOT',
+      'LOFTED_SIX',
+      'FORWARD_DEFENCE',
+      'RUN_UP',
+      'DELIVERY_STRIDE',
+      'RELEASE',
+      'FOLLOW_THROUGH',
+      'RUN_TO_BALL',
+      'GROUND_FIELD',
+      'THROW',
+      'KEEPER_READY',
+      'RUN_BETWEEN_WICKETS',
+      'CELEBRATION'
+    ];
+
+    testStates.forEach(state => {
+      batterChar.updateAnimation(state, 0.5);
+      const handPos = batterChar.getHandWorldPosition();
+      expect(Number.isFinite(handPos.x)).toBe(true);
+      expect(Number.isFinite(handPos.y)).toBe(true);
+      expect(Number.isFinite(handPos.z)).toBe(true);
+
+      const batPos = batterChar.getBatContactWorldPosition();
+      expect(Number.isFinite(batPos.x)).toBe(true);
+      expect(Number.isFinite(batPos.y)).toBe(true);
+      expect(Number.isFinite(batPos.z)).toBe(true);
+    });
+
+    // 3. Bowler character without bat/pads
+    const bowlerChar = createCricketCharacter({
+      id: 'bowler-test',
+      name: 'Jasprit Bumrah',
+      role: 'BOWLER',
+      teamName: 'India',
+      teamAccentColorHex: 0x2563EB,
+      hasBat: false,
+      hasPads: false,
+      hasHelmet: false,
+    });
+
+    expect(bowlerChar.joints.bat).toBeUndefined();
+    expect(bowlerChar.joints.ballSocket).toBeDefined();
+    bowlerChar.updateAnimation('RUN_UP', 0.8);
+    expect(Number.isFinite(bowlerChar.joints.spine.position.y)).toBe(true);
   });
 });
