@@ -9,7 +9,13 @@ interface ScheduleTabProps {
 }
 
 export default function ScheduleTab({ franchises }: ScheduleTabProps) {
-  const { fixtures, setCurrentMatch, setGameState, selectedFranchiseId, autoSimulateMatch, generatePlayoffFixtures } = useGameStore();
+  const { fixtures, setCurrentMatch, setGameState, selectedFranchiseId, autoSimulateMatch, generatePlayoffFixtures, generateSeasonFixtures } = useGameStore();
+
+  React.useEffect(() => {
+    if (fixtures.length === 0) {
+      generateSeasonFixtures();
+    }
+  }, [fixtures.length, generateSeasonFixtures]);
 
   const handleStartMatch = (matchId: string) => {
     setCurrentMatch(matchId);

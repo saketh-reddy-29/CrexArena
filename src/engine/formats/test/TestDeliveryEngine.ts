@@ -1,25 +1,34 @@
 import { TestMatchContext } from './testTypes';
 import { testBattingAI } from './testBattingAI';
+import { safeNumber, safeRating, safeProbability } from '../../utils/safeMath';
 
 export class TestDeliveryEngine {
-  public simulateDelivery(context: TestMatchContext, batter: any, bowler: any): { runs: number, isWicket: boolean, extras: number } {
+  public simulateDelivery(context: TestMatchContext, batter: any, bowler: any): { runs: number; isWicket: boolean; extras: number } {
+    const ballsFaced = safeNumber(context?.batterBallsFaced ?? batter?.ballsFaced, 0);
+    const settledness = testBattingAI.calculateSettledness(ballsFaced);
+
     // 1. Calculate base threat and risks
-    const deliveryThreat = bowler.bowlingRating || 50;
-    const batterTechniqueRisk = 100 - (batter.technique || 50);
-    const batterConcentrationRisk = 100 - context.batterConcentration;
+    const deliveryThreat = safeRating(bowler.bowlingRating || bowler.rating || 50);
+    const batterTechniqueRisk = 100 - safeRating(batter.technique || batter.rating || 50);
+    const batterConcentrationRisk = 100 - safeNumber(context.batterConcentration, 75);
     
     // Pitch & ball condition
-    const pitchMovement = context.pitchCondition + context.pitchDeterioration;
-    const ballCondition = context.ballAge < 15 ? 80 : 30; // 80 threat for new ball, drops later
+    const pitchMovement = safeNumber(context.pitchCondition, 20) + safeNumber(context.pitchDeterioration, 10);
+    const ballCondition = context.ballAge < 15 ? 80 : 30; // High threat for new ball
     
-    // Intent risk (Aggressive intent increases risk)
+    // Intent calculation
     const intentNumeric = testBattingAI.decideIntent(context, batter, bowler); 
-    const batterIntentRisk = intentNumeric; // 0 to 100 directly correlates to intent risk
-    
-    const fatigueRisk = context.batterFatigue;
+    const batterIntentRisk = intentNumeric;
+    const fatigueRisk = safeNumber(context.batterFatigue, 0);
+
+    // Bowler memory adaptation reduction
+    let memoryAdaptationBonus = 0;
+    if (batter?.testMemory && bowler?.id && batter.testMemory[bowler.id]) {
+      memoryAdaptationBonus = safeNumber(batter.testMemory[bowler.id].adaptationLevel, 0) * 0.15;
+    }
 
     // 2. Wicket Probability Calculation
-    let wicketRisk = (
+    const baseWicketRisk = (
       deliveryThreat * 0.25 +
       batterTechniqueRisk * 0.20 +
       batterConcentrationRisk * 0.15 +
@@ -29,43 +38,40 @@ export class TestDeliveryEngine {
       fatigueRisk * 0.05
     );
 
-    // Calibrate wicket risk to cricket realities (around 1.5% - 4% per ball typically)
-    // A base risk of 50/100 would map to ~2.5% chance.
-    let wicketProbability = (wicketRisk / 100) * 0.05; 
+    // Settledness significantly stabilizes the batter without making them invincible
+    const settlednessMultiplier = Math.max(0.40, 1 - (settledness * 0.0055)); // Up to ~55% reduction at 100 settledness
     
-    // Cap probabilities
-    wicketProbability = Math.max(0.005, Math.min(0.12, wicketProbability));
+    let wicketRisk = baseWicketRisk * settlednessMultiplier - memoryAdaptationBonus;
+    wicketRisk = Math.max(5, wicketRisk);
 
-    // 3. One Wicket Roll
+    // Calibrate wicket probability (typically 1.5% to 4% per delivery in Tests)
+    let wicketProbability = (wicketRisk / 100) * 0.045; 
+    wicketProbability = safeProbability(wicketProbability, 0.005, 0.10);
+
+    // 3. Wicket Roll
     const roll = Math.random();
-    
     if (roll < wicketProbability) {
       return { runs: 0, isWicket: true, extras: 0 };
     }
 
-    // Generate Runs
-    // Get shot selection based on batting intent
+    // 4. Generate Runs from Intent Shot Selection
     const outcomes = testBattingAI.getShotSelection(intentNumeric);
-    
-    // Calculate run probability
     const runOutcome = this.selectWeightedOutcome(outcomes);
-    
-    // console.log(`Intent: ${intentNumeric} | Outcome: ${runOutcome.runs} | Total Weight: ${outcomes.reduce((s,o)=>s+o.weight,0)} | Fours Weight: ${outcomes.find(o=>o.runs===4)?.weight}`);
     
     return {
       runs: runOutcome.runs,
       isWicket: false,
-      extras: 0 // Simplification for now
+      extras: 0
     };
   }
 
-  private selectWeightedOutcome(outcomes: {runs: number, weight: number}[]): {runs: number, weight: number} {
+  private selectWeightedOutcome(outcomes: { runs: number; weight: number }[]): { runs: number; weight: number } {
     const totalWeight = outcomes.reduce((sum, o) => sum + o.weight, 0);
     let roll = Math.random() * totalWeight;
 
     for (const outcome of outcomes) {
-        roll -= outcome.weight;
-        if (roll <= 0) return outcome;
+      roll -= outcome.weight;
+      if (roll <= 0) return outcome;
     }
     return outcomes[0];
   }

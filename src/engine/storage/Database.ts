@@ -1,25 +1,24 @@
-import { ArenaProfile, ArenaPlayerState, PlayerMatchStats, SeasonTeamStats } from '../models/ArenaState';
+import { ArenaProfile, ArenaPlayerState, PlayerMatchStats, SeasonTeamStats, ArenaFormat } from '../models/ArenaState';
 
 /**
  * A transaction-safe database abstraction for the Arena engine.
- * This simulates the behavior of a real database, allowing for atomic commits.
+ * Isolates mutable state per (arenaId, playerId, format) so that
+ * Arena A never contaminates Arena B or the global player registry.
  */
 export class ArenaDatabase {
-  // In a real app, this would wrap IndexedDB (via Dexie) or a remote API.
-  // We use memory stores here that can be synchronized to localStorage.
   private arenas = new Map<string, ArenaProfile>();
-  private playerStates = new Map<string, ArenaPlayerState>();
+  private playerStates = new Map<string, ArenaPlayerState>(); // Key: `${arenaId}_${playerId}_${format}`
   private matchStats = new Map<string, PlayerMatchStats>();
   private seasonStandings = new Map<string, SeasonTeamStats>();
 
-  // Transaction buffer
+  // Transaction buffer for atomic commits / rollbacks
   private transactionBuffer: {
     playerStates: Map<string, ArenaPlayerState>;
     matchStats: Map<string, PlayerMatchStats>;
     seasonStandings: Map<string, SeasonTeamStats>;
   } | null = null;
 
-  async beginTransaction() {
+  async beginTransaction(): Promise<void> {
     if (this.transactionBuffer) {
       throw new Error('Transaction already in progress.');
     }
@@ -30,7 +29,7 @@ export class ArenaDatabase {
     };
   }
 
-  async commitTransaction() {
+  async commitTransaction(): Promise<void> {
     if (!this.transactionBuffer) {
       throw new Error('No transaction in progress.');
     }
@@ -41,7 +40,6 @@ export class ArenaDatabase {
       this.transactionBuffer.matchStats.forEach((val, key) => this.matchStats.set(key, val));
       this.transactionBuffer.seasonStandings.forEach((val, key) => this.seasonStandings.set(key, val));
       
-      // Simulate sync to persistent storage (e.g., localStorage)
       this.syncToStorage();
     } catch (e) {
       this.rollbackTransaction();
@@ -51,28 +49,58 @@ export class ArenaDatabase {
     }
   }
 
-  async rollbackTransaction() {
+  async rollbackTransaction(): Promise<void> {
     this.transactionBuffer = null;
   }
 
-  // Helper to read state (reads from buffer if exists, else main store)
-  async getPlayerState(arenaId: string, playerId: string): Promise<ArenaPlayerState | undefined> {
-    const key = `${arenaId}_${playerId}`;
+  getKey(arenaId: string, playerId: string, format: ArenaFormat = 'T20'): string {
+    return `${arenaId}_${playerId}_${format}`;
+  }
+
+  async getPlayerState(arenaId: string, playerId: string, format: ArenaFormat = 'T20'): Promise<ArenaPlayerState | undefined> {
+    const key = this.getKey(arenaId, playerId, format);
     if (this.transactionBuffer?.playerStates.has(key)) {
       return this.transactionBuffer.playerStates.get(key);
     }
     return this.playerStates.get(key);
   }
 
-  async savePlayerState(state: ArenaPlayerState) {
+  async getAllPlayerStatesForArena(arenaId: string, format?: ArenaFormat): Promise<ArenaPlayerState[]> {
+    const results: ArenaPlayerState[] = [];
+    const source = this.transactionBuffer ? this.transactionBuffer.playerStates : this.playerStates;
+    
+    source.forEach((state) => {
+      if (state.arenaId === arenaId && (!format || state.format === format)) {
+        results.push(state);
+      }
+    });
+
+    // If in transaction, blend in base map records not yet modified
     if (this.transactionBuffer) {
-      this.transactionBuffer.playerStates.set(state.id, { ...state, updatedAt: Date.now() });
+      this.playerStates.forEach((state, key) => {
+        if (state.arenaId === arenaId && (!format || state.format === format)) {
+          if (!this.transactionBuffer!.playerStates.has(key)) {
+            results.push(state);
+          }
+        }
+      });
+    }
+
+    return results;
+  }
+
+  async savePlayerState(state: ArenaPlayerState): Promise<void> {
+    const key = this.getKey(state.arenaId, state.playerId, state.format);
+    const updated = { ...state, updatedAt: Date.now() };
+
+    if (this.transactionBuffer) {
+      this.transactionBuffer.playerStates.set(key, updated);
     } else {
-      this.playerStates.set(state.id, { ...state, updatedAt: Date.now() });
+      this.playerStates.set(key, updated);
     }
   }
 
-  async saveMatchStats(stats: PlayerMatchStats) {
+  async saveMatchStats(stats: PlayerMatchStats): Promise<void> {
     if (this.transactionBuffer) {
       this.transactionBuffer.matchStats.set(stats.id, stats);
     } else {
@@ -87,10 +115,10 @@ export class ArenaDatabase {
     if (!stats) {
       stats = { arenaId, seasonId, teamId, played: 0, won: 0, lost: 0, drawn: 0, tied: 0, noResult: 0, points: 0, nrr: 0 };
     }
-    return { ...stats }; // Return copy
+    return { ...stats };
   }
 
-  async saveTeamStandings(stats: SeasonTeamStats) {
+  async saveTeamStandings(stats: SeasonTeamStats): Promise<void> {
     const key = `${stats.arenaId}_${stats.seasonId}_${stats.teamId}`;
     if (this.transactionBuffer) {
       this.transactionBuffer.seasonStandings.set(key, { ...stats });
@@ -99,9 +127,8 @@ export class ArenaDatabase {
     }
   }
 
-  // App-level persistence (mock)
-  private syncToStorage() {
-    // e.g. localStorage.setItem('crex_arena_state', JSON.stringify(...))
+  private syncToStorage(): void {
+    // In-memory synced; can also serialize to local storage if needed
   }
 }
 

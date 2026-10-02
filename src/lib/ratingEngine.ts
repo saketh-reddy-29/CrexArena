@@ -1,5 +1,8 @@
 import { Player } from '../types/common';
-import { ArenaFormat } from '../stores/useGameStore';
+import { ArenaFormat } from '../engine/models/ArenaState';
+import { db } from '../engine/storage/Database';
+import { safeRating, safeForm, safeNumber } from '../engine/utils/safeMath';
+import { PlayerFormStatus } from '../engine/players/types';
 
 export interface PlayerEffectiveRating {
   overall: number;
@@ -9,7 +12,7 @@ export interface PlayerEffectiveRating {
 }
 
 // Basic format modifiers (simulating deep attributes)
-const FORMAT_MODIFIERS: Record<ArenaFormat, { batAggressionBase: number, batPatienceBase: number, bowlPaceBase: number, bowlSpinBase: number }> = {
+const FORMAT_MODIFIERS: Record<ArenaFormat, { batAggressionBase: number; batPatienceBase: number; bowlPaceBase: number; bowlSpinBase: number }> = {
   T20:  { batAggressionBase: 1.2, batPatienceBase: 0.7, bowlPaceBase: 1.1, bowlSpinBase: 1.0 },
   ODI:  { batAggressionBase: 1.0, batPatienceBase: 1.0, bowlPaceBase: 1.0, bowlSpinBase: 1.0 },
   TEST: { batAggressionBase: 0.7, batPatienceBase: 1.3, bowlPaceBase: 1.1, bowlSpinBase: 1.2 },
@@ -17,54 +20,131 @@ const FORMAT_MODIFIERS: Record<ArenaFormat, { batAggressionBase: number, batPati
 };
 
 /**
- * Calculates a player's effective rating based on the current format and their role.
- * This introduces variety so a player isn't equally good in Tests and T20s.
+ * Retrieves the format-specific rating for a player in a specific arena.
+ * If not yet played in the arena, returns their baseAbility/rating for that format.
  */
-export function calculateEffectiveRating(player: Player, format: ArenaFormat): PlayerEffectiveRating {
-  const mods = FORMAT_MODIFIERS[format];
+export async function getPlayerRatingAsync(playerId: string, format: ArenaFormat, arenaId?: string): Promise<number> {
+  if (arenaId) {
+    const state = await db.getPlayerState(arenaId, playerId, format);
+    if (state) {
+      return safeRating(state.currentRating);
+    }
+  }
+  return 75;
+}
+
+/**
+ * Synchronous accessor for player rating, taking in an optional arena player state dictionary or fallback.
+ */
+export function getPlayerRating(
+  player: Player,
+  format: ArenaFormat,
+  arenaPlayerStates?: Record<string, any>
+): number {
+  const key = arenaPlayerStates ? `${player.id}_${format}` : null;
+  if (key && arenaPlayerStates && arenaPlayerStates[key]) {
+    return safeRating(arenaPlayerStates[key].currentRating);
+  }
   
-  // Use player's hidden or assumed attributes, fallback to role-based assumptions
-  const isAggressive = player.strikeRate ? player.strikeRate > 135 : (player.role === 'Batsman' ? true : false);
+  // Format-adjusted base rating
+  const baseAbility = safeRating(player.baseAbility || player.rating || 75);
+  const mods = FORMAT_MODIFIERS[format] || FORMAT_MODIFIERS.T20;
+  let mult = 1.0;
+  if (format === 'TEST') {
+    mult = player.role === 'Batsman' ? (player.strikeRate && player.strikeRate < 130 ? 1.03 : 0.98) : 1.0;
+  } else if (format === 'IPL' || format === 'T20') {
+    mult = player.role === 'Batsman' ? (player.strikeRate && player.strikeRate > 140 ? 1.03 : 0.98) : 1.0;
+  }
+  return safeRating(baseAbility * mult);
+}
+
+/**
+ * Retrieves format-specific form status with clear labels.
+ * If no matches played, returns value: null and label: "NO MATCHES".
+ */
+export function getPlayerForm(
+  player: Player,
+  format: ArenaFormat,
+  arenaPlayerState?: any
+): PlayerFormStatus {
+  if (!arenaPlayerState || !arenaPlayerState.hasRecentMatches || arenaPlayerState.recentMatchCount === 0) {
+    return {
+      value: null,
+      label: "NO MATCHES",
+      trend: "NEUTRAL",
+      delta: 0,
+      recentMatches: 0,
+      lastMatchAt: undefined,
+    };
+  }
+
+  const formVal = safeForm(arenaPlayerState.formRating);
+  const delta = safeNumber(arenaPlayerState.ratingDelta, 0);
+
+  let label = "GOOD FORM";
+  if (formVal >= 85) label = "PEAK FORM";
+  else if (formVal >= 70) label = "GOOD FORM";
+  else if (formVal >= 55) label = "MODERATE";
+  else if (formVal >= 40) label = "DIP IN FORM";
+  else label = "POOR FORM";
+
+  let trend: 'IMPROVING' | 'DECLINING' | 'NEUTRAL' = 'NEUTRAL';
+  if (delta > 0.05) trend = 'IMPROVING';
+  else if (delta < -0.05) trend = 'DECLINING';
+
+  return {
+    value: formVal,
+    label,
+    trend,
+    delta,
+    recentMatches: arenaPlayerState.recentMatchCount || 0,
+    lastMatchAt: arenaPlayerState.lastMatchAt ? new Date(arenaPlayerState.lastMatchAt) : undefined,
+  };
+}
+
+/**
+ * Calculates a player's effective rating based on the current format and their role.
+ */
+export function calculateEffectiveRating(
+  player: Player, 
+  format: ArenaFormat,
+  arenaPlayerState?: any
+): PlayerEffectiveRating {
+  const mods = FORMAT_MODIFIERS[format] || FORMAT_MODIFIERS.T20;
+  
+  const isAggressive = player.strikeRate ? player.strikeRate > 135 : (player.role === 'Batsman');
   const isPace = player.bowlingStyle?.toLowerCase().includes('fast') || player.bowlingStyle?.toLowerCase().includes('medium');
   const isSpin = player.bowlingStyle?.toLowerCase().includes('spin');
 
-  // Base stats from player object
   let effBatting = player.stats?.batting ?? player.attributes?.battingAbility ?? player.rating ?? 50;
   let effBowling = player.stats?.bowling ?? player.attributes?.bowlingAbility ?? player.rating ?? 50;
   const effFielding = player.stats?.fielding ?? player.attributes?.fielding ?? 80;
 
+  if (arenaPlayerState) {
+    effBatting = arenaPlayerState.battingRating || effBatting;
+    effBowling = arenaPlayerState.bowlingRating || effBowling;
+  }
+
   // Apply format modifiers
   if (player.role === 'Batsman' || player.role === 'All-rounder' || player.role === 'Wicketkeeper') {
-    if (isAggressive) {
-      effBatting = effBatting * mods.batAggressionBase;
-    } else {
-      effBatting = effBatting * mods.batPatienceBase;
-    }
+    effBatting = isAggressive ? effBatting * mods.batAggressionBase : effBatting * mods.batPatienceBase;
   }
 
   if (player.role === 'Bowler' || player.role === 'All-rounder') {
-    if (isPace) {
-      effBowling = effBowling * mods.bowlPaceBase;
-    } else if (isSpin) {
-      effBowling = effBowling * mods.bowlSpinBase;
-    } else {
-      // Default modifier if style unknown
-      effBowling = effBowling * ((mods.bowlPaceBase + mods.bowlSpinBase) / 2);
-    }
+    if (isPace) effBowling = effBowling * mods.bowlPaceBase;
+    else if (isSpin) effBowling = effBowling * mods.bowlSpinBase;
+    else effBowling = effBowling * ((mods.bowlPaceBase + mods.bowlSpinBase) / 2);
   }
 
-  // Normalize stats to 1-99 range
-  effBatting = Math.min(99, Math.max(1, Math.round(effBatting)));
-  effBowling = Math.min(99, Math.max(1, Math.round(effBowling)));
+  effBatting = safeRating(effBatting);
+  effBowling = safeRating(effBowling);
 
-  // Implement User's Dynamic Base + Form logic
-  const baseAbility = player.baseAbility || player.rating;
-  const currentForm = player.form || 85;
+  const baseAbility = arenaPlayerState?.currentRating || player.baseAbility || player.rating || 75;
+  const currentForm = arenaPlayerState?.hasRecentMatches ? arenaPlayerState.formRating : 75;
   
   // Base Ability (70%) + Form (30%)
-  let baseOverall = (baseAbility * 0.70) + (currentForm * 0.30);
+  const baseOverall = (baseAbility * 0.70) + (currentForm * 0.30);
 
-  // Still apply format penalty/buff based on role style
   let overallMod = 1.0;
   if (player.role === 'Batsman' || player.role === 'Wicketkeeper') {
     overallMod = isAggressive ? mods.batAggressionBase : mods.batPatienceBase;
@@ -75,7 +155,7 @@ export function calculateEffectiveRating(player: Player, format: ArenaFormat): P
                  (isPace ? mods.bowlPaceBase : (isSpin ? mods.bowlSpinBase : 1.0)) * 0.5;
   }
 
-  let overall = Math.min(99, Math.max(1, Math.round(baseOverall * overallMod)));
+  const overall = safeRating(baseOverall * overallMod);
 
   return {
     overall,
@@ -85,16 +165,12 @@ export function calculateEffectiveRating(player: Player, format: ArenaFormat): P
   };
 }
 
-export function getFormatSpecificProfile(player: Player, format: ArenaFormat) {
+export function getFormatSpecificProfile(player: Player, format: ArenaFormat, arenaPlayerState?: any) {
   const seed = player.name.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
   const v = (base: number, offsetSeed: number, variance: number = 6) => {
     const val = base + ((seed + offsetSeed) % variance) - (variance / 2);
     return Math.min(99, Math.max(30, Math.round(val)));
   };
-
-  const isAggressive = player.strikeRate ? player.strikeRate > 135 : (player.role === 'Batsman' ? true : false);
-  const isPace = player.bowlingStyle?.toLowerCase().includes('fast') || player.bowlingStyle?.toLowerCase().includes('medium');
-  const isSpin = player.bowlingStyle?.toLowerCase().includes('spin');
 
   let techniqueMod = 0;
   let powerMod = 0;
@@ -113,7 +189,11 @@ export function getFormatSpecificProfile(player: Player, format: ArenaFormat) {
     aggressionMod = 15;
   }
 
-  const baseBat = player.stats?.batting ?? player.attributes?.battingAbility ?? player.rating ?? 50;
+  const baseBat = arenaPlayerState?.battingRating ?? player.stats?.batting ?? player.attributes?.battingAbility ?? player.rating ?? 50;
+  const currentRating = arenaPlayerState?.currentRating ?? player.rating ?? 75;
+  const currentForm = arenaPlayerState?.hasRecentMatches ? arenaPlayerState.formRating : 75;
+  const currentFitness = arenaPlayerState?.fitness ?? player.stamina ?? 85;
+  const currentConfidence = arenaPlayerState?.confidence ?? 75;
 
   return {
     batting: {
@@ -126,8 +206,8 @@ export function getFormatSpecificProfile(player: Player, format: ArenaFormat) {
       againstSpin: v(baseBat, 7, 6),
     },
     mental: {
-      concentration: Math.min(99, Math.max(30, v(player.rating, 8, 7) + concentrationMod)),
-      temperament: player.temperament || v(player.rating, 9, 8),
+      concentration: Math.min(99, Math.max(30, v(currentRating, 8, 7) + concentrationMod)),
+      temperament: player.temperament || v(currentRating, 9, 8),
       aggression: Math.min(99, Math.max(30, (player.aggression || v(75, 10, 30)) + aggressionMod)),
     },
     fielding: {
@@ -135,9 +215,9 @@ export function getFormatSpecificProfile(player: Player, format: ArenaFormat) {
       catching: v(player.stats?.fielding || 80, 12, 5),
     },
     form: {
-      currentForm: player.form || v(player.rating, 13, 15),
-      fitness: player.stamina || v(85, 14, 10),
-      confidence: v(player.form || player.rating, 15, 12),
+      currentForm,
+      fitness: currentFitness,
+      confidence: currentConfidence,
     }
   };
 }

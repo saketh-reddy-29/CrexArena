@@ -40,6 +40,7 @@ export default function AuctionRoom() {
     auctionHistory,
     bidLog,
     addBid,
+    activeTab,
     setActiveTab
   } = useGameStore();
   
@@ -145,14 +146,14 @@ export default function AuctionRoom() {
   }, [biddingTeamId, currentBid, currentPlayer, selectedFranchiseId, selectedFranchise, soldPlayer, updatePurse, addToSquad, moveToUnsold]);
 
   useEffect(() => {
-    if (gameState !== GameState.AUCTION) return;
+    if (activeTab !== 'AUCTION') return;
     if (auctionPhase === 'idle' && poolIndex < shuffledPool.length) {
       startNextPlayer();
     }
-  }, [auctionPhase, poolIndex, shuffledPool, startNextPlayer, gameState]);
+  }, [auctionPhase, poolIndex, shuffledPool, startNextPlayer, activeTab]);
 
   useEffect(() => {
-    if (gameState !== GameState.AUCTION || auctionPhase !== 'bidding' || isPaused || !currentPlayer) return;
+    if (activeTab !== 'AUCTION' || auctionPhase !== 'bidding' || isPaused || !currentPlayer) return;
 
     const activeTeams = franchises.filter((f) => {
       if (f.id === biddingTeamId || f.id === selectedFranchiseId) return false;
@@ -196,10 +197,10 @@ export default function AuctionRoom() {
     }, fastestBid.delay);
 
     return () => clearTimeout(bidTimer);
-  }, [auctionPhase, isPaused, franchises, currentBid, biddingTeamId, selectedFranchiseId, currentPlayer, addBid, gameState, auctionState]);
+  }, [auctionPhase, isPaused, franchises, currentBid, biddingTeamId, selectedFranchiseId, currentPlayer, addBid, activeTab, auctionState]);
 
   useEffect(() => {
-    if (gameState !== GameState.AUCTION || auctionPhase !== 'bidding' || isPaused) return;
+    if (activeTab !== 'AUCTION' || auctionPhase !== 'bidding' || isPaused) return;
     const timer = setInterval(() => {
       setCountdown(prev => {
         if (prev <= 1) { clearInterval(timer); return 0; }
@@ -207,14 +208,14 @@ export default function AuctionRoom() {
       });
     }, 1000);
     return () => clearInterval(timer);
-  }, [auctionPhase, isPaused, gameState]);
+  }, [auctionPhase, isPaused, activeTab]);
 
   useEffect(() => {
-    if (gameState !== GameState.AUCTION) return;
+    if (activeTab !== 'AUCTION') return;
     if (countdown === 0 && auctionPhase === 'bidding' && !isPaused) {
       handleSold();
     }
-  }, [countdown, auctionPhase, isPaused, handleSold, gameState]);
+  }, [countdown, auctionPhase, isPaused, handleSold, activeTab]);
 
   const handleUserBid = (increment?: number) => {
     if (!selectedFranchise || isPaused || biddingTeamId === selectedFranchiseId) return;

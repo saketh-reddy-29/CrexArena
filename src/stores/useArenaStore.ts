@@ -1,13 +1,14 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import { ArenaProfile } from '../engine/models/ArenaState';
+import { ArenaProfile, ArenaFormat } from '../engine/models/ArenaState';
 import { FormatType } from '../engine/rules/RulesEngine';
+import { useGameStore } from './useGameStore';
 
 interface ArenaStore {
   arenas: ArenaProfile[];
   activeArenaId: string | null;
   
-  createArena: (name: string, format: FormatType, userTeamId: string) => void;
+  createArena: (name: string, format: FormatType, userTeamId: string) => ArenaProfile;
   loadArena: (id: string) => void;
   deleteArena: (id: string) => void;
   getActiveArena: () => ArenaProfile | undefined;
@@ -22,7 +23,7 @@ export const useArenaStore = create<ArenaStore>()(
       createArena: (name, format, userTeamId) => {
         const newArena: ArenaProfile = {
           id: `arena_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
-          userId: 'local_user', // Since there is no auth yet
+          userId: 'local_user',
           name,
           format,
           seasonId: `season_${new Date().getFullYear()}`,
@@ -36,10 +37,24 @@ export const useArenaStore = create<ArenaStore>()(
           arenas: [...state.arenas, newArena],
           activeArenaId: newArena.id,
         }));
+
+        // Initialize fresh isolated player states in gameStore
+        const gameStore = useGameStore.getState();
+        gameStore.setArenaId(newArena.id);
+        gameStore.setFormat(format as ArenaFormat);
+        gameStore.initializeArenaPlayerStates(newArena.id, format as ArenaFormat);
+
+        return newArena;
       },
 
       loadArena: (id) => {
-        set({ activeArenaId: id });
+        const arena = get().arenas.find(a => a.id === id);
+        if (arena) {
+          set({ activeArenaId: id });
+          const gameStore = useGameStore.getState();
+          gameStore.setArenaId(arena.id);
+          gameStore.setFormat(arena.format as ArenaFormat);
+        }
       },
 
       deleteArena: (id) => {

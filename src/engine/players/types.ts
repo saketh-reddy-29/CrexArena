@@ -1,9 +1,16 @@
+import { ArenaFormat, ArenaPlayerState, MatchPerformanceRecord, CareerStatsModel } from '../models/ArenaState';
+
+export type { ArenaFormat, ArenaPlayerState, MatchPerformanceRecord, CareerStatsModel };
+
 export interface FormatAttributes {
   overall: number;
   batting: number;
   bowling: number;
   fielding: number;
   form: number;
+  confidence: number;
+  fitness: number;
+  fatigue: number;
   
   // Batting specifics
   technique?: number;
@@ -46,21 +53,17 @@ export interface MatchPerformanceSummary {
   catches: number;
   stumpings: number;
   runOuts: number;
+
+  dots?: number;
+  ballsSurvived?: number;
+  fourthInnings?: boolean;
 }
 
-export interface FormHistoryEntry {
-  matchId: string;
-  format: "TEST" | "ODI" | "T20" | "IPL";
-  performanceScore: number;
-  formBefore: number;
-  formAfter: number;
-  date: Date;
-}
-
-export interface ArenaPlayerState {
-  playerId: string;
-  arenaId: string; // The specific user's save game / arena
-  ratings: PlayerFormatRating;
-  formHistory: FormHistoryEntry[]; // Last N games recorded
-  // Add reference to stats here if managed separately
+export interface PlayerFormStatus {
+  value: number | null;
+  label: string;
+  trend: 'IMPROVING' | 'DECLINING' | 'NEUTRAL';
+  delta: number;
+  recentMatches: number;
+  lastMatchAt?: Date;
 }
