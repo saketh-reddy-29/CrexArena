@@ -141,7 +141,7 @@ export interface ArenaPlayerState {
   fitness: number;    // 0 - 100 (baseline 85)
   fatigue: number;    // 0 - 100 (baseline 0)
 
-  // Recent match tracking
+  recentForm: number; // 0 initially (meaning no matches played yet)
   hasRecentMatches: boolean;
   recentMatchCount: number;
   recentRuns: number;

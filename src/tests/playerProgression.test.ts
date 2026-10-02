@@ -41,13 +41,12 @@ describe('Player Development & Arena Isolation System', () => {
     expect(stateA.format).toBe('ODI');
     expect(stateA.recentMatchCount).toBe(0);
     expect(stateA.hasRecentMatches).toBe(false);
-    expect(stateA.recentRuns).toBe(0);
-    expect(stateA.recentWickets).toBe(0);
+    expect(stateA.recentForm).toBe(0);
     expect(stateA.currentRating).toBe(88);
 
     const formStatus = getPlayerForm(mockPlayer, 'ODI', stateA);
-    expect(formStatus.value).toBeNull();
-    expect(formStatus.label).toBe('NO MATCHES');
+    expect(formStatus.value).toBe(0);
+    expect(formStatus.label).toBe('New / No Data');
     expect(formStatus.recentMatches).toBe(0);
   });
 

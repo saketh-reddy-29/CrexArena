@@ -119,6 +119,7 @@ export class ProgressionEngine {
       wicketkeepingRating: player.role === 'Wicketkeeper' ? 85 : 30,
 
       formRating: 75, // Baseline form rating
+      recentForm: 0, // Explicitly 0 initially (meaning no matches played yet in this Arena)
       confidence: 75, // Baseline confidence
       fitness: 85,
       fatigue: 0,
@@ -282,6 +283,7 @@ export class ProgressionEngine {
       ...currentState,
       currentRating: newRating,
       formRating: newForm,
+      recentForm: newForm,
       confidence: newConfidence,
       fitness: newFitness,
       fatigue: newFatigue,

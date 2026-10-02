@@ -65,9 +65,9 @@ export default function PlayersView() {
           </div>
           
           <div className="flex items-center gap-1">
-            {formStatus.value !== null ? (
+            {playerState && playerState.hasRecentMatches && playerState.recentMatchCount > 0 && playerState.recentForm > 0 ? (
               <div className="flex items-center gap-0.5 px-1.5 py-0.5 bg-amber-500/20 text-amber-300 rounded-md border border-amber-500/30 text-[9px] font-black">
-                {formStatus.value}
+                {playerState.recentForm}
                 {formStatus.trend === 'IMPROVING' && <TrendingUp className="w-2.5 h-2.5 text-green-400" />}
                 {formStatus.trend === 'DECLINING' && <TrendingDown className="w-2.5 h-2.5 text-red-400" />}
               </div>

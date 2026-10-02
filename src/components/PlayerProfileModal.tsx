@@ -151,15 +151,15 @@ export default function PlayerProfileModal({ player, franchiseId, onClose }: Pla
             <div className="bg-white/[0.03] p-2 rounded-xl border border-white/5">
               <div className="text-[9px] font-bold text-amber-400 uppercase tracking-wider">Form</div>
               <div className="text-sm font-black text-amber-300 mt-0.5 flex items-center justify-center gap-1">
-                {formStatus.value !== null ? (
+                {playerState && playerState.hasRecentMatches && playerState.recentMatchCount > 0 && playerState.recentForm > 0 ? (
                   <>
-                    <span>{formStatus.value}</span>
+                    <span>{playerState.recentForm}</span>
                     {formStatus.trend === 'IMPROVING' && <TrendingUp className="w-3 h-3 text-green-400" />}
                     {formStatus.trend === 'DECLINING' && <TrendingDown className="w-3 h-3 text-red-400" />}
                     {formStatus.trend === 'NEUTRAL' && <Minus className="w-3 h-3 text-white/40" />}
                   </>
                 ) : (
-                  <span className="text-[10px] text-white/40">New / No Data</span>
+                  <span className="text-[10px] text-white/50 font-bold">New / No Data</span>
                 )}
               </div>
             </div>

@@ -67,10 +67,10 @@ export function getPlayerForm(
   format: ArenaFormat,
   arenaPlayerState?: any
 ): PlayerFormStatus {
-  if (!arenaPlayerState || !arenaPlayerState.hasRecentMatches || arenaPlayerState.recentMatchCount === 0) {
+  if (!arenaPlayerState || !arenaPlayerState.hasRecentMatches || arenaPlayerState.recentMatchCount === 0 || arenaPlayerState.recentForm === 0) {
     return {
-      value: null,
-      label: "NO MATCHES",
+      value: 0, // Explicitly 0 for fresh state with no matches played yet
+      label: "New / No Data",
       trend: "NEUTRAL",
       delta: 0,
       recentMatches: 0,
@@ -78,7 +78,7 @@ export function getPlayerForm(
     };
   }
 
-  const formVal = safeForm(arenaPlayerState.formRating);
+  const formVal = safeForm(arenaPlayerState.recentForm || arenaPlayerState.formRating);
   const delta = safeNumber(arenaPlayerState.ratingDelta, 0);
 
   let label = "GOOD FORM";
