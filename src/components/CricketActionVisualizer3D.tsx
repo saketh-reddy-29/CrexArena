@@ -19,7 +19,8 @@ import {
   Pause,
   StepForward,
   Compass,
-  Maximize2
+  Maximize2,
+  AlertTriangle
 } from 'lucide-react';
 import { BallOutcome } from '../types/match';
 import { Player } from '../types/common';
@@ -259,10 +260,10 @@ export default function CricketActionVisualizer3D({
   const [debugMode, setDebugMode] = useState<boolean>(false);
   const [showBowlerTactics, setShowBowlerTactics] = useState<boolean>(false);
   const [showFieldMenu, setShowFieldMenu] = useState<boolean>(false);
-  const [activePreset, setActivePreset] = useState<FieldPreset>('BALANCED');
   const [resultBanner, setResultBanner] = useState<string | null>(null);
   const [stateProgress, setStateProgress] = useState<number>(0);
   const [currentActionState, setCurrentActionState] = useState<string>('READY');
+  const [webglError, setWebglError] = useState<string | null>(null);
 
   // Live Player States for Debugging
   const [playerDebugStates, setPlayerDebugStates] = useState<{
@@ -297,44 +298,38 @@ export default function CricketActionVisualizer3D({
    * Helper to reset all characters to their static, stable resting poses
    */
   const resetAllPlayersToReady = useCallback(() => {
-    // Bowler at bowling mark
     const isSpinner = selectedTactic.includes('SPIN') || selectedTactic.includes('BREAK') || selectedTactic.includes('DOOSRA') || selectedTactic.includes('GOOGLY');
     const startZ = isSpinner ? -15.0 : -21.0;
     if (bowlerCharRef.current) {
       bowlerCharRef.current.group.position.set(-0.5, 0.04, startZ);
-      bowlerCharRef.current.group.rotation.y = 0; // Look towards batter (+Z)
+      bowlerCharRef.current.group.rotation.y = 0;
       bowlerCharRef.current.updateAnimation('BOWLING_READY', 0);
     }
 
-    // Striker at batting crease
     if (strikerCharRef.current) {
       strikerCharRef.current.group.position.set(0, 0.04, 9.4);
-      strikerCharRef.current.group.rotation.y = Math.PI; // Face down the pitch (-Z)
+      strikerCharRef.current.group.rotation.y = Math.PI;
       strikerCharRef.current.updateAnimation('BATTING_READY', 0);
     }
 
-    // Non-striker at bowling crease
     if (nonStrikerCharRef.current) {
       nonStrikerCharRef.current.group.position.set(1.4, 0.04, -9.4);
       nonStrikerCharRef.current.group.rotation.y = 0;
       nonStrikerCharRef.current.updateAnimation('IDLE', 0);
     }
 
-    // Wicketkeeper crouched behind stumps
     if (keeperCharRef.current) {
       keeperCharRef.current.group.position.set(0, 0.04, 14.2);
-      keeperCharRef.current.group.rotation.y = Math.PI; // Face pitch
+      keeperCharRef.current.group.rotation.y = Math.PI;
       keeperCharRef.current.updateAnimation('KEEPER_CROUCH', 0);
     }
 
-    // All 9 tactical fielders in stable FIELD_READY
     fieldersListRef.current.forEach((f) => {
       f.char.group.position.set(f.basePos.x, f.basePos.y, f.basePos.z);
-      f.char.group.lookAt(0, 0.04, 9.5); // All watch striker
+      f.char.group.lookAt(0, 0.04, 9.5);
       f.char.updateAnimation('FIELD_READY', 0);
     });
 
-    // Ball in bowler's hand
     if (ballMeshRef.current && bowlerCharRef.current) {
       const handPos = bowlerCharRef.current.getHandWorldPosition();
       ballMeshRef.current.position.copy(handPos);
@@ -343,7 +338,6 @@ export default function CricketActionVisualizer3D({
       ballShadowRef.current.position.set(ballMeshRef.current.position.x, 0.025, ballMeshRef.current.position.z);
     }
 
-    // Reset Stumps & Bails
     bailsRef.current.forEach((bail, idx) => {
       bail.position.set(idx === 0 ? -0.055 : 0.055, 0.73, 0);
       bail.rotation.set(0, 0, Math.PI / 2);
@@ -362,13 +356,31 @@ export default function CricketActionVisualizer3D({
   }, [selectedTactic]);
 
   /**
-   * 1. Initialize High-Performance Three.js 3D Cricket World
+   * 1. Initialize High-Performance Three.js 3D Cricket World (ONCE on mount)
    */
   useEffect(() => {
     if (!mountRef.current) return;
     const container = mountRef.current;
-    const width = container.clientWidth || 600;
-    const height = container.clientHeight || 500;
+    const width = Math.max(320, container.clientWidth || 600);
+    const height = Math.max(240, container.clientHeight || 450);
+
+    let renderer: THREE.WebGLRenderer;
+    try {
+      renderer = new THREE.WebGLRenderer({
+        antialias: true,
+        alpha: false,
+        powerPreference: 'high-performance',
+      });
+      renderer.setSize(width, height);
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+      renderer.shadowMap.enabled = true;
+      renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+      rendererRef.current = renderer;
+    } catch (err: any) {
+      console.warn('WebGL Initialization failed:', err);
+      setWebglError('WebGL is not available in your browser.');
+      return;
+    }
 
     // Scene
     const scene = new THREE.Scene();
@@ -382,29 +394,21 @@ export default function CricketActionVisualizer3D({
     camera.lookAt(0, 0, 0);
     cameraRef.current = camera;
 
-    // WebGL Renderer
-    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, powerPreference: 'high-performance' });
-    renderer.setSize(width, height);
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    renderer.shadowMap.enabled = true;
-    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-    rendererRef.current = renderer;
-
     container.replaceChildren(renderer.domElement);
 
     // ── Lighting & Stadium Atmosphere ──
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.75);
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
     scene.add(ambientLight);
 
-    const hemiLight = new THREE.HemisphereLight(0xffffff, 0x1a331a, 0.45);
+    const hemiLight = new THREE.HemisphereLight(0xffffff, 0x1a331a, 0.5);
     hemiLight.position.set(0, 50, 0);
     scene.add(hemiLight);
 
     const sunLight = new THREE.DirectionalLight(0xfffaed, 1.4);
     sunLight.position.set(25, 45, 25);
     sunLight.castShadow = true;
-    sunLight.shadow.mapSize.width = 2048;
-    sunLight.shadow.mapSize.height = 2048;
+    sunLight.shadow.mapSize.width = 1024;
+    sunLight.shadow.mapSize.height = 1024;
     sunLight.shadow.camera.near = 1;
     sunLight.shadow.camera.far = 120;
     sunLight.shadow.camera.left = -40;
@@ -416,7 +420,7 @@ export default function CricketActionVisualizer3D({
 
     // ── 3D Cricket Field & Turf ──
     const fieldRadius = 38;
-    const fieldGeo = new THREE.CylinderGeometry(fieldRadius, fieldRadius, 0.2, 64);
+    const fieldGeo = new THREE.CylinderGeometry(fieldRadius, fieldRadius, 0.2, 48);
     const grassMat = new THREE.MeshLambertMaterial({ color: 0x194d19 });
     const field = new THREE.Mesh(fieldGeo, grassMat);
     field.position.y = -0.1;
@@ -425,7 +429,7 @@ export default function CricketActionVisualizer3D({
 
     // Mower Stripe Pattern rings
     for (let r = 8; r < fieldRadius; r += 7) {
-      const ringGeo = new THREE.RingGeometry(r, r + 3.5, 64);
+      const ringGeo = new THREE.RingGeometry(r, r + 3.5, 48);
       const ringMat = new THREE.MeshBasicMaterial({ color: 0x1d581d, side: THREE.DoubleSide });
       const ring = new THREE.Mesh(ringGeo, ringMat);
       ring.rotation.x = -Math.PI / 2;
@@ -434,7 +438,7 @@ export default function CricketActionVisualizer3D({
     }
 
     // 30-Yard Circle Line
-    const circleGeo = new THREE.RingGeometry(18.5, 18.7, 64);
+    const circleGeo = new THREE.RingGeometry(18.5, 18.7, 48);
     const circleMat = new THREE.MeshBasicMaterial({ color: 0xffffff, opacity: 0.35, transparent: true, side: THREE.DoubleSide });
     const circle = new THREE.Mesh(circleGeo, circleMat);
     circle.rotation.x = -Math.PI / 2;
@@ -442,7 +446,7 @@ export default function CricketActionVisualizer3D({
     scene.add(circle);
 
     // Boundary Rope & LED Cushion Ring
-    const ropeGeo = new THREE.TorusGeometry(fieldRadius - 0.5, 0.18, 12, 64);
+    const ropeGeo = new THREE.TorusGeometry(fieldRadius - 0.5, 0.18, 8, 48);
     const ropeMat = new THREE.MeshLambertMaterial({ color: isTest ? 0x991B1B : 0x2563EB });
     const rope = new THREE.Mesh(ropeGeo, ropeMat);
     rope.rotation.x = Math.PI / 2;
@@ -462,12 +466,10 @@ export default function CricketActionVisualizer3D({
     // Crease Lines
     const creaseMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
     [-10, 10].forEach((zPos) => {
-      // Popping crease
       const pLine = new THREE.Mesh(new THREE.BoxGeometry(2.4, 0.01, 0.08), creaseMat);
       pLine.position.set(0, 0.045, zPos > 0 ? zPos - 0.6 : zPos + 0.6);
       scene.add(pLine);
 
-      // Bowling crease
       const bLine = new THREE.Mesh(new THREE.BoxGeometry(2.64, 0.01, 0.05), creaseMat);
       bLine.position.set(0, 0.045, zPos);
       scene.add(bLine);
@@ -507,7 +509,7 @@ export default function CricketActionVisualizer3D({
     scene.add(ballShadow);
     ballShadowRef.current = ballShadow;
 
-    // ── 1. Striker (Batsman in white kit with batting pads, helmet, and bat) ──
+    // ── Characters ──
     const strikerChar = createCricketCharacter({
       id: striker?.id || 'striker-1',
       name: striker?.name || 'Striker',
@@ -525,7 +527,6 @@ export default function CricketActionVisualizer3D({
     scene.add(strikerChar.group);
     strikerCharRef.current = strikerChar;
 
-    // ── 2. Non-Striker (At non-striker bowling crease) ──
     const nonStrikerChar = createCricketCharacter({
       id: nonStriker?.id || 'non-striker-1',
       name: nonStriker?.name || 'Non-Striker',
@@ -542,7 +543,6 @@ export default function CricketActionVisualizer3D({
     scene.add(nonStrikerChar.group);
     nonStrikerCharRef.current = nonStrikerChar;
 
-    // ── 3. Bowler (Aligned along pitch axis at bowling mark) ──
     const bowlerChar = createCricketCharacter({
       id: bowler?.id || 'bowler-1',
       name: bowler?.name || 'Bowler',
@@ -559,7 +559,6 @@ export default function CricketActionVisualizer3D({
     scene.add(bowlerChar.group);
     bowlerCharRef.current = bowlerChar;
 
-    // ── 4. Wicketkeeper (Crouched behind striker's stumps) ──
     const keeperChar = createCricketCharacter({
       id: 'keeper-1',
       name: 'Wicketkeeper',
@@ -578,7 +577,6 @@ export default function CricketActionVisualizer3D({
     scene.add(keeperChar.group);
     keeperCharRef.current = keeperChar;
 
-    // ── 5. 9 Tactical Fielders (All placed in stationary FIELD_READY) ──
     const presetPositions = FIELD_PRESETS_3D.BALANCED.positions;
     const fieldersList: FielderItem[] = [];
     presetPositions.forEach((pos, idx) => {
@@ -670,37 +668,64 @@ export default function CricketActionVisualizer3D({
     window.addEventListener('mouseup', onPointerUp);
     dom.addEventListener('wheel', onWheel, { passive: false });
 
-    // Resize Handler
+    // Robust Resize Handling with ResizeObserver
     const handleResize = () => {
       if (!container || !renderer || !camera) return;
-      const w = container.clientWidth;
-      const h = container.clientHeight;
-      camera.aspect = w / h;
-      camera.updateProjectionMatrix();
-      renderer.setSize(w, h);
+      const w = Math.max(320, container.clientWidth || 600);
+      const h = Math.max(240, container.clientHeight || 450);
+      if (w > 0 && h > 0) {
+        camera.aspect = w / h;
+        camera.updateProjectionMatrix();
+        renderer.setSize(w, h, false);
+      }
     };
 
+    let resizeObserver: ResizeObserver | null = null;
+    if (typeof ResizeObserver !== 'undefined') {
+      resizeObserver = new ResizeObserver(() => handleResize());
+      resizeObserver.observe(container);
+    }
     window.addEventListener('resize', handleResize);
 
-    // Continuous 60 FPS Render Loop
+    // Continuous Render Loop with error guard
     let animId: number;
     const renderLoop = () => {
       animId = requestAnimationFrame(renderLoop);
-      renderer.render(scene, camera);
+      try {
+        if (renderer && scene && camera) {
+          renderer.render(scene, camera);
+        }
+      } catch (err) {
+        console.warn('Three.js render loop warning:', err);
+      }
     };
     renderLoop();
 
     return () => {
       cancelAnimationFrame(animId);
+      if (resizeObserver) resizeObserver.disconnect();
       window.removeEventListener('resize', handleResize);
       dom.removeEventListener('mousedown', onPointerDown);
       window.removeEventListener('mousemove', onPointerMove);
       window.removeEventListener('mouseup', onPointerUp);
       dom.removeEventListener('wheel', onWheel);
-      renderer.dispose();
-      scene.clear();
+      try {
+        renderer.dispose();
+      } catch (e) {}
     };
-  }, [format, ballColorHex, battingAccentHex, bowlingAccentHex, isTest, battingTeamName, bowlingTeamName, striker?.name, nonStriker?.name, bowler?.name]);
+  }, []); // Run ONCE on mount
+
+  // Update Character Accent Colors dynamically when format / teams change
+  useEffect(() => {
+    if (strikerCharRef.current) strikerCharRef.current.setAccentColor(battingAccentHex);
+    if (nonStrikerCharRef.current) nonStrikerCharRef.current.setAccentColor(battingAccentHex);
+    if (bowlerCharRef.current) bowlerCharRef.current.setAccentColor(bowlingAccentHex);
+    if (keeperCharRef.current) keeperCharRef.current.setAccentColor(bowlingAccentHex);
+    fieldersListRef.current.forEach((f) => f.char.setAccentColor(bowlingAccentHex));
+    if (ballMeshRef.current) {
+      (ballMeshRef.current.material as THREE.MeshStandardMaterial).color.setHex(ballColorHex);
+    }
+  }, [format, ballColorHex, battingAccentHex, bowlingAccentHex]);
 
   /**
    * 2. Full 3D Physical Delivery & Skeletal Animation Synchronization Engine
@@ -721,7 +746,6 @@ export default function CricketActionVisualizer3D({
     const isSpinner = selectedTactic.includes('SPIN') || selectedTactic.includes('BREAK') || selectedTactic.includes('DOOSRA') || selectedTactic.includes('GOOGLY');
     const startBowlerZ = isSpinner ? -15.0 : -21.0;
 
-    // Find closest fielder to the target shot position
     let targetFielderItem: FielderItem | null = null;
     if (fieldersListRef.current.length > 0) {
       let minDist = Infinity;
@@ -866,7 +890,6 @@ export default function CricketActionVisualizer3D({
         ballShadow.scale.set(shadowScale, shadowScale, 1);
       }
 
-      // Accelerated running between wickets (1 run: 0.5s, 2 runs: 0.8s, 3 runs: 1.1s)
       if (seq.runs > 0 && !seq.isWicket) {
         const runMultiplier = seq.runs === 1 ? 1.0 : seq.runs === 2 ? 1.8 : 2.6;
         const runCycle = Math.min(1, pShot * runMultiplier);
@@ -883,7 +906,6 @@ export default function CricketActionVisualizer3D({
         }
       }
 
-      // Target Fielder moves; other 8 fielders stay stationary
       if (targetFielderItem) {
         const tf = targetFielderItem as FielderItem;
         const targetX = tf.basePos.x + (ballTrajectory.targetPos.x - tf.basePos.x) * (pShot * 0.6);
@@ -985,7 +1007,6 @@ export default function CricketActionVisualizer3D({
 
     resetAllPlayersToReady();
 
-    // Speed Multipliers: 1x (Normal ~2.5-3.0s), 1.5x (Fast ~2.0-2.5s, Default), 2x (Very Fast ~1.3-1.8s)
     const speedMultiplier = speed === 1 ? 1.0 : speed === 1.5 ? 0.68 : 0.45;
     const baseDuration = (seq.isSix ? 2800 : seq.isFour ? 2600 : seq.runs > 0 ? 2700 : seq.isCaught ? 3000 : 2200) * speedMultiplier;
 
@@ -1013,7 +1034,6 @@ export default function CricketActionVisualizer3D({
         animFrameIdRef.current = requestAnimationFrame(step3D);
       } else {
         isSimulatingRef.current = false;
-        // Immediate event-driven completion — ready for next delivery without delay!
         onAnimationComplete?.();
       }
     };
@@ -1146,7 +1166,7 @@ export default function CricketActionVisualizer3D({
             </button>
           )}
 
-          {/* Fast Match Speed Controls: 1x, 1.5x (Default Fast), 2x (Very Fast) */}
+          {/* Fast Match Speed Controls */}
           <div className="flex items-center bg-white/5 border border-white/10 rounded-lg p-0.5">
             {([1, 1.5, 2] as AnimationSpeed[]).map((sp) => (
               <button
@@ -1226,11 +1246,27 @@ export default function CricketActionVisualizer3D({
       </AnimatePresence>
 
       {/* ── 3D Viewport with Realistic Character Rigging ── */}
-      <div className="relative w-full aspect-[4/3] max-w-[620px] overflow-hidden flex items-center justify-center">
-        <div ref={mountRef} className="w-full h-full cursor-grab active:cursor-grabbing" />
+      <div className="relative w-full aspect-[4/3] min-h-[300px] max-w-[640px] overflow-hidden flex items-center justify-center bg-[#050c1e]">
+        {webglError ? (
+          <div className="flex flex-col items-center justify-center p-6 text-center space-y-3">
+            <AlertTriangle className="w-8 h-8 text-amber-400 animate-bounce" />
+            <div className="text-sm font-bold text-white">3D Canvas Mode</div>
+            <div className="text-xs text-white/60 max-w-xs">{webglError}</div>
+            {onToggle2D && (
+              <button
+                onClick={onToggle2D}
+                className="px-4 py-2 rounded-xl bg-cyan-500 text-black font-black text-xs shadow-lg hover:bg-cyan-400 transition-all"
+              >
+                Switch to 2D Stadium Map
+              </button>
+            )}
+          </div>
+        ) : (
+          <div ref={mountRef} className="w-full h-full cursor-grab active:cursor-grabbing" />
+        )}
 
         {/* ── On-Screen Interactive Controls ── */}
-        <div className="absolute bottom-3 left-3 z-30 flex items-center gap-1 bg-black/70 backdrop-blur-md p-1 rounded-xl border border-white/10">
+        <div className="absolute bottom-2 left-3 z-30 flex items-center gap-1 bg-black/70 backdrop-blur-md p-1 rounded-xl border border-white/10">
           <button
             onClick={run3DDeliveryAnimation}
             className="p-1.5 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/40 text-emerald-300 transition-all text-xs flex items-center gap-1 font-bold"
