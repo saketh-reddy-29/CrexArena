@@ -23,7 +23,7 @@ import PlayerProfileModal from './components/PlayerProfileModal';
 import { useGameStore, GameState } from './stores/useGameStore';
 
 export default function App() {
-  const { gameState, viewedPlayerId, setViewedPlayer, players, franchises } = useGameStore();
+  const { gameState, viewedPlayerId, setViewedPlayer, players, franchises, selectedFormat } = useGameStore();
   
   const viewedPlayer = viewedPlayerId ? players.find(p => p.id === viewedPlayerId) : null;
   const viewedPlayerFranchise = viewedPlayer ? franchises.find(f => f.squad.includes(viewedPlayer.id))?.id : undefined;
