@@ -32,9 +32,11 @@ import { BOWLING_TACTICS_CONFIG, BowlingTactic, FieldPreset } from './CricketAct
 import { createCricketCharacter, CricketPlayer3DInstance, PlayerAnimState } from './CricketPlayer3D';
 import { adaptDeliveryTo3DSequence, Action3DSequence } from './Delivery3DActionAdapter';
 import TVScoreboard, { TVScoreboardBatter, TVScoreboardBowler } from './TVScoreboard';
-import { playEventSound } from '../lib/cricketAudioEngine';
 import { BallCameraController, BallCameraState } from './BallCameraController';
 import { fieldStrategyEngine } from '../engine/strategy/FieldStrategyEngine';
+import { DeliveryStatus } from '../game/ui/DeliveryStatus';
+import { FieldChangeOverlay } from '../game/ui/FieldChangeOverlay';
+import { FieldStrategyPanel } from '../game/ui/FieldStrategyPanel';
 
 export type CameraMode = 'CAMERA_WIDE' | 'BROADCAST' | 'BALL_FOLLOW' | 'BATTER_FOCUS' | 'BOWLER_FOCUS' | 'WICKET_FOCUS';
 export type AnimationSpeed = 1 | 1.5 | 2 | 0; // 1 = Normal (1x), 1.5 = Fast (1.5x, Default), 2 = Very Fast (2x), 0 = Skip/Instant
@@ -1447,11 +1449,47 @@ export default function CricketActionVisualizer3D({
           <div ref={mountRef} className="w-full h-full cursor-grab active:cursor-grabbing" />
         )}
 
+        {/* Live Delivery Status HUD */}
+        <DeliveryStatus
+          stateName={currentActionState}
+          shotName={currentSeqRef.current?.shotName}
+          targetZone={currentSeqRef.current?.targetZone}
+          batterOutcome={lastBall?.isWicket ? 'WICKET' : lastBall?.runs === 6 ? 'SIX' : lastBall?.runs === 4 ? 'FOUR' : lastBall ? `${lastBall.runs} RUNS` : undefined}
+          isWicket={Boolean(lastBall?.isWicket)}
+          bowlerName={bowler?.name}
+          batterName={striker?.name}
+        />
+
         {/* Live Camera State Indicator */}
-        <div className="absolute top-2.5 left-3 z-30 flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-black/70 backdrop-blur-md border border-white/10 text-[9px] font-bold text-white/80 shadow-md">
+        <div className="absolute top-2.5 right-14 z-30 flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-black/70 backdrop-blur-md border border-white/10 text-[9px] font-bold text-white/80 shadow-md">
           <Camera className="w-3 h-3 text-cyan-400" />
           <span className="text-cyan-300 font-mono font-black tracking-wider uppercase">{cameraStateName}</span>
         </div>
+
+        {/* Field Strategy Tactical Panel (when opened) */}
+        {showBowlerTactics && (
+          <FieldStrategyPanel
+            bowlerName={bowler?.name || 'Current Bowler'}
+            bowlingPlan={tacticConfig.name}
+            fieldStrategy={currentSeqRef.current?.fieldStrategy || 'BALANCED ATTACK'}
+            deepFieldersCount={currentSeqRef.current?.fielders.filter(f => f.isDeep).length || 4}
+            maxDeepAllowed={format?.toUpperCase() === 'T20' ? 5 : 4}
+            onClose={() => setShowBowlerTactics(false)}
+          />
+        )}
+
+        {/* Field Change Notification Overlay */}
+        <FieldChangeOverlay
+          isVisible={currentActionState === 'FIELD_CHANGE' || currentActionState === 'FIELD_SETUP'}
+          bowlerName={bowler?.name || 'Bowler'}
+          bowlingPlan={tacticConfig.name}
+          strategyName={currentSeqRef.current?.fieldStrategy || 'Tactical Adjustment'}
+          changes={[
+            `${tacticConfig.name} field aligned`,
+            'Deep fielders set to boundary positions',
+            'Ring catchers locked & ready'
+          ]}
+        />
 
         {/* ── On-Screen Interactive Controls ── */}
         <div className="absolute bottom-2 left-3 z-30 flex items-center gap-1 bg-black/70 backdrop-blur-md p-1 rounded-xl border border-white/10">
