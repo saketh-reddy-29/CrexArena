@@ -450,7 +450,7 @@ export default function CricketActionVisualizer3D({
       renderer.setSize(width, height);
       renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
       renderer.shadowMap.enabled = true;
-      renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+      renderer.shadowMap.type = THREE.PCFShadowMap;
       rendererRef.current = renderer;
     } catch (err: any) {
       console.warn('WebGL Initialization failed:', err);
@@ -1135,19 +1135,78 @@ export default function CricketActionVisualizer3D({
       updateBallTransformAndFX(curX, curY, curZ);
       if (ballMesh) ballMesh.rotation.x += 0.45;
 
-      if (seq.runs > 0 && !seq.isWicket) {
-        const runMultiplier = seq.runs === 1 ? 1.0 : seq.runs === 2 ? 1.8 : 2.6;
-        const runCycle = Math.min(1, pShot * runMultiplier);
-        const sZ = 9.4 - (runCycle * 18.8);
-        const nsZ = -9.4 + (runCycle * 18.8);
+      if (seq.runs > 0 && !seq.isWicket && !seq.isSix && !seq.isFour) {
+        let sZ = 9.4;
+        let nsZ = -9.4;
+        let sRotY = Math.PI;
+        let nsRotY = 0;
+        const runLaneOffset = 0.75; // Striker runs on x=-0.75, Non-striker on x=0.75
+
+        if (seq.runs === 1) {
+          // 1 Run: Single sprint from crease to crease (0.0 to 0.85)
+          const runP = Math.min(1, pShot / 0.85);
+          sZ = 9.4 - runP * 18.8; // 9.4 -> -9.4
+          nsZ = -9.4 + runP * 18.8; // -9.4 -> 9.4
+          sRotY = 0; // Facing bowler end
+          nsRotY = Math.PI; // Facing batter end
+        } else if (seq.runs === 2) {
+          // 2 Runs: 1st run across (0.0 -> 0.44), Turn at crease (0.44 -> 0.50), 2nd run back (0.50 -> 0.92)
+          if (pShot < 0.44) {
+            const runP1 = pShot / 0.44;
+            sZ = 9.4 - runP1 * 18.8;
+            nsZ = -9.4 + runP1 * 18.8;
+            sRotY = 0; // Facing bowler end
+            nsRotY = Math.PI; // Facing batter end
+          } else if (pShot < 0.50) {
+            // Turn at crease
+            const turnP = (pShot - 0.44) / 0.06;
+            sZ = -9.4;
+            nsZ = 9.4;
+            sRotY = turnP * Math.PI; // Turn 180 to face striker end
+            nsRotY = Math.PI + turnP * Math.PI; // Turn 180 to face non-striker end
+          } else {
+            // 2nd run sprint back to starting crease
+            const runP2 = Math.min(1, (pShot - 0.50) / 0.42);
+            sZ = -9.4 + runP2 * 18.8; // -9.4 -> 9.4
+            nsZ = 9.4 - runP2 * 18.8; // 9.4 -> -9.4
+            sRotY = Math.PI; // Facing batter end
+            nsRotY = 0; // Facing bowler end
+          }
+        } else if (seq.runs >= 3) {
+          // 3 Runs: 3 complete lengths across
+          if (pShot < 0.30) {
+            const runP = pShot / 0.30;
+            sZ = 9.4 - runP * 18.8;
+            nsZ = -9.4 + runP * 18.8;
+            sRotY = 0; nsRotY = Math.PI;
+          } else if (pShot < 0.34) {
+            sZ = -9.4; nsZ = 9.4;
+            sRotY = Math.PI; nsRotY = 0;
+          } else if (pShot < 0.64) {
+            const runP = (pShot - 0.34) / 0.30;
+            sZ = -9.4 + runP * 18.8;
+            nsZ = 9.4 - runP * 18.8;
+            sRotY = Math.PI; nsRotY = 0;
+          } else if (pShot < 0.68) {
+            sZ = 9.4; nsZ = -9.4;
+            sRotY = 0; nsRotY = Math.PI;
+          } else {
+            const runP = Math.min(1, (pShot - 0.68) / 0.27);
+            sZ = 9.4 - runP * 18.8;
+            nsZ = -9.4 + runP * 18.8;
+            sRotY = 0; nsRotY = Math.PI;
+          }
+        }
 
         if (strikerChar) {
-          strikerChar.group.position.z = sZ;
-          strikerChar.updateAnimation('RUN_BETWEEN_WICKETS', pShot * 3);
+          strikerChar.group.position.set(-runLaneOffset, 0.04, sZ);
+          strikerChar.group.rotation.y = sRotY;
+          strikerChar.updateAnimation('RUN_BETWEEN_WICKETS', pShot * (seq.runs * 2.8));
         }
         if (nonStrikerChar) {
-          nonStrikerChar.group.position.z = nsZ;
-          nonStrikerChar.updateAnimation('RUN_BETWEEN_WICKETS', pShot * 3);
+          nonStrikerChar.group.position.set(runLaneOffset, 0.04, nsZ);
+          nonStrikerChar.group.rotation.y = nsRotY;
+          nonStrikerChar.updateAnimation('RUN_BETWEEN_WICKETS', pShot * (seq.runs * 2.8));
         }
       }
 
@@ -1307,15 +1366,56 @@ export default function CricketActionVisualizer3D({
     }
   }, [selectedTactic, tacticConfig.seamAngle, cameraMode]);
 
+  // Stable reference to latest props to prevent re-triggering animation mid-delivery
+  const deliveryPropsRef = useRef({
+    lastBall,
+    speed,
+    selectedTactic,
+    strikerStats,
+    striker,
+    bowlerStats,
+    bowler,
+    partnership,
+    target,
+    score,
+    totalOvers,
+    balls,
+    isTest,
+    onAnimationComplete,
+  });
+
+  deliveryPropsRef.current = {
+    lastBall,
+    speed,
+    selectedTactic,
+    strikerStats,
+    striker,
+    bowlerStats,
+    bowler,
+    partnership,
+    target,
+    score,
+    totalOvers,
+    balls,
+    isTest,
+    onAnimationComplete,
+  };
+
+  const prevBallCountRef = useRef<number>(0);
+
   /**
    * 3. Run Delivery Animation Controller
    */
   const run3DDeliveryAnimation = useCallback(() => {
-    if (!lastBall || speed === 0) {
-      if (lastBall) {
-        setResultBanner(lastBall.isWicket ? 'WICKET!' : lastBall.runs === 6 ? 'SIX!' : lastBall.runs === 4 ? 'FOUR!' : `${lastBall.runs} RUNS`);
+    const currentProps = deliveryPropsRef.current;
+    const currentLastBall = currentProps.lastBall;
+    const currentSpeed = currentProps.speed;
+
+    if (!currentLastBall || currentSpeed === 0) {
+      if (currentLastBall) {
+        setResultBanner(currentLastBall.isWicket ? 'WICKET!' : currentLastBall.runs === 6 ? 'SIX!' : currentLastBall.runs === 4 ? 'FOUR!' : `${currentLastBall.runs} RUNS`);
       }
-      onAnimationComplete?.();
+      currentProps.onAnimationComplete?.();
       return;
     }
 
@@ -1330,17 +1430,17 @@ export default function CricketActionVisualizer3D({
       emotion: false,
     };
 
-    const seq: Action3DSequence = adaptDeliveryTo3DSequence(lastBall, selectedTactic, {
-      strikerScore: strikerStats?.runs,
-      strikerName: striker?.name,
-      bowlerWickets: bowlerStats?.wickets,
-      bowlerName: bowler?.name,
-      partnershipRuns: partnership?.runs,
-      partnershipBalls: partnership?.balls,
-      target,
-      currentScore: score,
-      ballsRemaining: totalOvers ? Math.max(0, totalOvers * 6 - (balls || 0)) : undefined,
-      isTestFormat: isTest,
+    const seq: Action3DSequence = adaptDeliveryTo3DSequence(currentLastBall, currentProps.selectedTactic, {
+      strikerScore: currentProps.strikerStats?.runs,
+      strikerName: currentProps.striker?.name,
+      bowlerWickets: currentProps.bowlerStats?.wickets,
+      bowlerName: currentProps.bowler?.name,
+      partnershipRuns: currentProps.partnership?.runs,
+      partnershipBalls: currentProps.partnership?.balls,
+      target: currentProps.target,
+      currentScore: currentProps.score,
+      ballsRemaining: currentProps.totalOvers ? Math.max(0, currentProps.totalOvers * 6 - (currentProps.balls || 0)) : undefined,
+      isTestFormat: currentProps.isTest,
     });
     currentSeqRef.current = seq;
 
@@ -1352,7 +1452,7 @@ export default function CricketActionVisualizer3D({
     resetAllPlayersToReady();
     ballCameraControllerRef.current.reset(cameraRef.current || undefined);
 
-    const speedMultiplier = speed === 1 ? 1.0 : speed === 1.5 ? 0.72 : 0.48;
+    const speedMultiplier = currentSpeed === 1 ? 1.0 : currentSpeed === 1.5 ? 0.72 : 0.48;
     const baseDuration = seq.baseDurationMs * speedMultiplier;
 
     let startTime: number | null = null;
@@ -1379,17 +1479,13 @@ export default function CricketActionVisualizer3D({
         animFrameIdRef.current = requestAnimationFrame(step3D);
       } else {
         isSimulatingRef.current = false;
-        onAnimationComplete?.();
+        deliveryPropsRef.current.onAnimationComplete?.();
       }
     };
 
     if (animFrameIdRef.current) cancelAnimationFrame(animFrameIdRef.current);
     animFrameIdRef.current = requestAnimationFrame(step3D);
-
-    return () => {
-      if (animFrameIdRef.current) cancelAnimationFrame(animFrameIdRef.current);
-    };
-  }, [lastBall, speed, selectedTactic, strikerStats, striker, bowlerStats, bowler, partnership, target, score, totalOvers, balls, isTest, resetAllPlayersToReady, executeDeliveryFrame, onAnimationComplete]);
+  }, [resetAllPlayersToReady, executeDeliveryFrame]);
 
   // Step action (+5% advance when paused)
   const handleStepAction = () => {
@@ -1404,9 +1500,10 @@ export default function CricketActionVisualizer3D({
     setIsPaused(isPausedRef.current);
   };
 
-  // Trigger on delivery change
+  // Trigger only on new delivery ballCount increment or replay
   useEffect(() => {
-    if (ballCount > 0) {
+    if (ballCount > 0 && ballCount !== prevBallCountRef.current) {
+      prevBallCountRef.current = ballCount;
       run3DDeliveryAnimation();
     }
   }, [ballCount, run3DDeliveryAnimation]);
@@ -1633,7 +1730,7 @@ export default function CricketActionVisualizer3D({
             bowlerName={bowler?.name || 'Current Bowler'}
             bowlingPlan={tacticConfig.name}
             fieldStrategy={currentSeqRef.current?.fieldStrategy || 'BALANCED ATTACK'}
-            deepFieldersCount={currentSeqRef.current?.fielders.filter(f => f.isDeep).length || 4}
+            deepFieldersCount={currentSeqRef.current?.fielders?.filter(f => f.isDeep).length ?? 4}
             maxDeepAllowed={format?.toUpperCase() === 'T20' ? 5 : 4}
             onClose={() => setShowBowlerTactics(false)}
           />

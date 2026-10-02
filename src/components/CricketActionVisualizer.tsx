@@ -1030,12 +1030,12 @@ export default function CricketActionVisualizer({
     };
   }, [lastBall, speed, selectedTactic, get360ShotTrajectoryData, fielders, onAnimationComplete]);
 
-  // Trigger on new delivery
+  // Trigger on new delivery ONLY in 2D Mode (3D Mode handles its own animation lifecycle)
   useEffect(() => {
-    if (ballCount > 0) {
+    if (viewMode === '2D' && ballCount > 0) {
       runDeliveryAnimation();
     }
-  }, [ballCount, runDeliveryAnimation]);
+  }, [ballCount, runDeliveryAnimation, viewMode]);
 
   // Default to High-Performance 3D Stadium Match Engine
   if (viewMode === '3D') {
