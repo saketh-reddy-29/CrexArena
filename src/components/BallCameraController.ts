@@ -3,7 +3,7 @@ import { Action3DSequence } from './Delivery3DActionAdapter';
 
 export type BallCameraState =
   | 'BROADCAST'
-  | 'BOWLING_TRACK'
+  | 'BOWLER_TRACK'
   | 'BALL_TO_BATTER'
   | 'BALL_AFTER_CONTACT'
   | 'GROUND_TRACK'
@@ -124,33 +124,33 @@ export class BallCameraController {
     if (!ballReleased) {
       this.currentState = 'BOWLER_TRACK';
       // Follow bowler during run-up towards bowling crease
-      this.desiredCameraPos.set(0, 14, -28);
-      this.targetLookAt.set(0, 1.2, -10);
+      this.desiredCameraPos.set(0, 10.5, -25.0);
+      this.targetLookAt.set(0, 1.2, -6.0);
     } else if (ballReleased && !ballHitBat) {
       this.currentState = 'BALL_TO_BATTER';
       // Elevated tracking camera following ball from bowler to pitch bounce to batter
-      const camY = Math.max(5.5, ballPosition.y + 4.5);
-      const camZ = Math.min(ballPosition.z - 8.5, -2.0);
+      const camY = Math.max(4.2, ballPosition.y + 3.2);
+      const camZ = Math.min(ballPosition.z - 6.5, -1.0);
       this.desiredCameraPos.set(ballPosition.x * 0.4, camY, camZ);
-      this.targetLookAt.copy(lookAheadPos);
+      this.targetLookAt.set(ballPosition.x * 0.6, Math.max(0.6, ballPosition.y * 0.5 + 0.6), ballPosition.z + 4.0);
     } else if (ballHitBat && !ballReachedDestination) {
       // Ball is in active play after bat contact
       if (seq.isSix) {
         this.currentState = 'AIR_TRACK';
-        // Follow high ball arc with smooth wide camera tracking the flight to boundary
-        const camY = Math.max(9.0, ballPosition.y * 0.6 + 6.0);
-        const camZ = ballPosition.z * 0.35 + 16.0;
-        const camX = ballPosition.x * 0.45;
+        // Follow high ball arc with smooth broadcast tracking camera
+        const camY = Math.max(7.5, ballPosition.y * 0.45 + 4.5);
+        const camZ = ballPosition.z * 0.35 + 13.0;
+        const camX = ballPosition.x * 0.4;
         this.desiredCameraPos.set(camX, camY, camZ);
-        this.targetLookAt.copy(lookAheadPos);
+        this.targetLookAt.copy(ballPosition);
       } else if (seq.isFour) {
         this.currentState = 'GROUND_TRACK';
         // Follow ground boundary trajectory
-        const camY = 7.5;
-        const camZ = ballPosition.z * 0.5 + 12.0;
-        const camX = ballPosition.x * 0.5;
+        const camY = 6.0;
+        const camZ = ballPosition.z * 0.4 + 10.0;
+        const camX = ballPosition.x * 0.45;
         this.desiredCameraPos.set(camX, camY, camZ);
-        this.targetLookAt.copy(lookAheadPos);
+        this.targetLookAt.copy(ballPosition);
       } else if (seq.isCaught) {
         this.currentState = 'CATCH_TRACK';
         if (fielderPosition) {
@@ -158,77 +158,77 @@ export class BallCameraController {
           const distToFielder = ballPosition.distanceTo(fielderPosition);
           const blend = THREE.MathUtils.clamp(1.0 - (distToFielder / 18.0), 0, 1);
           const target = new THREE.Vector3().lerpVectors(ballPosition, fielderPosition, blend * 0.6);
-          target.y = Math.max(1.2, ballPosition.y * 0.5 + 0.8);
+          target.y = Math.max(1.0, ballPosition.y * 0.5 + 0.6);
           this.targetLookAt.copy(target);
 
           this.desiredCameraPos.set(
-            target.x * 0.6,
-            Math.max(6.5, ballPosition.y * 0.4 + 4.5),
-            target.z * 0.6 + 10.0
+            target.x * 0.55,
+            Math.max(5.5, ballPosition.y * 0.35 + 4.0),
+            target.z * 0.55 + 9.5
           );
         } else {
-          this.targetLookAt.copy(lookAheadPos);
-          this.desiredCameraPos.set(ballPosition.x * 0.5, 7.5, ballPosition.z * 0.5 + 12.0);
+          this.targetLookAt.copy(ballPosition);
+          this.desiredCameraPos.set(ballPosition.x * 0.45, 6.5, ballPosition.z * 0.45 + 10.5);
         }
       } else if (seq.isBowled) {
         this.currentState = 'WICKET_TRACK';
         // Focus on ball crashing into stumps and flying bails
-        this.desiredCameraPos.set(1.8, 3.2, 14.5);
+        this.desiredCameraPos.set(1.6, 2.8, 13.5);
         this.targetLookAt.set(0, 0.7, 10.1);
       } else if (seq.isLBW) {
         this.currentState = 'WICKET_TRACK';
         // Focus on pad impact & appeal
-        this.desiredCameraPos.set(-2.0, 3.0, 13.5);
+        this.desiredCameraPos.set(-1.8, 2.6, 12.8);
         this.targetLookAt.set(0, 0.8, 9.5);
       } else if (seq.isStumped) {
         this.currentState = 'KEEPER_TRACK';
         // Focus on keeper breaking stumps
-        this.desiredCameraPos.set(-1.5, 2.8, 14.0);
+        this.desiredCameraPos.set(-1.4, 2.5, 13.2);
         this.targetLookAt.set(0, 0.7, 10.1);
       } else if (seq.isRunOut) {
         this.currentState = 'WICKET_TRACK';
         // Follow throw to stumps
-        this.desiredCameraPos.set(ballPosition.x * 0.3, 5.5, ballPosition.z * 0.3 + 12.0);
+        this.desiredCameraPos.set(ballPosition.x * 0.3, 5.0, ballPosition.z * 0.3 + 11.0);
         this.targetLookAt.copy(lookAheadPos);
       } else {
         // Standard in-play ball follow for 1, 2, 3 runs or dot balls
         this.currentState = 'BALL_AFTER_CONTACT';
-        const camY = 7.0;
-        const camZ = ballPosition.z * 0.5 + 12.0;
-        const camX = ballPosition.x * 0.5;
+        const camY = 6.2;
+        const camZ = ballPosition.z * 0.45 + 10.5;
+        const camX = ballPosition.x * 0.45;
         this.desiredCameraPos.set(camX, camY, camZ);
-        this.targetLookAt.copy(lookAheadPos);
+        this.targetLookAt.copy(ballPosition);
       }
     } else if (emotionStage) {
       // Ball has reached destination! Camera now focuses on celebration / emotions
       this.currentState = 'CELEBRATION';
       if (seq.isMatchWinning || seq.milestone) {
         // Focus on celebrating batter raising bat/helmet
-        this.desiredCameraPos.set(-2.6, 2.6, 6.2);
+        this.desiredCameraPos.set(-2.4, 2.4, 6.5);
         this.targetLookAt.set(0, 1.2, 9.4);
       } else if (seq.isWicket) {
         // Focus on bowler / team celebration
         if (seq.isBowled || seq.isLBW) {
-          this.desiredCameraPos.set(2.4, 2.6, -14.0);
+          this.desiredCameraPos.set(2.2, 2.4, -13.5);
           this.targetLookAt.set(0, 1.2, -10.0);
         } else {
-          this.desiredCameraPos.set(-2.0, 2.5, 6.5);
+          this.desiredCameraPos.set(-1.8, 2.3, 6.8);
           this.targetLookAt.set(0, 1.1, 9.4);
         }
       } else if (seq.isBoundary) {
         // Batter confident walk / fist pump
-        this.desiredCameraPos.set(-2.5, 2.6, 6.0);
+        this.desiredCameraPos.set(-2.4, 2.4, 6.4);
         this.targetLookAt.set(0, 1.2, 9.4);
       } else {
         // Wide stadium angle
-        this.desiredCameraPos.set(0, 18, 30);
+        this.desiredCameraPos.set(0, 16, 28);
         this.targetLookAt.set(0, 1, 0);
       }
     } else if (finalStage) {
       this.currentState = 'RESULT';
       this.isDeliveryComplete = true;
       // Smoothly zoom out to broadcast wide
-      this.desiredCameraPos.set(0, 26, 38);
+      this.desiredCameraPos.set(0, 24, 36);
       this.targetLookAt.set(0, 1, 0);
     }
 

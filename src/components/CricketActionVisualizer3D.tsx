@@ -37,6 +37,7 @@ import { fieldStrategyEngine } from '../engine/strategy/FieldStrategyEngine';
 import { DeliveryStatus } from '../game/ui/DeliveryStatus';
 import { FieldChangeOverlay } from '../game/ui/FieldChangeOverlay';
 import { FieldStrategyPanel } from '../game/ui/FieldStrategyPanel';
+import { playEventSound } from '../lib/cricketAudioEngine';
 
 export type CameraMode = 'CAMERA_WIDE' | 'BROADCAST' | 'BALL_FOLLOW' | 'BATTER_FOCUS' | 'BOWLER_FOCUS' | 'WICKET_FOCUS';
 export type AnimationSpeed = 1 | 1.5 | 2 | 0; // 1 = Normal (1x), 1.5 = Fast (1.5x, Default), 2 = Very Fast (2x), 0 = Skip/Instant
@@ -258,9 +259,15 @@ export default function CricketActionVisualizer3D({
   const keeperCharRef = useRef<CricketPlayer3DInstance | null>(null);
   const fieldersListRef = useRef<FielderItem[]>([]);
 
-  // Ball & Stumps Entities
+  // Ball & Visual FX Entities
   const ballMeshRef = useRef<THREE.Mesh | null>(null);
+  const ballGlowRef = useRef<THREE.Mesh | null>(null);
   const ballShadowRef = useRef<THREE.Mesh | null>(null);
+  const ballDropLineRef = useRef<THREE.Line | null>(null);
+  const ballTrailRef = useRef<THREE.Line | null>(null);
+  const ballTrailPositionsRef = useRef<Float32Array>(new Float32Array(72 * 3));
+  const bounceMarkerRef = useRef<THREE.Mesh | null>(null);
+  const contactBurstRef = useRef<THREE.Mesh | null>(null);
   const bailsRef = useRef<THREE.Mesh[]>([]);
   const stumpsRef = useRef<THREE.Mesh[]>([]);
 
@@ -380,9 +387,31 @@ export default function CricketActionVisualizer3D({
     if (ballMeshRef.current && bowlerCharRef.current) {
       const handPos = bowlerCharRef.current.getHandWorldPosition();
       ballMeshRef.current.position.copy(handPos);
+
+      // Reset Trail buffer
+      const trailPositions = ballTrailPositionsRef.current;
+      for (let i = 0; i < 72; i++) {
+        trailPositions[i * 3] = handPos.x;
+        trailPositions[i * 3 + 1] = handPos.y;
+        trailPositions[i * 3 + 2] = handPos.z;
+      }
+      if (ballTrailRef.current) {
+        ballTrailRef.current.geometry.attributes.position.needsUpdate = true;
+        (ballTrailRef.current.material as THREE.LineBasicMaterial).color.setHex(0x00f0ff);
+      }
     }
     if (ballShadowRef.current && ballMeshRef.current) {
       ballShadowRef.current.position.set(ballMeshRef.current.position.x, 0.025, ballMeshRef.current.position.z);
+      ballShadowRef.current.scale.set(1, 1, 1);
+    }
+    if (ballDropLineRef.current) {
+      ballDropLineRef.current.visible = false;
+    }
+    if (bounceMarkerRef.current) {
+      (bounceMarkerRef.current.material as THREE.MeshBasicMaterial).opacity = 0;
+    }
+    if (contactBurstRef.current) {
+      (contactBurstRef.current.material as THREE.MeshBasicMaterial).opacity = 0;
     }
 
     bailsRef.current.forEach((bail, idx) => {
@@ -537,28 +566,105 @@ export default function CricketActionVisualizer3D({
     bowlerStumps.group.position.set(0, 0.04, -10.1);
     scene.add(bowlerStumps.group);
 
-    // ── 3D Cricket Ball & Ground Shadow ──
-    const ballGeo = new THREE.SphereGeometry(0.12, 16, 16);
+    // ── 3D Cricket Ball (High-Visibility Scale, Emissive Glow & Seam) ──
+    const ballGeo = new THREE.SphereGeometry(0.20, 24, 24);
     const ballMat = new THREE.MeshStandardMaterial({
       color: ballColorHex,
-      roughness: 0.35,
-      metalness: 0.1,
-      emissive: isTest ? 0x550000 : 0x222222,
-      emissiveIntensity: 0.2
+      roughness: 0.2,
+      metalness: 0.15,
+      emissive: isTest ? 0x880000 : 0x3b82f6,
+      emissiveIntensity: 0.45
     });
     const ballMesh = new THREE.Mesh(ballGeo, ballMat);
     ballMesh.position.set(0, 1.8, -10);
     ballMesh.castShadow = true;
+
+    // Seam Ring
+    const seamGeo = new THREE.TorusGeometry(0.202, 0.012, 8, 32);
+    const seamMat = new THREE.MeshBasicMaterial({ color: isTest ? 0xffddaa : 0xdddddd });
+    const seamMesh = new THREE.Mesh(seamGeo, seamMat);
+    ballMesh.add(seamMesh);
+
+    // Luminous Aura Halo
+    const glowGeo = new THREE.SphereGeometry(0.27, 16, 16);
+    const glowMat = new THREE.MeshBasicMaterial({
+      color: isTest ? 0xff3b30 : 0x38bdf8,
+      transparent: true,
+      opacity: 0.35,
+      side: THREE.BackSide
+    });
+    const ballGlow = new THREE.Mesh(glowGeo, glowMat);
+    ballMesh.add(ballGlow);
+    ballGlowRef.current = ballGlow;
+
     scene.add(ballMesh);
     ballMeshRef.current = ballMesh;
 
-    const shadowGeo = new THREE.CircleGeometry(0.16, 16);
-    const shadowMat = new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.45, side: THREE.DoubleSide });
+    // ── Ball Ground Shadow ──
+    const shadowGeo = new THREE.CircleGeometry(0.28, 24);
+    const shadowMat = new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.55, side: THREE.DoubleSide });
     const ballShadow = new THREE.Mesh(shadowGeo, shadowMat);
     ballShadow.rotation.x = -Math.PI / 2;
     ballShadow.position.set(0, 0.025, -10);
     scene.add(ballShadow);
     ballShadowRef.current = ballShadow;
+
+    // ── Vertical Elevation Drop Guide Line (Laser Depth Perception) ──
+    const dropLineGeo = new THREE.BufferGeometry();
+    const dropLinePositions = new Float32Array(6);
+    dropLineGeo.setAttribute('position', new THREE.BufferAttribute(dropLinePositions, 3));
+    const dropLineMat = new THREE.LineBasicMaterial({
+      color: 0x38bdf8,
+      transparent: true,
+      opacity: 0.5,
+      linewidth: 2,
+    });
+    const ballDropLine = new THREE.Line(dropLineGeo, dropLineMat);
+    ballDropLine.visible = false;
+    scene.add(ballDropLine);
+    ballDropLineRef.current = ballDropLine;
+
+    // ── 3D Neon Motion Trail / Tracer Ribbon (Hawk-Eye TV Visual) ──
+    const trailPositions = ballTrailPositionsRef.current;
+    const trailGeo = new THREE.BufferGeometry();
+    trailGeo.setAttribute('position', new THREE.BufferAttribute(trailPositions, 3));
+    const trailMat = new THREE.LineBasicMaterial({
+      color: 0x00f0ff,
+      transparent: true,
+      opacity: 0.85,
+      linewidth: 3,
+    });
+    const ballTrail = new THREE.Line(trailGeo, trailMat);
+    scene.add(ballTrail);
+    ballTrailRef.current = ballTrail;
+
+    // ── Pitch Bounce Spot Ring Marker ──
+    const bounceGeo = new THREE.RingGeometry(0.12, 0.40, 32);
+    const bounceMat = new THREE.MeshBasicMaterial({
+      color: 0x00f0ff,
+      transparent: true,
+      opacity: 0,
+      side: THREE.DoubleSide,
+    });
+    const bounceMarker = new THREE.Mesh(bounceGeo, bounceMat);
+    bounceMarker.rotation.x = -Math.PI / 2;
+    bounceMarker.position.set(0, 0.035, 0);
+    scene.add(bounceMarker);
+    bounceMarkerRef.current = bounceMarker;
+
+    // ── Bat Contact Burst Flash Marker ──
+    const burstGeo = new THREE.RingGeometry(0.08, 0.65, 24);
+    const burstMat = new THREE.MeshBasicMaterial({
+      color: 0xffea00,
+      transparent: true,
+      opacity: 0,
+      side: THREE.DoubleSide,
+    });
+    const contactBurst = new THREE.Mesh(burstGeo, burstMat);
+    contactBurst.rotation.x = -Math.PI / 2;
+    contactBurst.position.set(0, 0.035, 9.5);
+    scene.add(contactBurst);
+    contactBurstRef.current = contactBurst;
 
     // ── Characters ──
     const strikerChar = createCricketCharacter({
@@ -828,6 +934,83 @@ export default function CricketActionVisualizer3D({
       });
     }
 
+    // Helper to synchronize 3D ball mesh, shadow, laser drop line, neon tracer trail, and impact effects
+    const updateBallTransformAndFX = (curX: number, curY: number, curZ: number, seamAngleDeg?: number) => {
+      if (ballMesh) {
+        ballMesh.position.set(curX, curY, curZ);
+        if (seamAngleDeg !== undefined) {
+          ballMesh.rotation.z = (seamAngleDeg * Math.PI) / 180;
+        }
+      }
+      if (ballShadow) {
+        ballShadow.position.set(curX, 0.025, curZ);
+        const shadowScale = Math.max(0.2, 1 - (curY / 14));
+        ballShadow.scale.set(shadowScale, shadowScale, 1);
+      }
+
+      // Vertical Altitude Drop Line (shows 3D ball height and drop point on turf)
+      if (ballDropLineRef.current) {
+        if (curY > 0.35) {
+          ballDropLineRef.current.visible = true;
+          const posAttr = ballDropLineRef.current.geometry.attributes.position as THREE.BufferAttribute;
+          const posArray = posAttr.array as Float32Array;
+          posArray[0] = curX; posArray[1] = curY; posArray[2] = curZ;
+          posArray[3] = curX; posArray[4] = 0.025; posArray[5] = curZ;
+          posAttr.needsUpdate = true;
+        } else {
+          ballDropLineRef.current.visible = false;
+        }
+      }
+
+      // 3D Motion Trail / Tracer Ribbon (Hawk-Eye TV Visual)
+      if (ballTrailRef.current) {
+        const trailPositions = ballTrailPositionsRef.current;
+        const currentIdx = Math.min(71, Math.floor(p * 72));
+        for (let i = currentIdx; i < 72; i++) {
+          trailPositions[i * 3] = curX;
+          trailPositions[i * 3 + 1] = curY;
+          trailPositions[i * 3 + 2] = curZ;
+        }
+        ballTrailRef.current.geometry.attributes.position.needsUpdate = true;
+        const trailMat = ballTrailRef.current.material as THREE.LineBasicMaterial;
+        if (p < phases.contactEnd) {
+          trailMat.color.setHex(0x00f0ff); // Cyan bowler-to-pitch flight
+        } else if (seq.isWicket) {
+          trailMat.color.setHex(0xf43f5e); // Neon crimson for wicket / catch
+        } else if (seq.isSix || seq.isFour) {
+          trailMat.color.setHex(0xfbbf24); // Glowing golden yellow for boundary
+        } else {
+          trailMat.color.setHex(0x38bdf8); // Sky blue for runs
+        }
+      }
+
+      // Pitch Bounce Marker
+      if (bounceMarkerRef.current) {
+        bounceMarkerRef.current.position.set(ballTrajectory.bouncePos.x, 0.035, ballTrajectory.bouncePos.z);
+        const bounceMat = bounceMarkerRef.current.material as THREE.MeshBasicMaterial;
+        if (p >= phases.bounceEnd && p < phases.contactEnd + 0.15) {
+          bounceMat.opacity = Math.max(0, 0.85 - ((p - phases.bounceEnd) / 0.25) * 0.85);
+          const bounceScale = 1.0 + (p - phases.bounceEnd) * 2.5;
+          bounceMarkerRef.current.scale.set(bounceScale, bounceScale, 1);
+        } else {
+          bounceMat.opacity = 0;
+        }
+      }
+
+      // Bat Contact Burst Flash
+      if (contactBurstRef.current) {
+        const burstMat = contactBurstRef.current.material as THREE.MeshBasicMaterial;
+        if (p >= phases.contactEnd && p < phases.contactEnd + 0.12 && !seq.isLeave && !seq.isLBW) {
+          const pBurst = (p - phases.contactEnd) / 0.12;
+          burstMat.opacity = (1 - pBurst) * 0.9;
+          const burstScale = 0.6 + pBurst * 2.5;
+          contactBurstRef.current.scale.set(burstScale, burstScale, 1);
+        } else {
+          burstMat.opacity = 0;
+        }
+      }
+    };
+
     // ── Phase 1: Bowler Run-Up (0.00 - phases.runupEnd) ──
     if (p < phases.runupEnd) {
       setCurrentActionState('BOWLER_RUNUP');
@@ -839,12 +1022,9 @@ export default function CricketActionVisualizer3D({
         bowlerChar.updateAnimation('RUN_UP', pRun);
       }
 
-      if (ballMesh && bowlerChar) {
+      if (bowlerChar) {
         const handPos = bowlerChar.getHandWorldPosition();
-        ballMesh.position.copy(handPos);
-      }
-      if (ballShadow && ballMesh) {
-        ballShadow.position.set(ballMesh.position.x, 0.025, ballMesh.position.z);
+        updateBallTransformAndFX(handPos.x, handPos.y, handPos.z);
       }
 
       if (strikerChar) strikerChar.updateAnimation('BATTING_READY', pRun);
@@ -882,15 +1062,7 @@ export default function CricketActionVisualizer3D({
       const curZ = startZ + (endZ - startZ) * pFlight;
       const curY = 1.9 * (1 - pFlight) + 0.04 + Math.sin(pFlight * Math.PI) * 0.8;
 
-      if (ballMesh) {
-        ballMesh.position.set(curX, curY, curZ);
-        ballMesh.rotation.z = (tacticConfig.seamAngle * Math.PI) / 180;
-      }
-      if (ballShadow) {
-        ballShadow.position.set(curX, 0.025, curZ);
-        const shadowScale = Math.max(0.2, 1 - (curY / 4));
-        ballShadow.scale.set(shadowScale, shadowScale, 1);
-      }
+      updateBallTransformAndFX(curX, curY, curZ, tacticConfig.seamAngle);
 
       setPlayerDebugStates({
         bowlerState: 'FOLLOW_THROUGH',
@@ -916,11 +1088,7 @@ export default function CricketActionVisualizer3D({
       const curZ = startZ + (endZ - startZ) * pBounce;
       const curY = 0.05 + Math.sin(pBounce * Math.PI) * ballTrajectory.apexHeight;
 
-      if (ballMesh) ballMesh.position.set(curX, curY, curZ);
-      if (ballShadow) {
-        ballShadow.position.set(curX, 0.025, curZ);
-        ballShadow.scale.set(1 - curY / 3, 1 - curY / 3, 1);
-      }
+      updateBallTransformAndFX(curX, curY, curZ);
 
       if (strikerChar) strikerChar.updateAnimation(seq.batterAnim, pBounce * 0.5);
 
@@ -964,15 +1132,8 @@ export default function CricketActionVisualizer3D({
         curY = 0.08 + bounceSkip;
       }
 
-      if (ballMesh) {
-        ballMesh.position.set(curX, curY, curZ);
-        ballMesh.rotation.x += 0.45;
-      }
-      if (ballShadow) {
-        ballShadow.position.set(curX, 0.025, curZ);
-        const shadowScale = Math.max(0.2, 1 - (curY / 14));
-        ballShadow.scale.set(shadowScale, shadowScale, 1);
-      }
+      updateBallTransformAndFX(curX, curY, curZ);
+      if (ballMesh) ballMesh.rotation.x += 0.45;
 
       if (seq.runs > 0 && !seq.isWicket) {
         const runMultiplier = seq.runs === 1 ? 1.0 : seq.runs === 2 ? 1.8 : 2.6;
