@@ -71,6 +71,8 @@ export interface Visualizer3DProps {
   lead?: number | null;
   trail?: number | null;
   onAnimationComplete?: () => void;
+  speed?: AnimationSpeed;
+  onSpeedChange?: (speed: AnimationSpeed) => void;
   className?: string;
   activeBowlingTactic?: BowlingTactic;
   onTacticChange?: (tactic: BowlingTactic) => void;
@@ -227,6 +229,8 @@ export default function CricketActionVisualizer3D({
   lead,
   trail,
   onAnimationComplete,
+  speed: propSpeed,
+  onSpeedChange,
   className,
   activeBowlingTactic,
   onTacticChange,
@@ -262,9 +266,20 @@ export default function CricketActionVisualizer3D({
   const ballCameraControllerRef = useRef<BallCameraController>(new BallCameraController());
   const [cameraStateName, setCameraStateName] = useState<string>('BROADCAST');
 
-  // Visualizer UI Controls (Default 1.5x = Fast ~2.0-2.5s)
+  // Visualizer UI Controls (Default 1.0x = Realism Broadcast ~5.5-7.5s)
   const [cameraMode, setCameraMode] = useState<CameraMode>('BALL_FOLLOW');
-  const [speed, setSpeed] = useState<AnimationSpeed>(1.5);
+  const [speed, setInternalSpeed] = useState<AnimationSpeed>(propSpeed ?? 1);
+
+  useEffect(() => {
+    if (propSpeed !== undefined) {
+      setInternalSpeed(propSpeed);
+    }
+  }, [propSpeed]);
+
+  const setSpeed = useCallback((newSpeed: AnimationSpeed) => {
+    setInternalSpeed(newSpeed);
+    onSpeedChange?.(newSpeed);
+  }, [onSpeedChange]);
   const [isPaused, setIsPaused] = useState<boolean>(false);
   const [debugMode, setDebugMode] = useState<boolean>(false);
   const [showBowlerTactics, setShowBowlerTactics] = useState<boolean>(false);

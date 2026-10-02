@@ -284,6 +284,8 @@ export default function LiveMatchCenter() {
   const [impactIncomingId, setImpactIncomingId] = useState<string | null>(null);
   const [lastVisualizedBall, setLastVisualizedBall] = useState<any>(null);
   const [selectedBowlingTactic, setSelectedBowlingTactic] = useState<BowlingTactic>('OUTSWING');
+  const [playbackSpeed, setPlaybackSpeed] = useState<1 | 1.5 | 2>(1);
+  const [isDeliveryAnimating, setIsDeliveryAnimating] = useState<boolean>(false);
 
   const handleImpactSubstitution = () => {
     if (!impactIncomingId || !impactOutgoingId) return;
@@ -472,11 +474,17 @@ export default function LiveMatchCenter() {
     }
   }, [pending, inning, battingSquad, bowlingSquad, battingCursor, isMyTeamBatting, isMyTeamBowling, strikerId, nonStrikerId, getAvailableBatters, chooseAiBowler, queueBowlerAfterBatter, lastOverBowlerId, pendingBatterEnd, autoPlay]);
 
+  const handleAnimationComplete = useCallback(() => {
+    setIsDeliveryAnimating(false);
+  }, []);
+
   useEffect(() => {
     if (!inning || inning.isComplete || pending || !striker || !nonStriker || !currentBowler) return;
+    if (isDeliveryAnimating) return; // Strict Lock: Never interrupt or double-simulate while 3D delivery action is playing!
     if (!autoPlay && manualBallRequests <= 0) return;
 
     const playDelivery = () => {
+      setIsDeliveryAnimating(true);
       // ---- Compute ball result from closure state (fresh thanks to setTimeout) ----
       const current = inning;
       if (current.isComplete) return;
@@ -742,9 +750,10 @@ export default function LiveMatchCenter() {
       if (!autoPlay) setManualBallRequests((value) => Math.max(0, value - 1));
     };
 
-    const timer = window.setTimeout(playDelivery, autoPlay ? 1900 : 0);
+    const breatherDelay = !autoPlay ? 0 : (playbackSpeed === 1 ? 850 : playbackSpeed === 1.5 ? 450 : 200);
+    const timer = window.setTimeout(playDelivery, breatherDelay);
     return () => window.clearTimeout(timer);
-  }, [inning, innings, inningNo, pending, striker, nonStriker, currentBowler, battingCursor, autoPlay, manualBallRequests, pitch, weather, battingTeam]);
+  }, [inning, innings, inningNo, pending, striker, nonStriker, currentBowler, battingCursor, autoPlay, manualBallRequests, pitch, weather, battingTeam, isDeliveryAnimating, playbackSpeed]);
 
   useEffect(() => {
     const first = innings[0];
@@ -840,7 +849,26 @@ export default function LiveMatchCenter() {
             <div className="truncate text-sm font-bold">{team1.shortName} vs {team2.shortName}</div>
             <div className="text-[10px] text-slate-500">{currentMatch?.isPlayoff ? currentMatch.playoffType : `Match ${currentMatch?.matchNumber || 1}`} · {selectedFormat || 'T20'} · {matchStatus}</div>
           </div>
-          <button onClick={() => setAutoPlay((v) => !v)} className={`shrink-0 rounded-full px-3 py-1 text-[10px] font-black uppercase ${autoPlay ? 'bg-green-500 text-white' : 'bg-white/10 text-slate-300'}`}>
+          
+          {/* Speed Selector */}
+          <div className="flex items-center gap-1 bg-zinc-900 border border-zinc-800 rounded-full p-0.5">
+            {[1, 1.5, 2].map((s) => (
+              <button
+                key={s}
+                onClick={() => setPlaybackSpeed(s as 1 | 1.5 | 2)}
+                className={`px-2 py-0.5 rounded-full text-[9px] font-black transition-all ${
+                  playbackSpeed === s
+                    ? 'bg-amber-400 text-zinc-950 shadow-sm'
+                    : 'text-zinc-400 hover:text-zinc-200'
+                }`}
+                title={s === 1 ? '1x Real Broadcast Pacing (~5.5-7.5s)' : `${s}x Speed`}
+              >
+                {s === 1 ? '1x' : `${s}x`}
+              </button>
+            ))}
+          </div>
+
+          <button onClick={() => setAutoPlay((v) => !v)} className={`shrink-0 rounded-full px-3 py-1 text-[10px] font-black uppercase ${autoPlay ? 'bg-green-500 text-white shadow-sm' : 'bg-white/10 text-slate-300'}`}>
             {autoPlay ? 'Auto' : 'Manual'}
           </button>
         </div>
@@ -1023,6 +1051,9 @@ export default function LiveMatchCenter() {
             partnership={{ runs: inning?.partnershipRuns || 0, balls: inning?.partnershipBalls || 0 }}
             activeBowlingTactic={selectedBowlingTactic}
             onTacticChange={setSelectedBowlingTactic}
+            onAnimationComplete={handleAnimationComplete}
+            speed={playbackSpeed}
+            onSpeedChange={(s) => setPlaybackSpeed(s as 1 | 1.5 | 2)}
           />
         </div>
 
@@ -1107,8 +1138,16 @@ export default function LiveMatchCenter() {
                     </span>
                   </div>
                 )}
-                <button onClick={() => setManualBallRequests((v) => v + 1)} className="w-full rounded-lg bg-white py-2.5 text-center text-xs font-black uppercase text-zinc-950 hover:bg-zinc-200 transition-colors shadow-lg">
-                  Next Ball ▶
+                <button
+                  disabled={isDeliveryAnimating}
+                  onClick={() => setManualBallRequests((v) => v + 1)}
+                  className={`w-full rounded-lg py-2.5 text-center text-xs font-black uppercase transition-all shadow-lg ${
+                    isDeliveryAnimating
+                      ? 'bg-zinc-800 text-zinc-400 cursor-not-allowed border border-zinc-700 opacity-80'
+                      : 'bg-white text-zinc-950 hover:bg-zinc-200 active:scale-[0.98]'
+                  }`}
+                >
+                  {isDeliveryAnimating ? 'Bowling in action... 🎬' : 'Next Ball ▶'}
                 </button>
               </div>
             )}

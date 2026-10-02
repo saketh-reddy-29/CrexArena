@@ -97,8 +97,9 @@ export interface VisualizerProps {
   day?: number;
   session?: number;
   lead?: number | null;
-  trail?: number | null;
   onAnimationComplete?: () => void;
+  speed?: AnimationSpeed;
+  onSpeedChange?: (speed: AnimationSpeed) => void;
   className?: string;
   activeBowlingTactic?: BowlingTactic;
   onTacticChange?: (tactic: BowlingTactic) => void;
@@ -483,6 +484,8 @@ export default function CricketActionVisualizer({
   lead,
   trail,
   onAnimationComplete,
+  speed: propSpeed,
+  onSpeedChange,
   className,
   activeBowlingTactic,
   onTacticChange,
@@ -493,7 +496,18 @@ export default function CricketActionVisualizer({
 
   // Animation & View Mode Controls
   const [viewMode, setViewMode] = useState<'3D' | '2D'>('3D');
-  const [speed, setSpeed] = useState<AnimationSpeed>(1);
+  const [speed, setInternalSpeed] = useState<AnimationSpeed>(propSpeed ?? 1);
+
+  useEffect(() => {
+    if (propSpeed !== undefined) {
+      setInternalSpeed(propSpeed);
+    }
+  }, [propSpeed]);
+
+  const setSpeed = useCallback((newSpeed: AnimationSpeed) => {
+    setInternalSpeed(newSpeed);
+    onSpeedChange?.(newSpeed);
+  }, [onSpeedChange]);
   const [debugMode, setDebugMode] = useState<boolean>(false);
   const [showFieldMenu, setShowFieldMenu] = useState<boolean>(false);
   const [showBowlerTactics, setShowBowlerTactics] = useState<boolean>(false);
@@ -1058,6 +1072,8 @@ export default function CricketActionVisualizer({
         lead={lead}
         trail={trail}
         onAnimationComplete={onAnimationComplete}
+        speed={speed}
+        onSpeedChange={setSpeed}
         className={className}
         activeBowlingTactic={activeBowlingTactic}
         onTacticChange={onTacticChange}
