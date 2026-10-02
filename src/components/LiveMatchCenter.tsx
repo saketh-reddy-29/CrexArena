@@ -981,7 +981,45 @@ export default function LiveMatchCenter() {
             format={(selectedFormat as ArenaFormat) || 'T20'}
             battingTeamName={battingTeam.name}
             bowlingTeamName={bowlingTeam.name}
+            battingTeamShortName={battingTeam.shortName}
+            teamLogo={resolveTeamLogo(battingTeam)}
+            teamAccentColor={battingTeam.color}
             isFreeHit={Boolean(inning?.isFreeHitPending)}
+            score={inning?.runs || 0}
+            wickets={inning?.wickets || 0}
+            balls={inning?.balls || 0}
+            totalOvers={maxOvers}
+            target={inningNo === 2 && innings[0] ? innings[0].runs + 1 : null}
+            currentRunRate={inning?.balls ? (inning.runs / (inning.balls / 6)) : 0}
+            requiredRunRate={inningNo === 2 && innings[0] && inning && !inning.isComplete ? ((innings[0].runs + 1 - inning.runs) / Math.max(0.5, (maxBalls - inning.balls) / 6)) : null}
+            strikerStats={{
+              name: striker?.name || 'Striker',
+              runs: strikerLine.runs,
+              balls: strikerLine.balls,
+              fours: strikerLine.fours,
+              sixes: strikerLine.sixes,
+              strikeRate: Number(strikeRate(strikerLine.runs, strikerLine.balls)) || 0,
+              isStriker: true,
+            }}
+            nonStrikerStats={{
+              name: nonStriker?.name || 'Non-Striker',
+              runs: nonStrikerLine.runs,
+              balls: nonStrikerLine.balls,
+              fours: nonStrikerLine.fours,
+              sixes: nonStrikerLine.sixes,
+              strikeRate: Number(strikeRate(nonStrikerLine.runs, nonStrikerLine.balls)) || 0,
+              isStriker: false,
+            }}
+            bowlerStats={{
+              name: currentBowler?.name || 'Bowler',
+              overs: Number(formatOvers(bowlerLine.balls)) || 0,
+              maidens: bowlerMaidens(inning, currentBowler?.id || ''),
+              runs: bowlerLine.runs,
+              wickets: bowlerLine.wickets,
+              economy: Number(economy(bowlerLine.runs, bowlerLine.balls)) || 0,
+            }}
+            recentBalls={currentOverBalls}
+            partnership={{ runs: inning?.partnershipRuns || 0, balls: inning?.partnershipBalls || 0 }}
             activeBowlingTactic={selectedBowlingTactic}
             onTacticChange={setSelectedBowlingTactic}
           />

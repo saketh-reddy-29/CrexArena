@@ -65,6 +65,8 @@ export type BowlingTactic =
   | 'TOP_SPINNER'
   | 'CARROM_BALL';
 
+import { TVScoreboardBatter, TVScoreboardBowler } from './TVScoreboard';
+
 export interface VisualizerProps {
   striker: Player | null;
   nonStriker: Player | null;
@@ -74,7 +76,28 @@ export interface VisualizerProps {
   format: ArenaFormat;
   battingTeamName: string;
   bowlingTeamName: string;
+  battingTeamShortName?: string;
+  teamLogo?: string;
+  teamAccentColor?: string;
   isFreeHit?: boolean;
+  score?: number;
+  wickets?: number;
+  overs?: number;
+  balls?: number;
+  totalOvers?: number;
+  target?: number | null;
+  currentRunRate?: number;
+  requiredRunRate?: number | null;
+  strikerStats?: TVScoreboardBatter;
+  nonStrikerStats?: TVScoreboardBatter;
+  bowlerStats?: TVScoreboardBowler;
+  recentBalls?: string[];
+  partnership?: { runs: number; balls: number };
+  innings?: number;
+  day?: number;
+  session?: number;
+  lead?: number | null;
+  trail?: number | null;
   onAnimationComplete?: () => void;
   className?: string;
   activeBowlingTactic?: BowlingTactic;
@@ -437,7 +460,28 @@ export default function CricketActionVisualizer({
   format,
   battingTeamName,
   bowlingTeamName,
+  battingTeamShortName,
+  teamLogo,
+  teamAccentColor,
   isFreeHit = false,
+  score,
+  wickets,
+  overs,
+  balls,
+  totalOvers,
+  target,
+  currentRunRate,
+  requiredRunRate,
+  strikerStats,
+  nonStrikerStats,
+  bowlerStats,
+  recentBalls,
+  partnership,
+  innings,
+  day,
+  session,
+  lead,
+  trail,
   onAnimationComplete,
   className,
   activeBowlingTactic,
@@ -991,7 +1035,28 @@ export default function CricketActionVisualizer({
         format={format}
         battingTeamName={battingTeamName}
         bowlingTeamName={bowlingTeamName}
+        battingTeamShortName={battingTeamShortName}
+        teamLogo={teamLogo}
+        teamAccentColor={teamAccentColor}
         isFreeHit={isFreeHit}
+        score={score}
+        wickets={wickets}
+        overs={overs}
+        balls={balls}
+        totalOvers={totalOvers}
+        target={target}
+        currentRunRate={currentRunRate}
+        requiredRunRate={requiredRunRate}
+        strikerStats={strikerStats}
+        nonStrikerStats={nonStrikerStats}
+        bowlerStats={bowlerStats}
+        recentBalls={recentBalls}
+        partnership={partnership}
+        innings={innings}
+        day={day}
+        session={session}
+        lead={lead}
+        trail={trail}
         onAnimationComplete={onAnimationComplete}
         className={className}
         activeBowlingTactic={activeBowlingTactic}

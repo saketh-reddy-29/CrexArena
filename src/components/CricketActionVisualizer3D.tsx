@@ -28,6 +28,7 @@ import { cn } from '../lib/utils';
 import { BOWLING_TACTICS_CONFIG, BowlingTactic, FieldPreset } from './CricketActionVisualizer';
 import { createCricketCharacter, CricketPlayer3DInstance, PlayerAnimState } from './CricketPlayer3D';
 import { adaptDeliveryTo3DSequence, Action3DSequence } from './Delivery3DActionAdapter';
+import TVScoreboard, { TVScoreboardBatter, TVScoreboardBowler } from './TVScoreboard';
 
 export type CameraMode = 'CAMERA_WIDE' | 'BROADCAST' | 'BALL_FOLLOW' | 'BATTER_FOCUS' | 'BOWLER_FOCUS' | 'WICKET_FOCUS';
 export type AnimationSpeed = 1 | 1.5 | 2 | 0; // 1 = Normal (1x), 1.5 = Fast (1.5x, Default), 2 = Very Fast (2x), 0 = Skip/Instant
@@ -41,7 +42,28 @@ export interface Visualizer3DProps {
   format: ArenaFormat;
   battingTeamName: string;
   bowlingTeamName: string;
+  battingTeamShortName?: string;
+  teamLogo?: string;
+  teamAccentColor?: string;
   isFreeHit?: boolean;
+  score?: number;
+  wickets?: number;
+  overs?: number;
+  balls?: number;
+  totalOvers?: number;
+  target?: number | null;
+  currentRunRate?: number;
+  requiredRunRate?: number | null;
+  strikerStats?: TVScoreboardBatter;
+  nonStrikerStats?: TVScoreboardBatter;
+  bowlerStats?: TVScoreboardBowler;
+  recentBalls?: string[];
+  partnership?: { runs: number; balls: number };
+  innings?: number;
+  day?: number;
+  session?: number;
+  lead?: number | null;
+  trail?: number | null;
   onAnimationComplete?: () => void;
   className?: string;
   activeBowlingTactic?: BowlingTactic;
@@ -176,7 +198,28 @@ export default function CricketActionVisualizer3D({
   format,
   battingTeamName,
   bowlingTeamName,
+  battingTeamShortName,
+  teamLogo,
+  teamAccentColor,
   isFreeHit = false,
+  score,
+  wickets,
+  overs,
+  balls,
+  totalOvers,
+  target,
+  currentRunRate,
+  requiredRunRate,
+  strikerStats,
+  nonStrikerStats,
+  bowlerStats,
+  recentBalls,
+  partnership,
+  innings,
+  day,
+  session,
+  lead,
+  trail,
   onAnimationComplete,
   className,
   activeBowlingTactic,
@@ -1296,20 +1339,35 @@ export default function CricketActionVisualizer3D({
         )}
       </div>
 
-      {/* ── Broadcast Footer ── */}
-      <div className="w-full px-4 py-2 bg-black/80 backdrop-blur-md border-t border-white/5 flex items-center justify-between text-xs text-white/80 z-30 flex-wrap gap-2">
-        <div className="flex items-center gap-2">
-          <span className="font-bold text-white">{striker?.name || 'Striker'}</span>
-          <span className="text-white/40 text-[10px]">facing</span>
-          <span className="font-bold text-cyan-400">{bowler?.name || 'Bowler'}</span>
-        </div>
-
-        <div className="flex items-center gap-2 text-[10px] font-bold text-white/50 uppercase">
-          <span>Camera: <strong className="text-cyan-300">{cameraMode}</strong></span>
-          <span>•</span>
-          <span>Speed: <strong className="text-amber-300">{speed}x</strong></span>
-        </div>
-      </div>
+      {/* ── Professional TV Broadcast Scoreboard Overlay ── */}
+      <TVScoreboard
+        battingTeamName={battingTeamName}
+        bowlingTeamName={bowlingTeamName}
+        battingTeamShortName={battingTeamShortName}
+        teamLogo={teamLogo}
+        teamAccentColor={teamAccentColor || (isTest ? '#991B1B' : '#2563EB')}
+        score={score ?? (ballCount > 0 ? (lastBall?.runs ? 156 + (lastBall.runs || 0) : 156) : 0)}
+        wickets={wickets ?? (lastBall?.isWicket ? 4 : 3)}
+        overs={overs ?? Math.floor(ballCount / 6)}
+        balls={balls ?? ballCount}
+        totalOvers={totalOvers ?? (format === 'T20' || format === 'IPL' ? 20 : format === 'ODI' ? 50 : 90)}
+        target={target}
+        currentRunRate={currentRunRate}
+        requiredRunRate={requiredRunRate}
+        striker={strikerStats || (striker ? { name: striker.name, runs: 62, balls: 38, fours: 5, sixes: 2, strikeRate: 163.15, isStriker: true } : null)}
+        nonStriker={nonStrikerStats || (nonStriker ? { name: nonStriker.name, runs: 21, balls: 15, fours: 2, sixes: 0, strikeRate: 140.0, isStriker: false } : null)}
+        bowler={bowlerStats || (bowler ? { name: bowler.name, overs: 3.3, runs: 28, wickets: 2, economy: 8.0 } : null)}
+        recentBalls={recentBalls || (lastBall ? [lastBall.isWicket ? 'W' : lastBall.runs === 6 ? '6' : lastBall.runs === 4 ? '4' : `${lastBall.runs}`] : ['1', '0', '4', '0', 'W', '2'])}
+        partnership={partnership}
+        format={format}
+        innings={innings}
+        day={day}
+        session={session}
+        lead={lead}
+        trail={trail}
+        activeEventBadge={resultBanner && (resultBanner.includes('SIX') ? 'SIX' : resultBanner.includes('FOUR') ? 'FOUR' : resultBanner.includes('WICKET') ? 'WICKET' : null)}
+        isFreeHit={isFreeHit}
+      />
     </div>
   );
 }
