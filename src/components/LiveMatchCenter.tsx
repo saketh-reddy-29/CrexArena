@@ -331,6 +331,7 @@ export default function LiveMatchCenter() {
   const secondBattingTeamId = firstBattingTeamId === team1.id ? team2.id : team1.id;
   const myTeamId = selectedFranchiseId || '';
   const maxBalls = selectedFormat === 'ODI' ? 300 : selectedFormat === 'TEST' ? 9999 : 120; // balls per innings
+  const maxOvers = selectedFormat === 'ODI' ? 50 : selectedFormat === 'TEST' ? 90 : 20; // overs per innings
 
   // Use locked Playing XI (11 players). Falls back to franchise.squad for AI/IPL teams.
   const selectedXiPlayers = useMemo(

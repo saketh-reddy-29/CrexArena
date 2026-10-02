@@ -224,4 +224,58 @@ describe('Cricket Action Visualizer Physics & Trajectory Engine', () => {
     expect(stumpedSeq.isStumped).toBe(true);
     expect(stumpedSeq.keeperAnim).toBe('STUMPING');
   });
+
+  it('correctly identifies milestones, emotions, and victory celebrations', () => {
+    // 1. Batter Century Milestone
+    const centurySeq = adaptDeliveryTo3DSequence(
+      { runs: 4, isWicket: false, wicketType: '', ball: '18.4' } as any,
+      'OUTSWING',
+      { strikerScore: 102, strikerName: 'Virat Kohli' }
+    );
+    expect(centurySeq.eventType).toBe('BATTER_CENTURY');
+    expect(centurySeq.priority).toBe('VERY_HIGH');
+    expect(centurySeq.strikerReactionAnim).toBe('HELMET_RAISE');
+    expect(centurySeq.strikerEmotion).toBe('HAPPY');
+    expect(centurySeq.milestone?.title).toContain('CENTURY');
+
+    // 2. Batter Fifty Milestone
+    const fiftySeq = adaptDeliveryTo3DSequence(
+      { runs: 1, isWicket: false, wicketType: '', ball: '12.1' } as any,
+      'OUTSWING',
+      { strikerScore: 50, strikerName: 'Rohit Sharma' }
+    );
+    expect(fiftySeq.eventType).toBe('BATTER_FIFTY');
+    expect(fiftySeq.priority).toBe('HIGH');
+    expect(fiftySeq.strikerReactionAnim).toBe('BAT_RAISE');
+
+    // 3. Bowler 5-Wicket Haul
+    const fiveWktSeq = adaptDeliveryTo3DSequence(
+      { runs: 0, isWicket: true, wicketType: 'Bowled', ball: '16.5' } as any,
+      'YORKER',
+      { bowlerWickets: 5, bowlerName: 'Jasprit Bumrah' }
+    );
+    expect(fiveWktSeq.eventType).toBe('BOWLER_5_WICKET_HAUL');
+    expect(fiveWktSeq.priority).toBe('VERY_HIGH');
+    expect(fiveWktSeq.bowlerEmotion).toBe('CELEBRATING');
+
+    // 4. Match-Winning Six
+    const matchWinSeq = adaptDeliveryTo3DSequence(
+      { runs: 6, isWicket: false, wicketType: '', isSix: true, ball: '19.6' } as any,
+      'BOUNCER',
+      { target: 160, currentScore: 156, strikerName: 'MS Dhoni' }
+    );
+    expect(matchWinSeq.eventType).toBe('MATCH_WINNING_SIX');
+    expect(matchWinSeq.priority).toBe('VERY_HIGH');
+    expect(matchWinSeq.strikerReactionAnim).toBe('MATCH_WIN_CELEBRATION');
+    expect(matchWinSeq.isMatchWinning).toBe(true);
+
+    // 5. Batter Duck
+    const duckSeq = adaptDeliveryTo3DSequence(
+      { runs: 0, isWicket: true, wicketType: 'Caught behind', ball: '0.2' } as any,
+      'OUTSWING',
+      { strikerScore: 0, strikerName: 'Opener' }
+    );
+    expect(duckSeq.eventType).toBe('BATTER_DUCK');
+    expect(duckSeq.strikerReactionAnim).toBe('BATTER_WALK_OFF');
+  });
 });

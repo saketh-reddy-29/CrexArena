@@ -58,7 +58,21 @@ export type PlayerAnimState =
   | 'CELEBRATION'
   | 'BOWLER_CELEBRATION'
   | 'BATTER_DISMISSED'
-  | 'BOWLED_REACTION';
+  | 'BOWLED_REACTION'
+  | 'BAT_RAISE'
+  | 'HELMET_RAISE'
+  | 'FIST_PUMP'
+  | 'CONFIDENT_WALK'
+  | 'BOWLER_APPEAL'
+  | 'FIELDER_APPEAL'
+  | 'HANDS_ON_HEAD'
+  | 'BATTER_WALK_OFF'
+  | 'HEAD_SHAKE'
+  | 'TEAM_HUG'
+  | 'HIGH_FIVE'
+  | 'CAPTAIN_CELEBRATION'
+  | 'MATCH_WIN_CELEBRATION'
+  | 'BAT_TAP';
 
 export interface Player3DConfig {
   id: string;
@@ -791,22 +805,144 @@ export function createCricketCharacter(config: Player3DConfig): CricketPlayer3DI
       leftShoulder.rotation.set(0.6 * (1 - throwP), 0, 0);
     }
 
-    // ── 6. CELEBRATIONS & DISMISSALS ──
+    // ── 6. CELEBRATIONS, REACTION & EMOTION STATES ──
     else if (state === 'CELEBRATION' || state === 'BOWLER_CELEBRATION') {
-      // Fist pump & high five
+      // Bowler jump & ecstatic fist pump
       const celebP = Math.sin(progress * Math.PI * 4);
-      spineGroup.rotation.set(-0.15, 0, 0);
-      rightShoulder.rotation.set(-2.0 + (celebP * 0.3), 0, 0.2);
-      leftShoulder.rotation.set(-1.2, 0, -0.4);
+      spineGroup.rotation.set(-0.2, 0, 0);
+      pelvis.position.y = 0.95 + Math.abs(celebP) * 0.2;
+      rightShoulder.rotation.set(-2.2 + (celebP * 0.4), 0, 0.2);
+      leftShoulder.rotation.set(-1.4, 0, -0.4);
+      rightForearm.rotation.set(0.6, 0, 0);
+      leftForearm.rotation.set(0.6, 0, 0);
     }
 
-    else if (state === 'BOWLED_REACTION' || state === 'BATTER_DISMISSED') {
-      // Head down in disappointment, looking at dislodged bails
+    else if (state === 'BAT_RAISE') {
+      // Batter raises bat aloft to salute 50 / crowd / milestone
+      const raiseP = Math.min(1, progress * 2.0);
+      spineGroup.rotation.set(-0.1, 0, 0);
+      headGroup.rotation.set(-0.15, Math.sin(progress * Math.PI * 2) * 0.25, 0); // nods / looks around
+      pelvis.position.y = 0.95;
+
+      rightShoulder.rotation.set(-2.4 * raiseP, 0.2, 0.1);
+      rightForearm.rotation.set(0.2, 0, 0);
+      if (joints.bat) joints.bat.rotation.set(0.2, 0, 0);
+
+      leftShoulder.rotation.set(0.2, 0, 0); // resting left arm
+    }
+
+    else if (state === 'HELMET_RAISE') {
+      // Century / 150 / 200: Raises bat in right hand, lifts helmet in left hand
+      const raiseP = Math.min(1, progress * 2.0);
+      spineGroup.rotation.set(-0.15, 0, 0);
+      headGroup.rotation.set(-0.2, Math.sin(progress * Math.PI * 2) * 0.3, 0);
+      pelvis.position.y = 0.95;
+
+      rightShoulder.rotation.set(-2.5 * raiseP, 0.3, 0.2);
+      if (joints.bat) joints.bat.rotation.set(0.3, 0, 0);
+
+      leftShoulder.rotation.set(-2.3 * raiseP, -0.3, -0.2); // holding helmet high
+    }
+
+    else if (state === 'FIST_PUMP') {
+      // Passionate power fist pump
+      const pumpP = Math.sin(progress * Math.PI * 5);
+      spineGroup.rotation.set(0.15, 0.1, 0);
+      pelvis.position.y = 0.95;
+
+      rightShoulder.rotation.set(-0.5 + (pumpP * 0.8), 0.3, -0.2);
+      rightForearm.rotation.set(1.2, 0, 0);
+      leftShoulder.rotation.set(0.3, -0.2, 0.1);
+    }
+
+    else if (state === 'CONFIDENT_WALK') {
+      // Batter smiling, confident stride tapping the pitch
+      const walkCycle = progress * Math.PI * 6;
+      spineGroup.rotation.set(0.05, 0, 0);
+      pelvis.position.y = 0.95 + Math.abs(Math.sin(walkCycle)) * 0.05;
+
+      leftHip.rotation.set(Math.sin(walkCycle) * 0.35, 0, 0);
+      rightHip.rotation.set(-Math.sin(walkCycle) * 0.35, 0, 0);
+      rightShoulder.rotation.set(0.2, 0, 0);
+      leftShoulder.rotation.set(0.2, 0, 0);
+    }
+
+    else if (state === 'BOWLER_APPEAL' || state === 'FIELDER_APPEAL') {
+      // Explosive appeal: Both arms thrust into air, shouting "HOWZAT"
+      const appealP = Math.min(1, progress * 2.5);
+      spineGroup.rotation.set(-0.25 * appealP, 0, 0);
+      headGroup.rotation.set(-0.4 * appealP, 0, 0);
+      pelvis.position.y = 0.95 + Math.sin(progress * Math.PI * 4) * 0.1;
+
+      rightShoulder.rotation.set(-2.6 * appealP, 0.2, 0.2);
+      leftShoulder.rotation.set(-2.6 * appealP, -0.2, -0.2);
+      rightForearm.rotation.set(0.1, 0, 0);
+      leftForearm.rotation.set(0.1, 0, 0);
+    }
+
+    else if (state === 'HANDS_ON_HEAD') {
+      // Dropped catch or missed opportunity: Both hands placed on head in shock
+      spineGroup.rotation.set(0.15, 0, 0);
+      headGroup.rotation.set(0.3, 0, 0);
+      pelvis.position.y = 0.92;
+
+      rightShoulder.rotation.set(-2.1, 0.6, -0.4);
+      leftShoulder.rotation.set(-2.1, -0.6, 0.4);
+      rightForearm.rotation.set(1.5, 0, 0);
+      leftForearm.rotation.set(1.5, 0, 0);
+    }
+
+    else if (state === 'BATTER_WALK_OFF' || state === 'BATTER_DISMISSED' || state === 'BOWLED_REACTION') {
+      // Head down, disconsolate slow walk off the pitch
+      const walkCycle = progress * Math.PI * 4;
       spineGroup.rotation.set(0.35, 0, 0);
-      headGroup.rotation.set(0.4, 0, 0);
-      rightShoulder.rotation.set(0.3, 0, 0);
-      leftShoulder.rotation.set(0.3, 0, 0);
-      if (joints.bat) joints.bat.rotation.set(-0.2, 0, 0);
+      headGroup.rotation.set(0.45, 0, 0);
+      pelvis.position.y = 0.92 + Math.abs(Math.sin(walkCycle)) * 0.04;
+
+      leftHip.rotation.set(Math.sin(walkCycle) * 0.25, 0, 0);
+      rightHip.rotation.set(-Math.sin(walkCycle) * 0.25, 0, 0);
+
+      rightShoulder.rotation.set(0.4, 0, 0);
+      leftShoulder.rotation.set(0.4, 0, 0);
+      if (joints.bat) joints.bat.rotation.set(0.2, 0, 0);
+    }
+
+    else if (state === 'HEAD_SHAKE') {
+      // Batter shaking head in disbelief looking at edge / replay
+      spineGroup.rotation.set(0.2, 0, 0);
+      headGroup.rotation.set(0.1, Math.sin(progress * Math.PI * 6) * 0.4, 0);
+      rightShoulder.rotation.set(0.2, 0, 0);
+      leftShoulder.rotation.set(0.2, 0, 0);
+    }
+
+    else if (state === 'TEAM_HUG' || state === 'HIGH_FIVE') {
+      // Teammates leaping and clapping hands
+      const hugP = Math.sin(progress * Math.PI * 3);
+      spineGroup.rotation.set(-0.1, 0, 0);
+      pelvis.position.y = 0.95 + Math.abs(hugP) * 0.15;
+
+      rightShoulder.rotation.set(-1.8, 0.4, 0.3);
+      leftShoulder.rotation.set(-1.8, -0.4, -0.3);
+    }
+
+    else if (state === 'CAPTAIN_CELEBRATION' || state === 'MATCH_WIN_CELEBRATION') {
+      // Epic match victory celebration: Arms wide in glory
+      spineGroup.rotation.set(-0.3, 0, 0);
+      headGroup.rotation.set(-0.35, 0, 0);
+      pelvis.position.y = 1.05 + Math.sin(progress * Math.PI * 3) * 0.15;
+
+      rightShoulder.rotation.set(-1.5, 0, 1.2);
+      leftShoulder.rotation.set(-1.5, 0, -1.2);
+      rightForearm.rotation.set(0.2, 0, 0);
+      leftForearm.rotation.set(0.2, 0, 0);
+    }
+
+    else if (state === 'BAT_TAP') {
+      // Batters meet mid-pitch and tap bats together
+      spineGroup.rotation.set(0.15, 0.2, 0);
+      pelvis.position.y = 0.95;
+      rightShoulder.rotation.set(0.6, 0.3, 0);
+      if (joints.bat) joints.bat.rotation.set(0.8, 0.3, 0);
     }
   };
 

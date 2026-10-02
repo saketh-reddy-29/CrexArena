@@ -206,99 +206,103 @@ export default function TVScoreboard({
         </div>
       </div>
 
-      {/* ── Main Broadcast Strip: Batters (Left) & Bowler + Over Log (Right) ── */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-2 px-3 py-1.5 text-[10px]">
-        {/* Left: Active Batters */}
-        <div className="flex items-center justify-between sm:justify-start sm:gap-6 bg-white/[0.02] sm:bg-transparent rounded-lg p-1 sm:p-0">
-          {/* Striker */}
-          <div className="flex items-center gap-1.5 min-w-[130px]">
-            <span className="text-amber-400 font-black text-xs animate-pulse">▶</span>
-            <div className="flex flex-col">
-              <span className="font-bold text-white truncate max-w-[95px]">{formatName(striker?.name)}</span>
-              <div className="flex items-center gap-1 text-[9px] text-white/60 font-mono">
-                <span className="text-amber-300 font-black">{striker?.runs ?? 0}*</span>
-                <span>({striker?.balls ?? 0})</span>
-                {typeof striker?.strikeRate === 'number' && (
-                  <span className="hidden sm:inline text-white/40">SR {(striker.strikeRate).toFixed(1)}</span>
-                )}
-              </div>
+      {/* ── Main Broadcast Strip: Clean 2-Column Split (Batters on Left, Bowler & Over on Right) ── */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1.5 px-3 py-1.5 text-[10px] bg-black/40">
+        {/* Left Column: Striker & Non-Striker Rows */}
+        <div className="flex flex-col gap-1 min-w-0">
+          {/* Striker Row */}
+          <div className="flex items-center justify-between gap-2 min-w-0">
+            <div className="flex items-center gap-1.5 min-w-0 truncate">
+              <span className="text-amber-400 font-black text-[10px] shrink-0">▶</span>
+              <span className="font-bold text-white truncate max-w-[120px]">{formatName(striker?.name)}</span>
+            </div>
+            <div className="flex items-center gap-2 shrink-0 font-mono text-[9px]">
+              <span className="text-amber-300 font-black text-[10px]">{striker?.runs ?? 0}*</span>
+              <span className="text-white/60">({striker?.balls ?? 0}b)</span>
+              {typeof striker?.strikeRate === 'number' && (
+                <span className="text-white/40">SR {(striker.strikeRate).toFixed(1)}</span>
+              )}
             </div>
           </div>
 
-          {/* Non-Striker */}
-          <div className="flex items-center gap-1.5 min-w-[120px] opacity-85">
-            <span className="text-white/30 text-xs">•</span>
-            <div className="flex flex-col">
-              <span className="font-bold text-white/90 truncate max-w-[95px]">{formatName(nonStriker?.name)}</span>
-              <div className="flex items-center gap-1 text-[9px] text-white/60 font-mono">
-                <span className="text-white font-bold">{nonStriker?.runs ?? 0}*</span>
-                <span>({nonStriker?.balls ?? 0})</span>
-                {typeof nonStriker?.strikeRate === 'number' && (
-                  <span className="hidden sm:inline text-white/40">SR {(nonStriker.strikeRate).toFixed(1)}</span>
-                )}
-              </div>
+          {/* Non-Striker Row */}
+          <div className="flex items-center justify-between gap-2 min-w-0 opacity-85">
+            <div className="flex items-center gap-1.5 min-w-0 truncate">
+              <span className="text-white/30 text-[10px] shrink-0">•</span>
+              <span className="font-semibold text-white/90 truncate max-w-[120px]">{formatName(nonStriker?.name)}</span>
+            </div>
+            <div className="flex items-center gap-2 shrink-0 font-mono text-[9px]">
+              <span className="text-white font-bold text-[10px]">{nonStriker?.runs ?? 0}*</span>
+              <span className="text-white/60">({nonStriker?.balls ?? 0}b)</span>
+              {typeof nonStriker?.strikeRate === 'number' && (
+                <span className="text-white/40">SR {(nonStriker.strikeRate).toFixed(1)}</span>
+              )}
             </div>
           </div>
-
-          {partnership && partnership.runs > 0 && (
-            <div className="hidden lg:flex flex-col text-[9px] text-white/50 border-l border-white/10 pl-3">
-              <span>P'ship</span>
-              <span className="text-white font-bold">{partnership.runs} ({partnership.balls}b)</span>
-            </div>
-          )}
         </div>
 
-        {/* Right: Current Bowler & Recent 6 Balls */}
-        <div className="flex items-center justify-between sm:justify-end gap-3 sm:gap-4">
-          {/* Bowler Figures */}
-          <div className="flex items-center gap-1.5">
-            <span className="text-cyan-400 text-xs">🎯</span>
-            <div className="flex flex-col">
-              <span className="font-bold text-cyan-300 truncate max-w-[100px]">{formatName(bowler?.name)}</span>
-              <div className="flex items-center gap-1 text-[9px] text-white/60 font-mono">
-                <span className="text-white font-bold">{bowler?.wickets ?? 0}-{bowler?.runs ?? 0}</span>
-                <span>({typeof bowler?.overs === 'number' ? bowler.overs : '0.0'})</span>
-                {typeof bowler?.economy === 'number' && (
-                  <span className="hidden sm:inline text-white/40">Econ {bowler.economy.toFixed(2)}</span>
-                )}
-              </div>
+        {/* Right Column: Bowler Figures & This Over Tracker */}
+        <div className="flex flex-col gap-1 min-w-0 sm:border-l sm:border-white/10 sm:pl-3">
+          {/* Bowler Figures Row */}
+          <div className="flex items-center justify-between gap-2 min-w-0">
+            <div className="flex items-center gap-1.5 min-w-0 truncate">
+              <span className="text-cyan-400 text-[10px] shrink-0">🎯</span>
+              <span className="font-bold text-cyan-300 truncate max-w-[120px]">{formatName(bowler?.name)}</span>
+            </div>
+            <div className="flex items-center gap-2 shrink-0 font-mono text-[9px]">
+              <span className="text-white font-black">{bowler?.wickets ?? 0}-{bowler?.runs ?? 0}</span>
+              <span className="text-white/60">({typeof bowler?.overs === 'number' ? bowler.overs : '0.0'})</span>
+              {typeof bowler?.economy === 'number' && (
+                <span className="text-white/40">Econ {bowler.economy.toFixed(2)}</span>
+              )}
             </div>
           </div>
 
-          {/* Recent 6 Balls Over Tracker */}
-          <div className="flex items-center gap-1 pl-2 border-l border-white/10">
-            <span className="hidden sm:inline text-[9px] uppercase font-bold text-white/40 mr-0.5">Over:</span>
-            {recentBalls && recentBalls.length > 0 ? (
-              recentBalls.slice(-6).map((ball, idx) => {
-                const bStr = String(ball).toUpperCase();
-                const isWkt = bStr.includes('W');
-                const isSix = bStr === '6';
-                const isFour = bStr === '4';
-                const isDot = bStr === '0' || bStr === '·' || bStr === '.';
-
-                return (
-                  <span
-                    key={idx}
-                    className={cn(
-                      "w-5 h-5 rounded-full flex items-center justify-center font-black text-[9px] transition-all shadow-sm",
-                      isWkt && "bg-red-600 text-white animate-bounce",
-                      isSix && "bg-purple-600 text-white font-black",
-                      isFour && "bg-blue-600 text-white font-black",
-                      isDot && "bg-zinc-800 text-zinc-400",
-                      !isWkt && !isSix && !isFour && !isDot && "bg-white/20 text-white"
-                    )}
-                  >
-                    {bStr}
-                  </span>
-                );
-              })
+          {/* This Over & Partnership Row */}
+          <div className="flex items-center justify-between gap-2 min-w-0 pt-0.5">
+            {partnership && partnership.runs > 0 ? (
+              <div className="flex items-center gap-1 text-[9px] text-white/50 truncate shrink-0">
+                <span>P'ship:</span>
+                <span className="text-white font-bold">{partnership.runs} ({partnership.balls}b)</span>
+              </div>
             ) : (
-              [0, 1, 2, 3, 4, 5].map((i) => (
-                <span key={i} className="w-5 h-5 rounded-full bg-white/5 border border-white/5 flex items-center justify-center text-[9px] text-white/20 font-bold">
-                  ·
-                </span>
-              ))
+              <span className="text-[9px] text-white/40 uppercase font-bold shrink-0">This Over</span>
             )}
+
+            {/* Over Ball Badges */}
+            <div className="flex items-center gap-1 shrink-0">
+              {recentBalls && recentBalls.length > 0 ? (
+                recentBalls.slice(-6).map((ball, idx) => {
+                  const bStr = String(ball).toUpperCase();
+                  const isWkt = bStr.includes('W');
+                  const isSix = bStr === '6';
+                  const isFour = bStr === '4';
+                  const isDot = bStr === '0' || bStr === '·' || bStr === '.';
+
+                  return (
+                    <span
+                      key={idx}
+                      className={cn(
+                        "w-4 h-4 rounded-full flex items-center justify-center font-black text-[8px] transition-all shadow-sm",
+                        isWkt && "bg-red-600 text-white animate-bounce",
+                        isSix && "bg-purple-600 text-white font-black",
+                        isFour && "bg-blue-600 text-white font-black",
+                        isDot && "bg-zinc-800 text-zinc-400",
+                        !isWkt && !isSix && !isFour && !isDot && "bg-white/20 text-white"
+                      )}
+                    >
+                      {bStr}
+                    </span>
+                  );
+                })
+              ) : (
+                [0, 1, 2, 3, 4, 5].map((i) => (
+                  <span key={i} className="w-4 h-4 rounded-full bg-white/5 border border-white/5 flex items-center justify-center text-[8px] text-white/20 font-bold">
+                    ·
+                  </span>
+                ))
+              )}
+            </div>
           </div>
         </div>
       </div>

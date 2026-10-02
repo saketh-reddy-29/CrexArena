@@ -20,7 +20,9 @@ import {
   StepForward,
   Compass,
   Maximize2,
-  AlertTriangle
+  AlertTriangle,
+  Trophy,
+  Target
 } from 'lucide-react';
 import { BallOutcome } from '../types/match';
 import { Player } from '../types/common';
@@ -30,6 +32,9 @@ import { BOWLING_TACTICS_CONFIG, BowlingTactic, FieldPreset } from './CricketAct
 import { createCricketCharacter, CricketPlayer3DInstance, PlayerAnimState } from './CricketPlayer3D';
 import { adaptDeliveryTo3DSequence, Action3DSequence } from './Delivery3DActionAdapter';
 import TVScoreboard, { TVScoreboardBatter, TVScoreboardBowler } from './TVScoreboard';
+import { playEventSound } from '../lib/cricketAudioEngine';
+import { BallCameraController, BallCameraState } from './BallCameraController';
+import { fieldStrategyEngine } from '../engine/strategy/FieldStrategyEngine';
 
 export type CameraMode = 'CAMERA_WIDE' | 'BROADCAST' | 'BALL_FOLLOW' | 'BATTER_FOCUS' | 'BOWLER_FOCUS' | 'WICKET_FOCUS';
 export type AnimationSpeed = 1 | 1.5 | 2 | 0; // 1 = Normal (1x), 1.5 = Fast (1.5x, Default), 2 = Very Fast (2x), 0 = Skip/Instant
@@ -253,8 +258,12 @@ export default function CricketActionVisualizer3D({
   const bailsRef = useRef<THREE.Mesh[]>([]);
   const stumpsRef = useRef<THREE.Mesh[]>([]);
 
+  // Ball-Locked Broadcast Camera Controller
+  const ballCameraControllerRef = useRef<BallCameraController>(new BallCameraController());
+  const [cameraStateName, setCameraStateName] = useState<string>('BROADCAST');
+
   // Visualizer UI Controls (Default 1.5x = Fast ~2.0-2.5s)
-  const [cameraMode, setCameraMode] = useState<CameraMode>('CAMERA_WIDE');
+  const [cameraMode, setCameraMode] = useState<CameraMode>('BALL_FOLLOW');
   const [speed, setSpeed] = useState<AnimationSpeed>(1.5);
   const [isPaused, setIsPaused] = useState<boolean>(false);
   const [debugMode, setDebugMode] = useState<boolean>(false);
@@ -324,8 +333,29 @@ export default function CricketActionVisualizer3D({
       keeperCharRef.current.updateAnimation('KEEPER_CROUCH', 0);
     }
 
-    fieldersListRef.current.forEach((f) => {
-      f.char.group.position.set(f.basePos.x, f.basePos.y, f.basePos.z);
+    // Dynamic Field Layout based on match phase, format, overs and partnership
+    const currentOvers = overs || 0;
+    const currentWickets = wickets || 0;
+    const currentCRR = currentRunRate || 0;
+    const currentRRR = requiredRunRate || null;
+    const pRuns = partnership?.runs || 0;
+
+    const dynamicField = fieldStrategyEngine.evaluate(
+      format,
+      currentOvers,
+      currentWickets,
+      currentCRR,
+      currentRRR,
+      isSpinner,
+      'NONE',
+      pRuns
+    );
+
+    fieldersListRef.current.forEach((f, idx) => {
+      const pos = dynamicField.positions[idx] || f.basePos;
+      f.name = pos.name;
+      f.basePos = { x: pos.x, y: 0.04, z: pos.z };
+      f.char.group.position.set(pos.x, 0.04, pos.z);
       f.char.group.lookAt(0, 0.04, 9.5);
       f.char.updateAnimation('FIELD_READY', 0);
     });
@@ -353,7 +383,7 @@ export default function CricketActionVisualizer3D({
       keeperState: 'KEEPER_CROUCH',
       targetFielder: null,
     });
-  }, [selectedTactic]);
+  }, [selectedTactic, format, overs, wickets, currentRunRate, requiredRunRate, partnership]);
 
   /**
    * 1. Initialize High-Performance Three.js 3D Cricket World (ONCE on mount)
@@ -381,6 +411,10 @@ export default function CricketActionVisualizer3D({
       setWebglError('WebGL is not available in your browser.');
       return;
     }
+
+    renderer.domElement.style.width = '100%';
+    renderer.domElement.style.height = '100%';
+    renderer.domElement.style.display = 'block';
 
     // Scene
     const scene = new THREE.Scene();
@@ -727,6 +761,25 @@ export default function CricketActionVisualizer3D({
     }
   }, [format, ballColorHex, battingAccentHex, bowlingAccentHex]);
 
+  // Procedural Audio Trigger Tracker (ensures sound fires once per phase)
+  const audioTriggersRef = useRef<{
+    bounce: boolean;
+    contact: boolean;
+    stumps: boolean;
+    appeal: boolean;
+    catch: boolean;
+    boundary: boolean;
+    emotion: boolean;
+  }>({
+    bounce: false,
+    contact: false,
+    stumps: false,
+    appeal: false,
+    catch: false,
+    boundary: false,
+    emotion: false,
+  });
+
   /**
    * 2. Full 3D Physical Delivery & Skeletal Animation Synchronization Engine
    */
@@ -758,7 +811,7 @@ export default function CricketActionVisualizer3D({
       });
     }
 
-    // ── Phase 1: Bowler Run-Up (0.00 - 0.18) [~0.35s]
+    // ── Phase 1: Bowler Run-Up (0.00 - phases.runupEnd) ──
     if (p < phases.runupEnd) {
       setCurrentActionState('BOWLER_RUNUP');
       const pRun = p / phases.runupEnd;
@@ -789,7 +842,7 @@ export default function CricketActionVisualizer3D({
       });
     }
 
-    // ── Phase 2: Delivery Stride & Windmill to Bounce (0.18 - 0.38) [~0.45s]
+    // ── Phase 2: Delivery Stride & Windmill to Bounce (phases.runupEnd - phases.bounceEnd) ──
     else if (p < phases.bounceEnd) {
       setCurrentActionState('BALL_FLIGHT');
       const pFlight = (p - phases.runupEnd) / (phases.bounceEnd - phases.runupEnd);
@@ -830,9 +883,14 @@ export default function CricketActionVisualizer3D({
       });
     }
 
-    // ── Phase 3: Bounce to Bat Contact (0.38 - 0.48) [~0.20s]
+    // ── Phase 3: Bounce to Bat Contact (phases.bounceEnd - phases.contactEnd) ──
     else if (p < phases.contactEnd) {
       setCurrentActionState('BOUNCE');
+      if (!audioTriggersRef.current.bounce) {
+        audioTriggersRef.current.bounce = true;
+        playEventSound('BALL_BOUNCE', 0.5);
+      }
+
       const pBounce = (p - phases.bounceEnd) / (phases.contactEnd - phases.bounceEnd);
       const startZ = ballTrajectory.bouncePos.z;
       const endZ = 9.5;
@@ -857,9 +915,18 @@ export default function CricketActionVisualizer3D({
       });
     }
 
-    // ── Phase 4: Bat Strike, Ball Flight, Running, & Fielding (0.48 - 0.80) [~0.75s]
+    // ── Phase 4: Bat Strike, Ball Flight, Running, & Fielding (phases.contactEnd - phases.fieldingEnd) ──
     else if (p < phases.fieldingEnd) {
       setCurrentActionState('SHOT_TRAVEL');
+      if (!audioTriggersRef.current.contact && !seq.isLeave && !seq.isLBW) {
+        audioTriggersRef.current.contact = true;
+        playEventSound(seq.isSix ? 'BAT_SIX' : 'BAT_HIT', 0.8);
+      }
+      if (!audioTriggersRef.current.appeal && (seq.isLBW || (seq.isCaught && seq.isEdge))) {
+        audioTriggersRef.current.appeal = true;
+        playEventSound('APPEAL', 0.6);
+      }
+
       const pShot = (p - phases.contactEnd) / (phases.fieldingEnd - phases.contactEnd);
       const startX = 0;
       const startZ = 9.5;
@@ -915,7 +982,13 @@ export default function CricketActionVisualizer3D({
 
         if (seq.isCatch) {
           if (pShot < 0.65) tf.char.updateAnimation('RUN_TO_BALL', pShot);
-          else tf.char.updateAnimation('HIGH_CATCH', (pShot - 0.65) / 0.35);
+          else {
+            tf.char.updateAnimation('HIGH_CATCH', (pShot - 0.65) / 0.35);
+            if (!audioTriggersRef.current.catch) {
+              audioTriggersRef.current.catch = true;
+              playEventSound('CROWD_WICKET', 0.8);
+            }
+          }
         } else {
           if (pShot < 0.65) tf.char.updateAnimation('RUN_TO_BALL', pShot);
           else if (pShot < 0.85) tf.char.updateAnimation('GROUND_FIELD', (pShot - 0.65) / 0.2);
@@ -934,6 +1007,11 @@ export default function CricketActionVisualizer3D({
       }
 
       if (seq.isBowled && pShot > 0.05) {
+        if (!audioTriggersRef.current.stumps) {
+          audioTriggersRef.current.stumps = true;
+          playEventSound('STUMPS_SHATTER', 0.9);
+          playEventSound('CROWD_WICKET', 0.8);
+        }
         bailsRef.current.forEach((bail, i) => {
           bail.position.y += 0.08;
           bail.position.x += i === 0 ? -0.05 : 0.05;
@@ -946,6 +1024,11 @@ export default function CricketActionVisualizer3D({
         if (strikerChar) strikerChar.updateAnimation('BOWLED_REACTION', pShot);
       }
 
+      if (!audioTriggersRef.current.boundary && (seq.isSix || seq.isFour) && pShot > 0.7) {
+        audioTriggersRef.current.boundary = true;
+        playEventSound(seq.isSix ? 'CROWD_CHEER_SIX' : 'CROWD_CHEER_FOUR', 0.8);
+      }
+
       setPlayerDebugStates({
         bowlerState: seq.isBowled ? 'BOWLER_CELEBRATION' : 'IDLE',
         strikerState: seq.runs > 0 ? 'RUN_BETWEEN_WICKETS' : seq.batterAnim,
@@ -954,33 +1037,94 @@ export default function CricketActionVisualizer3D({
       });
     }
 
-    // ── Phase 5: Final Result & Banner Trigger (0.80 - 1.00) [~0.30s]
+    // ── Phase 5: Emotion, Celebration & Reactions (phases.fieldingEnd - phases.emotionEnd) ──
+    else if (p < phases.emotionEnd) {
+      setCurrentActionState('EMOTION_REACTION');
+      const pEmotion = (p - phases.fieldingEnd) / (phases.emotionEnd - phases.fieldingEnd);
+
+      if (!audioTriggersRef.current.emotion && (seq.milestone || seq.isMatchWinning)) {
+        audioTriggersRef.current.emotion = true;
+        playEventSound(seq.isMatchWinning ? 'VICTORY_ROAR' : 'MILESTONE_APPLAUSE', 0.9);
+      }
+
+      // Striker Reaction (Bat Raise on 50/100, Fist pump on 6, Disappointment walk on wicket)
+      if (strikerChar) {
+        strikerChar.updateAnimation(seq.strikerReactionAnim, pEmotion);
+      }
+
+      // Non-Striker Reaction (Bat tap, applause, high five)
+      if (nonStrikerChar) {
+        nonStrikerChar.updateAnimation(seq.nonStrikerReactionAnim, pEmotion);
+      }
+
+      // Bowler Reaction (Ecstatic jump, appeal, hands on head)
+      if (bowlerChar) {
+        bowlerChar.updateAnimation(seq.bowlerReactionAnim, pEmotion);
+      }
+
+      // Keeper Reaction
+      if (keeperChar) {
+        keeperChar.updateAnimation(seq.keeperReactionAnim, pEmotion);
+      }
+
+      // Nearby Fielders Celebrate
+      fieldersListRef.current.forEach((f, idx) => {
+        if (seq.isWicket || seq.isMatchWinning) {
+          if (idx < 3) {
+            f.char.updateAnimation(seq.fielderReactionAnim, pEmotion);
+          } else {
+            f.char.updateAnimation('FIELD_READY', 0);
+          }
+        } else {
+          f.char.updateAnimation('FIELD_READY', 0);
+        }
+      });
+
+      setPlayerDebugStates({
+        bowlerState: `${seq.bowlerReactionAnim} (${seq.bowlerEmotion})`,
+        strikerState: `${seq.strikerReactionAnim} (${seq.strikerEmotion})`,
+        keeperState: `${seq.keeperReactionAnim} (${seq.keeperEmotion})`,
+        targetFielder: targetFielderItem ? { name: (targetFielderItem as FielderItem).name, state: seq.fielderReactionAnim } : null,
+      });
+    }
+
+    // ── Phase 6: TV Result Presentation & Score Sync (phases.emotionEnd - 1.00) ──
     else {
       setCurrentActionState('RESULT');
       setResultBanner(seq.resultLabel);
     }
 
-    // ── Fast Snappy Camera Lerp (0.12 lerp speed) ──
+    // ── Ball-Locked Camera Director ──
     if (camera && ballMesh && !isUserOrbitingRef.current) {
-      if (cameraMode === 'CAMERA_WIDE') {
+      if (cameraMode === 'BALL_FOLLOW' || cameraMode === 'BROADCAST') {
+        const targetFielderPos = targetFielderItem?.basePos
+          ? new THREE.Vector3(targetFielderItem.basePos.x, targetFielderItem.basePos.y, targetFielderItem.basePos.z)
+          : null;
+        const camResult = ballCameraControllerRef.current.update(
+          camera,
+          p,
+          seq,
+          ballMesh.position,
+          targetFielderPos,
+          0.016
+        );
+        setCameraStateName(camResult.state);
+      } else if (cameraMode === 'CAMERA_WIDE') {
         camera.position.lerp(new THREE.Vector3(0, 32, 42), 0.12);
         camera.lookAt(0, 0, 0);
-      } else if (cameraMode === 'BROADCAST') {
-        camera.position.lerp(new THREE.Vector3(0, 14, 28), 0.12);
-        camera.lookAt(0, 1, 0);
-      } else if (cameraMode === 'BALL_FOLLOW') {
-        const desiredCamPos = new THREE.Vector3(ballMesh.position.x * 0.6, 7 + ballMesh.position.y * 0.4, ballMesh.position.z + 12);
-        camera.position.lerp(desiredCamPos, 0.14);
-        camera.lookAt(ballMesh.position.x, ballMesh.position.y, ballMesh.position.z);
+        setCameraStateName('WIDE');
       } else if (cameraMode === 'BATTER_FOCUS') {
         camera.position.lerp(new THREE.Vector3(-2.5, 3.0, 4.0), 0.12);
         camera.lookAt(0, 1.2, 9.4);
+        setCameraStateName('BATTER');
       } else if (cameraMode === 'BOWLER_FOCUS') {
         camera.position.lerp(new THREE.Vector3(2.5, 3.0, -18.0), 0.12);
         camera.lookAt(0, 1.2, -10.0);
+        setCameraStateName('BOWLER');
       } else if (cameraMode === 'WICKET_FOCUS') {
         camera.position.lerp(new THREE.Vector3(0, 2.0, 13.5), 0.12);
         camera.lookAt(0, 0.7, 10.1);
+        setCameraStateName('STUMPS');
       }
     }
   }, [selectedTactic, tacticConfig.seamAngle, cameraMode]);
@@ -997,7 +1141,29 @@ export default function CricketActionVisualizer3D({
       return;
     }
 
-    const seq: Action3DSequence = adaptDeliveryTo3DSequence(lastBall, selectedTactic);
+    // Reset audio flags for this delivery
+    audioTriggersRef.current = {
+      bounce: false,
+      contact: false,
+      stumps: false,
+      appeal: false,
+      catch: false,
+      boundary: false,
+      emotion: false,
+    };
+
+    const seq: Action3DSequence = adaptDeliveryTo3DSequence(lastBall, selectedTactic, {
+      strikerScore: strikerStats?.runs,
+      strikerName: striker?.name,
+      bowlerWickets: bowlerStats?.wickets,
+      bowlerName: bowler?.name,
+      partnershipRuns: partnership?.runs,
+      partnershipBalls: partnership?.balls,
+      target,
+      currentScore: score,
+      ballsRemaining: totalOvers ? Math.max(0, totalOvers * 6 - (balls || 0)) : undefined,
+      isTestFormat: isTest,
+    });
     currentSeqRef.current = seq;
 
     isSimulatingRef.current = true;
@@ -1006,9 +1172,10 @@ export default function CricketActionVisualizer3D({
     setResultBanner(null);
 
     resetAllPlayersToReady();
+    ballCameraControllerRef.current.reset(cameraRef.current || undefined);
 
-    const speedMultiplier = speed === 1 ? 1.0 : speed === 1.5 ? 0.68 : 0.45;
-    const baseDuration = (seq.isSix ? 2800 : seq.isFour ? 2600 : seq.runs > 0 ? 2700 : seq.isCaught ? 3000 : 2200) * speedMultiplier;
+    const speedMultiplier = speed === 1 ? 1.0 : speed === 1.5 ? 0.72 : 0.48;
+    const baseDuration = seq.baseDurationMs * speedMultiplier;
 
     let startTime: number | null = null;
     let pausedTimeOffset = 0;
@@ -1044,7 +1211,7 @@ export default function CricketActionVisualizer3D({
     return () => {
       if (animFrameIdRef.current) cancelAnimationFrame(animFrameIdRef.current);
     };
-  }, [lastBall, speed, selectedTactic, resetAllPlayersToReady, executeDeliveryFrame, onAnimationComplete]);
+  }, [lastBall, speed, selectedTactic, strikerStats, striker, bowlerStats, bowler, partnership, target, score, totalOvers, balls, isTest, resetAllPlayersToReady, executeDeliveryFrame, onAnimationComplete]);
 
   // Step action (+5% advance when paused)
   const handleStepAction = () => {
@@ -1265,6 +1432,12 @@ export default function CricketActionVisualizer3D({
           <div ref={mountRef} className="w-full h-full cursor-grab active:cursor-grabbing" />
         )}
 
+        {/* Live Camera State Indicator */}
+        <div className="absolute top-2.5 left-3 z-30 flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-black/70 backdrop-blur-md border border-white/10 text-[9px] font-bold text-white/80 shadow-md">
+          <Camera className="w-3 h-3 text-cyan-400" />
+          <span className="text-cyan-300 font-mono font-black tracking-wider uppercase">{cameraStateName}</span>
+        </div>
+
         {/* ── On-Screen Interactive Controls ── */}
         <div className="absolute bottom-2 left-3 z-30 flex items-center gap-1 bg-black/70 backdrop-blur-md p-1 rounded-xl border border-white/10">
           <button
@@ -1302,24 +1475,52 @@ export default function CricketActionVisualizer3D({
           </button>
         </div>
 
-        {/* ── Action Result Banner (Appears only after action completes) ── */}
+        {/* ── TV Broadcast Action & Milestone Graphics Overlay (Appears during result/milestone phase) ── */}
         <AnimatePresence>
           {resultBanner && (
             <motion.div
-              initial={{ scale: 0.5, opacity: 0, y: 15 }}
+              initial={{ scale: 0.6, opacity: 0, y: 20 }}
               animate={{ scale: 1, opacity: 1, y: 0 }}
-              exit={{ scale: 0.8, opacity: 0 }}
-              className={cn(
-                "absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 px-7 py-3 rounded-2xl backdrop-blur-xl border font-black text-2xl tracking-wider shadow-2xl z-40 text-center pointer-events-none flex items-center gap-2",
-                resultBanner.includes('SIX') && "bg-purple-950/85 border-purple-400 text-purple-200 shadow-purple-500/40 text-3xl animate-pulse",
-                resultBanner.includes('FOUR') && "bg-blue-950/85 border-blue-400 text-blue-200 shadow-blue-500/40 text-3xl",
-                resultBanner.includes('WICKET') && "bg-red-950/90 border-red-500 text-red-100 shadow-red-500/50 text-3xl",
-                resultBanner.includes('RUN') && "bg-zinc-900/85 border-white/20 text-white text-xl",
-                resultBanner.includes('DOT') && "bg-black/85 border-white/10 text-white/70 text-base"
-              )}
+              exit={{ scale: 0.85, opacity: 0, y: -10 }}
+              transition={{ type: 'spring', damping: 20, stiffness: 300 }}
+              className="absolute top-1/3 left-1/2 -translate-x-1/2 -translate-y-1/2 z-40 text-center pointer-events-none"
             >
-              {resultBanner.includes('SIX') && <Sparkles className="w-5 h-5 text-amber-300 animate-spin" />}
-              {resultBanner}
+              {/* Milestone Card (e.g. CENTURY, FIFTY, 5-WKT, MATCH WIN) */}
+              {currentSeqRef.current?.milestone ? (
+                <div className="flex flex-col items-center bg-black/90 backdrop-blur-2xl px-6 py-4 rounded-2xl border-2 border-amber-400 shadow-[0_0_40px_rgba(251,191,36,0.35)] min-w-[240px]">
+                  <div className="px-2.5 py-0.5 rounded-full bg-amber-400 text-black font-black text-[9px] uppercase tracking-widest mb-1 shadow-sm">
+                    {currentSeqRef.current.milestone.badge || 'MILESTONE'}
+                  </div>
+                  <div className="font-black text-2xl tracking-wider text-amber-300 drop-shadow-md flex items-center gap-1.5">
+                    <Trophy className="w-5 h-5 text-amber-400" />
+                    {currentSeqRef.current.milestone.title}
+                  </div>
+                  <div className="text-xs font-bold text-white/90 mt-0.5">
+                    {currentSeqRef.current.milestone.subtitle}
+                  </div>
+                  {currentSeqRef.current.milestone.statValue && (
+                    <div className="mt-1 text-sm font-black font-mono text-cyan-300 bg-white/10 px-3 py-0.5 rounded-lg">
+                      {currentSeqRef.current.milestone.statValue}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                /* Standard Event Banner (SIX, FOUR, WICKET, RUNS) */
+                <div
+                  className={cn(
+                    "px-7 py-3 rounded-2xl backdrop-blur-xl border font-black text-2xl tracking-wider shadow-2xl flex items-center justify-center gap-2",
+                    resultBanner.includes('SIX') && "bg-purple-950/90 border-purple-400 text-purple-200 shadow-purple-500/50 text-3xl animate-pulse",
+                    resultBanner.includes('FOUR') && "bg-blue-950/90 border-blue-400 text-blue-200 shadow-blue-500/50 text-3xl",
+                    resultBanner.includes('WICKET') && "bg-red-950/95 border-red-500 text-red-100 shadow-red-500/60 text-3xl",
+                    resultBanner.includes('RUN') && "bg-zinc-900/90 border-white/20 text-white text-xl",
+                    resultBanner.includes('DOT') && "bg-black/90 border-white/10 text-white/70 text-base"
+                  )}
+                >
+                  {resultBanner.includes('SIX') && <Sparkles className="w-6 h-6 text-amber-300 animate-spin" />}
+                  {resultBanner.includes('WICKET') && <Flame className="w-6 h-6 text-red-400 animate-pulse" />}
+                  {resultBanner}
+                </div>
+              )}
             </motion.div>
           )}
         </AnimatePresence>
