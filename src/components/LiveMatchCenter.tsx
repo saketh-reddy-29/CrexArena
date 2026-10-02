@@ -9,6 +9,8 @@ import { MatchEngine } from '../lib/matchEngine';
 import { getPlayerImage, handlePlayerImageError } from '../lib/playerImages';
 import { MatchStatus, PitchType, WeatherCondition, type InningsData, type PlayerMatchStats, DRSResult } from '../types/match';
 import { getIntlTeamLogoUrl } from '../data/crexIntlTeams';
+import CricketActionVisualizer from './CricketActionVisualizer';
+import { ArenaFormat } from '../engine/models/ArenaState';
 
 const IPL_TEAM_LOGOS: Record<string, string> = {
   MI:   'https://cricketvectors.akamaized.net/Teams/F.png',
@@ -280,6 +282,7 @@ export default function LiveMatchCenter() {
   const [showImpactModal, setShowImpactModal] = useState(false);
   const [impactOutgoingId, setImpactOutgoingId] = useState<string | null>(null);
   const [impactIncomingId, setImpactIncomingId] = useState<string | null>(null);
+  const [lastVisualizedBall, setLastVisualizedBall] = useState<any>(null);
 
   const handleImpactSubstitution = () => {
     if (!impactIncomingId || !impactOutgoingId) return;
@@ -557,6 +560,15 @@ export default function LiveMatchCenter() {
       const wicketNumber = current.wickets + (wicket ? 1 : 0);
       const wicketStatus = `${ball.wicketType || 'Out'} b ${currentBowler.name}`;
       const tone: CommentaryLine['tone'] = wicket ? 'wicket' : ballRuns === 6 ? 'six' : ballRuns === 4 ? 'four' : ballRuns === 0 ? 'dot' : 'info';
+
+      setLastVisualizedBall({
+        ...ball,
+        runs: ballRuns,
+        isWicket: wicket,
+        wicketType: ball.wicketType,
+        isExtra: ball.isExtra,
+        extraType: ball.extraType
+      });
 
       // ---- Determine state transitions ----
       const overEnded = !wicket && isLegalDelivery && nextBall % 6 === 0;
@@ -955,6 +967,21 @@ export default function LiveMatchCenter() {
             <span>P'ship: <span className="text-white font-bold">{inning?.partnershipRuns || 0}</span>({inning?.partnershipBalls || 0})</span>
             {lastWicket && <span>Last Wkt: <span className="text-white">{lastWicketBatter?.name}</span> {lastWicket.score}/{lastWicket.wicket}</span>}
           </div>
+        </div>
+
+        {/* ── Real-Time Cricket Action Visualizer ── */}
+        <div className="p-2 sm:p-3 border-b border-zinc-800 bg-zinc-950/90">
+          <CricketActionVisualizer
+            striker={striker || null}
+            nonStriker={nonStriker || null}
+            bowler={currentBowler || null}
+            lastBall={lastVisualizedBall}
+            ballCount={inning?.deliveries?.length || 0}
+            format={(selectedFormat as ArenaFormat) || 'T20'}
+            battingTeamName={battingTeam.name}
+            bowlingTeamName={bowlingTeam.name}
+            isFreeHit={Boolean(inning?.isFreeHitPending)}
+          />
         </div>
 
         {/* ── Captain Controls ── */}

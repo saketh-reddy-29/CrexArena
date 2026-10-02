@@ -12,6 +12,8 @@ import {
 } from '../types/match';
 import { ArrowLeft, Target, Layout, ListOrdered, Radio, History } from 'lucide-react';
 import { cn } from '../lib/utils';
+import CricketActionVisualizer from './CricketActionVisualizer';
+import { ArenaFormat } from '../engine/models/ArenaState';
 
 function formatOvers(overs: number, balls: number) {
   return `${overs}.${balls}`;
@@ -634,8 +636,19 @@ export default function MatchSimulation() {
                     initial={{ opacity: 0 }} animate={{ opacity: 1 }}
                     className="flex-1 overflow-y-auto p-4 flex flex-col lg:flex-row gap-6 max-h-[calc(100vh-250px)]"
                 >
-                    {/* LEFT: COMMENTARY */}
+                    {/* LEFT: VISUALIZER & COMMENTARY */}
                     <div className="flex-1 space-y-4 overflow-y-auto pr-2 custom-scrollbar">
+                        <CricketActionVisualizer
+                          striker={players.find(p => p.id === strikerId) || null}
+                          nonStriker={players.find(p => p.id === nonStrikerId) || null}
+                          bowler={players.find(p => p.id === currentBowlerId) || null}
+                          lastBall={lastBall ? { ...lastBall, runs: lastBall.runs || 0 } : null}
+                          ballCount={activeInnings?.balls || 0}
+                          format={(format as ArenaFormat) || 'T20'}
+                          battingTeamName={activeInnings?.battingTeamId === team1?.id ? team1?.name || '' : team2?.name || ''}
+                          bowlingTeamName={activeInnings?.bowlingTeamId === team1?.id ? team1?.name || '' : team2?.name || ''}
+                          isFreeHit={Boolean(activeInnings?.isFreeHitPending)}
+                        />
                         {commentary.map((line, i) => (
                             <div key={i} className={cn("p-4 rounded-xl border border-white/5", i === 0 ? "bg-white/5 border-white/10" : "bg-[#0f1629]/40 backdrop-blur-md")}>
                                 <div className="text-sm leading-relaxed">{line}</div>
