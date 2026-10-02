@@ -1533,16 +1533,18 @@ export default function CricketActionVisualizer3D({
               <span className="text-white/60">{stateProgress}%</span>
             </div>
 
-            <div className="space-y-0.5">
-              <div>STATE: <span className="text-white font-bold">{currentActionState}</span></div>
-              <div>SPEED: <span className="text-amber-300 font-bold">{speed}x ({speed === 1.5 ? 'FAST' : speed === 2 ? 'VERY_FAST' : 'NORMAL'})</span></div>
-              <div>BOWLER: <span className="text-amber-300 font-bold">{playerDebugStates.bowlerState}</span></div>
-              <div>BATTER: <span className="text-emerald-300 font-bold">{playerDebugStates.strikerState}</span></div>
+            <div className="space-y-0.5 text-[8.5px]">
+              <div>FORMAT: <span className="text-white font-bold">{format}</span></div>
+              <div>OVER: <span className="text-white font-bold">{overs ?? 0}.{(balls ?? 0) % 6}</span> | SCORE: <span className="text-amber-300 font-bold">{score ?? 0}/{wickets ?? 0}</span></div>
+              <div>BATTER: <span className="text-emerald-300 font-bold">{striker?.name || 'Striker'} ({playerDebugStates.strikerState})</span></div>
+              <div>BOWLER: <span className="text-amber-300 font-bold">{bowler?.name || 'Bowler'} ({selectedTactic})</span></div>
+              <div>ACTION STATE: <span className="text-white font-bold">{currentActionState}</span></div>
+              <div>TIMELINE: <span className="text-cyan-300 font-bold">{cameraStateName}</span></div>
+              <div>SPEED: <span className="text-amber-300 font-bold">{speed}x</span></div>
               <div>KEEPER: <span className="text-cyan-300 font-bold">{playerDebugStates.keeperState}</span></div>
               {playerDebugStates.targetFielder && (
-                <div>TARGET FIELDER: <span className="text-purple-300 font-bold">{playerDebugStates.targetFielder.name} ({playerDebugStates.targetFielder.state})</span></div>
+                <div>FIELDER: <span className="text-purple-300 font-bold">{playerDebugStates.targetFielder.name} ({playerDebugStates.targetFielder.state})</span></div>
               )}
-              <div>CAMERA: <span className="text-cyan-300 font-bold">{cameraMode}</span></div>
             </div>
 
             {/* Quick Camera Jump Buttons */}

@@ -210,34 +210,37 @@ export function adaptDeliveryTo3DSequence(
   let eventType: CricketEventType = 'DOT_BALL';
   let priority: EventPriority = 'NORMAL';
   let milestone: MilestoneEventData | null = null;
-  let baseDurationMs = 2400; // Normal ~2.4s
+
+  // Format-aware broadcast pacing
+  const isTest = Boolean(options.isTestFormat);
+  let baseDurationMs = isTest ? 6500 : 5000; // Normal ball ~5.0s (T20/ODI) to 6.5s (Test)
 
   if (isMatchWinning && isSix) {
     eventType = 'MATCH_WINNING_SIX';
     priority = 'VERY_HIGH';
-    baseDurationMs = 4800;
+    baseDurationMs = isTest ? 10000 : 8000;
     milestone = {
       type: 'MATCH_WINNING_SIX',
       title: 'MATCH WINNING SIX!',
       subtitle: `${options.strikerName || 'Striker'} SEALS THE VICTORY!`,
       badge: 'VICTORY',
-      bannerDurationMs: 3000,
+      bannerDurationMs: 3500,
     };
   } else if (isMatchWinning && isFour) {
     eventType = 'MATCH_WINNING_FOUR';
     priority = 'VERY_HIGH';
-    baseDurationMs = 4500;
+    baseDurationMs = isTest ? 9500 : 7500;
     milestone = {
       type: 'MATCH_WINNING_FOUR',
       title: 'MATCH WINNING FOUR!',
       subtitle: `${options.strikerName || 'Striker'} HITS THE WINNING RUNS!`,
       badge: 'VICTORY',
-      bannerDurationMs: 2800,
+      bannerDurationMs: 3200,
     };
   } else if (reached5Wickets) {
     eventType = 'BOWLER_5_WICKET_HAUL';
     priority = 'VERY_HIGH';
-    baseDurationMs = 3800;
+    baseDurationMs = isTest ? 9500 : 8000;
     milestone = {
       type: 'BOWLER_5_WICKET_HAUL',
       title: '5-WICKET HAUL!',
@@ -245,12 +248,12 @@ export function adaptDeliveryTo3DSequence(
       badge: '5 WICKETS',
       playerName: options.bowlerName,
       statValue: '5 Wickets',
-      bannerDurationMs: 2500,
+      bannerDurationMs: 3000,
     };
   } else if (reachedCentury || reached200 || reached150) {
     eventType = reached200 ? 'BATTER_200' : reached150 ? 'BATTER_150' : 'BATTER_CENTURY';
     priority = 'VERY_HIGH';
-    baseDurationMs = 3800;
+    baseDurationMs = isTest ? 10000 : 8500;
     milestone = {
       type: eventType,
       title: reached200 ? 'DOUBLE CENTURY! 200*' : reached150 ? 'MAGNIFICENT 150*!' : 'CENTURY! 100*',
@@ -258,12 +261,12 @@ export function adaptDeliveryTo3DSequence(
       badge: 'MILESTONE',
       playerName: options.strikerName,
       statValue: `${currBatterScore}*`,
-      bannerDurationMs: 2500,
+      bannerDurationMs: 3000,
     };
   } else if (reachedFifty) {
     eventType = 'BATTER_FIFTY';
     priority = 'HIGH';
-    baseDurationMs = 3200;
+    baseDurationMs = isTest ? 8000 : 7000;
     milestone = {
       type: 'BATTER_FIFTY',
       title: 'FIFTY! 50*',
@@ -271,63 +274,63 @@ export function adaptDeliveryTo3DSequence(
       badge: 'FIFTY',
       playerName: options.strikerName,
       statValue: `${currBatterScore}*`,
-      bannerDurationMs: 2000,
+      bannerDurationMs: 2500,
     };
   } else if (isDuck) {
     eventType = 'BATTER_DUCK';
     priority = 'HIGH';
-    baseDurationMs = 3000;
+    baseDurationMs = isTest ? 8500 : 7000;
     milestone = {
       type: 'BATTER_DUCK',
       title: 'DUCK! OUT FOR 0',
       subtitle: `${options.strikerName || 'Batter'} departs without scoring`,
       badge: 'DUCK',
-      bannerDurationMs: 1800,
+      bannerDurationMs: 2200,
     };
   } else if (isBowled) {
     eventType = 'WICKET_BOWLED';
     priority = 'HIGH';
-    baseDurationMs = 3000;
+    baseDurationMs = isTest ? 9000 : 7000;
   } else if (isLBW) {
     eventType = 'WICKET_LBW';
     priority = 'HIGH';
-    baseDurationMs = 2900;
+    baseDurationMs = isTest ? 8800 : 7000;
   } else if (isCaught) {
     eventType = 'WICKET_CAUGHT';
     priority = 'HIGH';
-    baseDurationMs = 3100;
+    baseDurationMs = isTest ? 9000 : 7200;
   } else if (isStumped) {
     eventType = 'WICKET_STUMPED';
     priority = 'HIGH';
-    baseDurationMs = 3000;
+    baseDurationMs = isTest ? 8800 : 7000;
   } else if (isRunOut) {
     eventType = 'WICKET_RUN_OUT';
     priority = 'HIGH';
-    baseDurationMs = 3200;
+    baseDurationMs = isTest ? 9000 : 7200;
   } else if (isSix) {
     eventType = 'SIX';
     priority = 'MEDIUM';
-    baseDurationMs = 2800;
+    baseDurationMs = isTest ? 7500 : 6500;
   } else if (isFour) {
     eventType = 'FOUR';
     priority = 'MEDIUM';
-    baseDurationMs = 2600;
+    baseDurationMs = isTest ? 7500 : 6000;
   } else if (runs === 3) {
     eventType = 'THREE_RUNS';
     priority = 'NORMAL';
-    baseDurationMs = 2600;
+    baseDurationMs = isTest ? 7000 : 5800;
   } else if (runs === 2) {
     eventType = 'TWO_RUNS';
     priority = 'NORMAL';
-    baseDurationMs = 2500;
+    baseDurationMs = isTest ? 6800 : 5500;
   } else if (runs === 1) {
     eventType = 'SINGLE';
     priority = 'NORMAL';
-    baseDurationMs = 2300;
+    baseDurationMs = isTest ? 6500 : 5200;
   } else {
     eventType = 'DOT_BALL';
     priority = 'NORMAL';
-    baseDurationMs = 2200;
+    baseDurationMs = isTest ? 6500 : 5000;
   }
 
   // 3. Emotion States Assignment

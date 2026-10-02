@@ -66,9 +66,15 @@ describe('Full-Ground Batting & Scoring Zone Engine Suite', () => {
       expect(timing.exitVelocityMps).toBeGreaterThan(20);
     });
 
-    it('produces lower power and higher catch risk when mistimed', () => {
-      const timing = batTimingEngine.evaluate(20, 0, 50, 150, true);
-      expect(timing.catchRiskFactor).toBeGreaterThan(0.3);
+    it('produces lower power and higher catch risk when mistimed on average', () => {
+      let totalCatchRisk = 0;
+      const samples = 20;
+      for (let i = 0; i < samples; i++) {
+        const timing = batTimingEngine.evaluate(20, 0, 50, 150, true);
+        totalCatchRisk += timing.catchRiskFactor;
+      }
+      const avgCatchRisk = totalCatchRisk / samples;
+      expect(avgCatchRisk).toBeGreaterThan(0.4);
     });
   });
 
