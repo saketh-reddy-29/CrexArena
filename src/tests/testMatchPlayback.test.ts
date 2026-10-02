@@ -132,4 +132,27 @@ describe('CRICKET ARENA — Test Match Ball-by-Ball Playback Engine', () => {
       expect(del.trajectory.targetPos.z).toBeTypeOf('number');
     });
   });
+
+  it('supports interactive Bowl Selection option with strict eligibility enforcement', () => {
+    const controller = new TestMatchPlaybackController('test-match-id-6', team1, team2, team1.id);
+    const availableBowlers = controller.getAvailableBowlers();
+
+    expect(availableBowlers.length).toBeGreaterThan(0);
+    // All available bowlers must be eligible bowlers (all-rounder or bowler)
+    availableBowlers.forEach((b) => {
+      expect(['ALL_ROUNDER', 'BOWLER']).toContain(b.role.toUpperCase());
+    });
+
+    // Selecting an eligible bowler succeeds
+    const targetBowler = availableBowlers[availableBowlers.length - 1];
+    const success = controller.setBowler(targetBowler.id);
+    expect(success).toBe(true);
+    expect(controller.getSummary().bowlerId).toBe(targetBowler.id);
+
+    // Attempting to select a pure batter fails
+    const pureBatter = team2Squad[0]; // aus-p1 is BATTER
+    const batterSuccess = controller.setBowler(pureBatter.id);
+    expect(batterSuccess).toBe(false);
+    expect(controller.getSummary().bowlerId).toBe(targetBowler.id); // bowler remained unchanged
+  });
 });

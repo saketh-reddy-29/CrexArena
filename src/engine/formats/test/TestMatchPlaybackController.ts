@@ -267,6 +267,57 @@ export class TestMatchPlaybackController {
   }
 
   /**
+   * User Bowl Selection option: sets active/next bowler
+   */
+  public setBowler(bowlerId: string): boolean {
+    const currentInning = this.innings[this.currentInningsIndex];
+    const bowlingSquad = this.getSquad(currentInning.bowlingTeamId);
+    const selected = bowlingSquad.find((p) => p.id === bowlerId);
+
+    if (!selected) {
+      console.warn(`[TestMatchPlaybackController] Player ${bowlerId} not found in bowling squad.`);
+      return false;
+    }
+
+    if (!isEligibleBowler(selected)) {
+      console.warn(`[TestMatchPlaybackController] Player ${selected.name} is not an eligible bowler.`);
+      return false;
+    }
+
+    if (!currentInning.bowlers[selected.id]) {
+      currentInning.bowlers[selected.id] = {
+        id: selected.id,
+        name: selected.name,
+        overs: 0,
+        balls: 0,
+        maidens: 0,
+        runs: 0,
+        wickets: 0,
+        economy: 0,
+        dots: 0,
+        boundaries: 0,
+        currentSpellOvers: 0,
+        currentSpellRuns: 0,
+        currentSpellWickets: 0,
+      };
+    }
+
+    this.bowlerId = selected.id;
+    this.callbacks.onStateUpdate?.(this.getSummary());
+    return true;
+  }
+
+  public getAvailableBowlers(): Player[] {
+    const currentInning = this.innings[this.currentInningsIndex];
+    const bowlingSquad = this.getSquad(currentInning.bowlingTeamId);
+    return getValidBowlingPool(bowlingSquad, 1);
+  }
+
+  public getLastOverBowlerId(): string | null {
+    return this.lastOverBowlerId;
+  }
+
+  /**
    * Main asynchronous test match execution loop
    */
   public async startContinuousMatch(): Promise<void> {

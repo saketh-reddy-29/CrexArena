@@ -19,7 +19,9 @@ import {
   ArrowLeft,
   Flame,
   Zap,
+  UserCheck,
 } from 'lucide-react';
+import BowlerSelectionModal from './BowlerSelectionModal';
 import { Player } from '../types/common';
 import { useGameStore, GameState } from '../stores/useGameStore';
 import CricketActionVisualizer3D from './CricketActionVisualizer3D';
@@ -68,6 +70,7 @@ export default function ODILiveMatchCenter() {
     subtext: 'Next delivery locked & ready',
   });
 
+  const [showBowlerModal, setShowBowlerModal] = useState<boolean>(false);
   const [showScorecardModal, setShowScorecardModal] = useState<boolean>(false);
   const [scorecardTabInnings, setScorecardTabInnings] = useState<number>(0);
   const [activeMilestone, setActiveMilestone] = useState<{ title: string; subtitle: string; badge?: string } | null>(null);
@@ -144,6 +147,15 @@ export default function ODILiveMatchCenter() {
 
   const handleNextBall = () => {
     controllerRef.current?.playNextBallManual();
+  };
+
+  // Bowl Selection Option
+  const handleSelectBowler = (bowlerId: string) => {
+    if (!controllerRef.current) return;
+    const success = controllerRef.current.setBowler(bowlerId);
+    if (success) {
+      setMatchSummary(controllerRef.current.getSummary());
+    }
   };
 
   const currentInning = matchSummary?.innings[matchSummary.currentInningsIndex];
@@ -414,10 +426,20 @@ export default function ODILiveMatchCenter() {
             </div>
           </div>
 
-          {/* Card 2: Bowler */}
+          {/* Card 2: Bowler & Tactics */}
           <div className="bg-zinc-900/90 border border-zinc-800/80 rounded-2xl p-3 shadow-lg flex flex-col justify-between">
             <div className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider flex items-center justify-between mb-2">
-              <span>Current Bowler</span>
+              <div className="flex items-center gap-1.5">
+                <span>Current Bowler</span>
+                <button
+                  onClick={() => setShowBowlerModal(true)}
+                  className="px-2 py-0.5 rounded-lg bg-sky-500/20 hover:bg-sky-500/30 text-sky-400 border border-sky-500/40 text-[9px] font-bold transition-all flex items-center gap-1 shadow-sm"
+                  title="Choose / Change Bowler"
+                >
+                  <UserCheck className="w-3 h-3" />
+                  <span>Bowl Option</span>
+                </button>
+              </div>
               <span className="text-[9px] text-zinc-500">Max 10 Overs</span>
             </div>
 
@@ -664,6 +686,19 @@ export default function ODILiveMatchCenter() {
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* ── BOWL SELECTION OPTION MODAL ── */}
+      <BowlerSelectionModal
+        isOpen={showBowlerModal}
+        onClose={() => setShowBowlerModal(false)}
+        bowlingSquad={allBowlingSquad}
+        currentBowlerId={matchSummary?.bowlerId || null}
+        lastOverBowlerId={controllerRef.current?.getLastOverBowlerId ? controllerRef.current.getLastOverBowlerId() : null}
+        bowlerStatsMap={currentInning?.bowlers}
+        onSelectBowler={handleSelectBowler}
+        format="ODI"
+        bowlingTeamName={currentInning?.bowlingTeamName || 'Bowling Team'}
+      />
 
       {/* Development Debug Delivery Panel */}
       <DebugDeliveryPanel
