@@ -7,6 +7,8 @@ import LandingPage from './components/LandingPage';
 
 import AuctionRoom from './components/AuctionRoom';
 import LiveMatchCenter from './components/LiveMatchCenter';
+import TestMatchLiveCenter from './components/TestMatchLiveCenter';
+import ODILiveMatchCenter from './components/ODILiveMatchCenter';
 import LeagueView from './components/LeagueView';
 import SquadPlanner from './components/SquadPlanner';
 import PlayersView from './components/PlayersView';
@@ -42,7 +44,15 @@ export default function App() {
       {gameState === GameState.PLAYING_XI_BUILDER && <PlayingXIBuilder />}
       
       {gameState === GameState.PRE_MATCH && <PreMatch />}
-      {gameState === GameState.MATCH_SIMULATION && <LiveMatchCenter />}
+      {gameState === GameState.MATCH_SIMULATION && (
+        (selectedFormat === 'TEST' || (selectedFormat as string) === 'Test') ? (
+          <TestMatchLiveCenter />
+        ) : (selectedFormat === 'ODI' || (selectedFormat as string) === 'Odi') ? (
+          <ODILiveMatchCenter />
+        ) : (
+          <LiveMatchCenter />
+        )
+      )}
 
       {![
         GameState.LANDING,
