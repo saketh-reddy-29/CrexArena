@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { BOWLING_TACTICS_CONFIG, BowlingTactic } from '../components/CricketActionVisualizer';
 import { createCricketCharacter, PlayerAnimState } from '../components/CricketPlayer3D';
+import { adaptDeliveryTo3DSequence } from '../components/Delivery3DActionAdapter';
 
 describe('Cricket Action Visualizer Physics & Trajectory Engine', () => {
   // Cubic Bezier formula verification
@@ -97,7 +98,6 @@ describe('Cricket Action Visualizer Physics & Trajectory Engine', () => {
   });
 
   it('constructs complete 3D rigged cricket character and executes skeletal animations', () => {
-    // 1. Batter character with bat and pads
     const batterChar = createCricketCharacter({
       id: 'batter-test',
       name: 'Virat Kohli',
@@ -115,7 +115,6 @@ describe('Cricket Action Visualizer Physics & Trajectory Engine', () => {
     expect(batterChar.joints.bat).toBeDefined();
     expect(batterChar.joints.ballSocket).toBeDefined();
 
-    // 2. Test animations
     const testStates: PlayerAnimState[] = [
       'BATTING_READY',
       'BACKLIFT',
@@ -149,7 +148,6 @@ describe('Cricket Action Visualizer Physics & Trajectory Engine', () => {
       expect(Number.isFinite(batPos.z)).toBe(true);
     });
 
-    // 3. Bowler character without bat/pads
     const bowlerChar = createCricketCharacter({
       id: 'bowler-test',
       name: 'Jasprit Bumrah',
@@ -165,5 +163,65 @@ describe('Cricket Action Visualizer Physics & Trajectory Engine', () => {
     expect(bowlerChar.joints.ballSocket).toBeDefined();
     bowlerChar.updateAnimation('RUN_UP', 0.8);
     expect(Number.isFinite(bowlerChar.joints.spine.position.y)).toBe(true);
+  });
+
+  it('correctly adapts match delivery outcomes into physical 3D action timelines', () => {
+    // 1. Six Outcome
+    const sixSeq = adaptDeliveryTo3DSequence({
+      runs: 6,
+      isWicket: false,
+      wicketType: '',
+      isBoundary: true,
+      isSix: true,
+      isFour: false,
+      ball: '1.2',
+      commentary: 'Massive six over long-on!',
+    } as any);
+
+    expect(sixSeq.isSix).toBe(true);
+    expect(sixSeq.resultLabel).toBe('SIX!');
+    expect(sixSeq.ballTrajectory.isAerial).toBe(true);
+    expect(sixSeq.ballTrajectory.apexHeight).toBeGreaterThan(10);
+
+    // 2. Four Outcome
+    const fourSeq = adaptDeliveryTo3DSequence({
+      runs: 4,
+      isWicket: false,
+      wicketType: '',
+      isBoundary: true,
+      isSix: false,
+      isFour: true,
+      ball: '2.4',
+      commentary: 'Driven through cover for four!',
+    } as any);
+
+    expect(fourSeq.isFour).toBe(true);
+    expect(fourSeq.resultLabel).toBe('FOUR!');
+    expect(fourSeq.ballTrajectory.isAerial).toBe(false);
+
+    // 3. Bowled Dismissal
+    const bowledSeq = adaptDeliveryTo3DSequence({
+      runs: 0,
+      isWicket: true,
+      wicketType: 'Bowled',
+      ball: '3.1',
+      commentary: 'Clean bowled! Off-stump knocked out of ground!',
+    } as any, 'INSWING');
+
+    expect(bowledSeq.isBowled).toBe(true);
+    expect(bowledSeq.isWicket).toBe(true);
+    expect(bowledSeq.resultLabel).toBe('BOWLED');
+
+    // 4. Stumping
+    const stumpedSeq = adaptDeliveryTo3DSequence({
+      runs: 0,
+      isWicket: true,
+      wicketType: 'Stumped',
+      ball: '4.5',
+      commentary: 'Beaten by flight, keeper whips off bails!',
+    } as any, 'OFF_BREAK');
+
+    expect(stumpedSeq.isStumped).toBe(true);
+    expect(stumpedSeq.keeperAnim).toBe('STUMPING');
   });
 });

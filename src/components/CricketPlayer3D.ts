@@ -9,33 +9,55 @@ export type PlayerAnimState =
   | 'BACKLIFT'
   | 'COVER_DRIVE'
   | 'STRAIGHT_DRIVE'
+  | 'ON_DRIVE'
   | 'SQUARE_CUT'
+  | 'CUT'
   | 'PULL_SHOT'
   | 'HOOK_SHOT'
+  | 'PULL'
+  | 'HOOK'
   | 'FLICK'
+  | 'GLANCE'
   | 'SWEEP'
   | 'FORWARD_DEFENCE'
+  | 'BACKFOOT_DEFENCE'
+  | 'DEFEND'
   | 'LEAVE'
   | 'EDGE'
+  | 'MISS'
   | 'LOFTED_SIX'
+  | 'LOFT'
+  | 'ATTACK'
   | 'BOWLING_READY'
   | 'RUN_UP'
+  | 'GATHER'
   | 'DELIVERY_STRIDE'
   | 'RELEASE'
   | 'FOLLOW_THROUGH'
   | 'FIELD_READY'
   | 'RUN_TO_BALL'
   | 'GROUND_FIELD'
+  | 'GROUND_PICKUP'
   | 'DIVING_CATCH'
   | 'HIGH_CATCH'
+  | 'LOW_CATCH'
+  | 'DROP'
   | 'THROW'
   | 'KEEPER_READY'
+  | 'KEEPER_CROUCH'
+  | 'KEEPER_SHIFT_LEFT'
+  | 'KEEPER_SHIFT_RIGHT'
+  | 'KEEPER_COLLECT'
   | 'KEEPER_CATCH'
-  | 'STUMPING'
+  | 'KEEPER_DIVE'
+  | 'KEEPER_STUMPING'
+  | 'KEEPER_THROW'
   | 'RUN_BETWEEN_WICKETS'
   | 'TURN_AT_CREASE'
   | 'SLIDE_BAT'
   | 'CELEBRATION'
+  | 'BOWLER_CELEBRATION'
+  | 'BATTER_DISMISSED'
   | 'BOWLED_REACTION';
 
 export interface Player3DConfig {
@@ -418,12 +440,16 @@ export function createCricketCharacter(config: Player3DConfig): CricketPlayer3DI
     rightFoot,
   };
 
+  let currentAnimState: PlayerAnimState = 'IDLE';
+
   /**
    * Complete Skeletal Animation Controller
    * Applies smooth joint rotations based on high-level cricket animation states.
    */
   const updateAnimation = (state: PlayerAnimState, progress: number, subProgress = 0) => {
+    currentAnimState = state;
     // Reset defaults
+    pelvis.rotation.set(0, 0, 0);
     spineGroup.rotation.set(0, 0, 0);
     headGroup.rotation.set(0, 0, 0);
     leftShoulder.rotation.set(0, 0, 0);
@@ -438,8 +464,16 @@ export function createCricketCharacter(config: Player3DConfig): CricketPlayer3DI
 
     if (joints.bat) joints.bat.rotation.set(-Math.PI / 4, 0, 0);
 
-    // ── BATTING STATES ──
-    if (state === 'BATTING_READY') {
+    // ── 1. IDLE / NON-STRIKER WAITING ──
+    if (state === 'IDLE') {
+      spineGroup.rotation.set(0.08, 0, 0);
+      rightShoulder.rotation.set(0.3, 0.1, 0);
+      leftShoulder.rotation.set(0.3, -0.1, 0);
+      if (joints.bat) joints.bat.rotation.set(-0.3, 0, 0);
+    }
+
+    // ── 2. BATTING STATES ──
+    else if (state === 'BATTING_READY') {
       // Crouch stance, side-on to bowler
       spineGroup.rotation.set(0.15, -0.4, 0);
       headGroup.rotation.set(-0.1, 0.4, 0); // Head looks down the pitch
@@ -476,10 +510,14 @@ export function createCricketCharacter(config: Player3DConfig): CricketPlayer3DI
       if (joints.bat) joints.bat.rotation.set(-1.2 * progress, 0, 0.3);
     }
 
-    else if (state === 'COVER_DRIVE' || state === 'STRAIGHT_DRIVE') {
-      // Front foot leaning forward into exquisite drive
+    else if (state === 'COVER_DRIVE' || state === 'STRAIGHT_DRIVE' || state === 'ON_DRIVE') {
+      // Front foot leaning forward into drive
       const swingP = Math.min(1, progress * 1.5);
-      spineGroup.rotation.set(0.35, -0.2 * (1 - swingP), 0);
+      const isCover = state === 'COVER_DRIVE';
+      const isOn = state === 'ON_DRIVE';
+      const sideAngle = isCover ? -0.35 : isOn ? 0.35 : 0;
+
+      spineGroup.rotation.set(0.35, sideAngle * swingP, 0);
       pelvis.position.y = 0.82;
 
       // Front leg strides forward
@@ -488,14 +526,14 @@ export function createCricketCharacter(config: Player3DConfig): CricketPlayer3DI
       rightHip.rotation.set(0.35 * swingP, 0, 0);
 
       // High elbow and bat swing down the vertical arc
-      rightShoulder.rotation.set(-0.8 + (swingP * 2.2), 0.2, -0.3);
+      rightShoulder.rotation.set(-0.8 + (swingP * 2.2), sideAngle * 0.5, -0.3);
       rightForearm.rotation.set(0.4 * (1 - swingP), 0, 0);
-      leftShoulder.rotation.set(-0.5 + (swingP * 1.8), -0.4, 0.3);
+      leftShoulder.rotation.set(-0.5 + (swingP * 1.8), -0.4 + sideAngle * 0.5, 0.3);
 
-      if (joints.bat) joints.bat.rotation.set(-1.2 + (swingP * 2.4), 0, -0.2);
+      if (joints.bat) joints.bat.rotation.set(-1.2 + (swingP * 2.4), sideAngle, -0.2);
     }
 
-    else if (state === 'SQUARE_CUT') {
+    else if (state === 'SQUARE_CUT' || state === 'CUT') {
       // Backfoot transfer, horizontal slashing swing
       const swingP = Math.min(1, progress * 1.6);
       spineGroup.rotation.set(0.1, -0.6 * swingP, 0);
@@ -507,7 +545,7 @@ export function createCricketCharacter(config: Player3DConfig): CricketPlayer3DI
       if (joints.bat) joints.bat.rotation.set(-0.8, -0.8 * swingP, -0.9 * swingP);
     }
 
-    else if (state === 'PULL_SHOT' || state === 'HOOK_SHOT') {
+    else if (state === 'PULL_SHOT' || state === 'HOOK_SHOT' || state === 'PULL' || state === 'HOOK') {
       // Swivelling pull shot over mid-wicket
       const swingP = Math.min(1, progress * 1.6);
       spineGroup.rotation.set(-0.1, 0.9 * swingP, 0);
@@ -518,7 +556,34 @@ export function createCricketCharacter(config: Player3DConfig): CricketPlayer3DI
       if (joints.bat) joints.bat.rotation.set(0.2, 1.2 * swingP, 0.8 * swingP);
     }
 
-    else if (state === 'LOFTED_SIX') {
+    else if (state === 'FLICK' || state === 'GLANCE') {
+      // Wristy flick off the pads
+      const swingP = Math.min(1, progress * 1.6);
+      spineGroup.rotation.set(0.2, 0.5 * swingP, 0);
+      leftHip.rotation.set(-0.4 * swingP, 0, 0);
+      leftKnee.rotation.set(0.5 * swingP, 0, 0);
+
+      rightShoulder.rotation.set(0.2 + swingP * 1.2, 0.4 * swingP, 0.3);
+      leftShoulder.rotation.set(0.3 + swingP * 1.0, -0.2, 0.2);
+      if (joints.bat) joints.bat.rotation.set(-0.4 + swingP * 1.4, 0.7 * swingP, 0.5 * swingP);
+    }
+
+    else if (state === 'SWEEP') {
+      // Down on one knee sweep
+      const swingP = Math.min(1, progress * 1.5);
+      spineGroup.rotation.set(0.4, 0.6 * swingP, 0);
+      pelvis.position.y = 0.60;
+      rightHip.rotation.set(-0.7, 0, 0);
+      rightKnee.rotation.set(1.4, 0, 0); // Back knee on ground
+      leftHip.rotation.set(-0.5, 0, 0);
+      leftKnee.rotation.set(0.7, 0, 0);
+
+      rightShoulder.rotation.set(0.4, 0.8 * swingP, 0.3);
+      leftShoulder.rotation.set(0.4, 0.6 * swingP, 0.2);
+      if (joints.bat) joints.bat.rotation.set(0.3, 1.2 * swingP, 0.2);
+    }
+
+    else if (state === 'LOFTED_SIX' || state === 'LOFT' || state === 'ATTACK') {
       // Monster aerial launch with full follow-through
       const swingP = Math.min(1, progress * 1.4);
       spineGroup.rotation.set(-0.25 * swingP, 0.3 * swingP, 0);
@@ -529,7 +594,7 @@ export function createCricketCharacter(config: Player3DConfig): CricketPlayer3DI
       if (joints.bat) joints.bat.rotation.set(-1.4 + (swingP * 3.0), 0, 0);
     }
 
-    else if (state === 'FORWARD_DEFENCE') {
+    else if (state === 'FORWARD_DEFENCE' || state === 'DEFEND') {
       // Solid forward defensive block
       const defP = Math.min(1, progress * 1.8);
       spineGroup.rotation.set(0.3 * defP, -0.1, 0);
@@ -542,11 +607,42 @@ export function createCricketCharacter(config: Player3DConfig): CricketPlayer3DI
       if (joints.bat) joints.bat.rotation.set(-0.2 * defP, 0, 0.1);
     }
 
-    // ── BOWLER STATES ──
+    else if (state === 'BACKFOOT_DEFENCE') {
+      const defP = Math.min(1, progress * 1.8);
+      spineGroup.rotation.set(0.15 * defP, 0, 0);
+      rightHip.rotation.set(-0.3 * defP, 0, 0);
+      rightKnee.rotation.set(0.4 * defP, 0, 0);
+
+      rightShoulder.rotation.set(0.3 * defP, 0, 0);
+      leftShoulder.rotation.set(0.3 * defP, 0, 0);
+      if (joints.bat) joints.bat.rotation.set(-0.3 * defP, 0, 0);
+    }
+
+    else if (state === 'LEAVE') {
+      // Shoulders arms, lifts bat away from off-stump
+      const leaveP = Math.min(1, progress * 1.6);
+      spineGroup.rotation.set(0.05, -0.3, 0);
+      rightShoulder.rotation.set(-0.9 * leaveP, 0.4, -0.3);
+      leftShoulder.rotation.set(-0.8 * leaveP, -0.3, 0.3);
+      if (joints.bat) joints.bat.rotation.set(-1.1 * leaveP, 0, 0.4);
+    }
+
+    else if (state === 'EDGE' || state === 'MISS') {
+      // Pushing outside off stump with inside/outside edge
+      const edgeP = Math.min(1, progress * 1.5);
+      spineGroup.rotation.set(0.25, -0.3, 0);
+      rightShoulder.rotation.set(0.2 + edgeP * 0.9, 0.4, -0.2);
+      leftShoulder.rotation.set(0.2 + edgeP * 0.8, -0.2, 0.2);
+      if (joints.bat) joints.bat.rotation.set(-0.4 + edgeP * 0.6, 0.2, -0.3);
+    }
+
+    // ── 3. BOWLER STATES ──
     else if (state === 'BOWLING_READY') {
+      // Stable at the top of bowling mark
       spineGroup.rotation.set(0.1, 0, 0);
       rightShoulder.rotation.set(0.2, 0, 0);
       leftShoulder.rotation.set(0.2, 0, 0);
+      pelvis.position.y = 0.95;
     }
 
     else if (state === 'RUN_UP') {
@@ -566,7 +662,7 @@ export function createCricketCharacter(config: Player3DConfig): CricketPlayer3DI
       pelvis.position.y = 0.95 + Math.abs(Math.sin(runCycle)) * 0.12;
     }
 
-    else if (state === 'DELIVERY_STRIDE' || state === 'RELEASE') {
+    else if (state === 'GATHER' || state === 'DELIVERY_STRIDE' || state === 'RELEASE') {
       // High gather into explosive 360 overarm windmill rotation
       const windP = Math.min(1, progress * 2.0);
       const armRotationAngle = -Math.PI * 0.5 + (windP * Math.PI * 2.1);
@@ -589,7 +685,69 @@ export function createCricketCharacter(config: Player3DConfig): CricketPlayer3DI
       rightHip.rotation.set(-0.3 * (1 - ftP), 0, 0);
     }
 
-    // ── FIELDING & RUNNING STATES ──
+    // ── 4. WICKETKEEPER STATES ──
+    else if (state === 'KEEPER_CROUCH' || state === 'KEEPER_READY') {
+      // WICKETKEEPER CROUCH: Deep knee bend, pelvis low, hands ready
+      spineGroup.rotation.set(0.5, 0, 0);
+      headGroup.rotation.set(-0.35, 0, 0); // Head up watching bowler & pitch
+      pelvis.position.y = 0.66;
+
+      leftHip.rotation.set(-0.75, 0, 0.2);
+      leftKnee.rotation.set(1.25, 0, 0);
+      rightHip.rotation.set(-0.75, 0, -0.2);
+      rightKnee.rotation.set(1.25, 0, 0);
+
+      rightShoulder.rotation.set(0.65, 0.25, 0);
+      leftShoulder.rotation.set(0.65, -0.25, 0);
+      rightForearm.rotation.set(0.5, 0, 0);
+      leftForearm.rotation.set(0.5, 0, 0);
+    }
+
+    else if (state === 'KEEPER_COLLECT' || state === 'KEEPER_CATCH') {
+      // Rises slightly to gather ball into gloves
+      const colP = Math.min(1, progress * 1.8);
+      spineGroup.rotation.set(0.35, 0, 0);
+      headGroup.rotation.set(-0.2, 0, 0);
+      pelvis.position.y = 0.75;
+
+      leftHip.rotation.set(-0.5, 0, 0.1);
+      leftKnee.rotation.set(0.9, 0, 0);
+      rightHip.rotation.set(-0.5, 0, -0.1);
+      rightKnee.rotation.set(0.9, 0, 0);
+
+      rightShoulder.rotation.set(0.8 * colP, 0.1, 0);
+      leftShoulder.rotation.set(0.8 * colP, -0.1, 0);
+      rightForearm.rotation.set(0.6, 0, 0);
+      leftForearm.rotation.set(0.6, 0, 0);
+    }
+
+    else if (state === 'KEEPER_STUMPING' || state === 'STUMPING') {
+      // Rapid swipe of gloves at stumps
+      const stpP = Math.min(1, progress * 2.0);
+      spineGroup.rotation.set(0.6, -0.3 * stpP, 0);
+      pelvis.position.y = 0.65;
+      rightShoulder.rotation.set(1.1 * stpP, -0.4 * stpP, 0);
+      leftShoulder.rotation.set(1.1 * stpP, -0.4 * stpP, 0);
+    }
+
+    // ── 5. FIELDING & RUNNING STATES ──
+    else if (state === 'FIELD_READY') {
+      // Athletic ready posture: Hands on knees, slightly bent waist, alert & stationary
+      spineGroup.rotation.set(0.3, 0, 0);
+      headGroup.rotation.set(-0.2, 0, 0);
+      pelvis.position.y = 0.88;
+
+      leftHip.rotation.set(-0.35, 0, 0.1);
+      leftKnee.rotation.set(0.5, 0, 0);
+      rightHip.rotation.set(-0.35, 0, -0.1);
+      rightKnee.rotation.set(0.5, 0, 0);
+
+      rightShoulder.rotation.set(0.5, 0.2, 0);
+      leftShoulder.rotation.set(0.5, -0.2, 0);
+      rightForearm.rotation.set(0.4, 0, 0);
+      leftForearm.rotation.set(0.4, 0, 0);
+    }
+
     else if (state === 'RUN_BETWEEN_WICKETS' || state === 'RUN_TO_BALL') {
       const runCycle = progress * Math.PI * 7;
       const legSwing = Math.sin(runCycle) * 0.7;
@@ -605,7 +763,7 @@ export function createCricketCharacter(config: Player3DConfig): CricketPlayer3DI
       pelvis.position.y = 0.95 + Math.abs(Math.sin(runCycle)) * 0.1;
     }
 
-    else if (state === 'GROUND_FIELD') {
+    else if (state === 'GROUND_FIELD' || state === 'GROUND_PICKUP') {
       // Bend down low with cupped hands
       spineGroup.rotation.set(0.7, 0, 0);
       pelvis.position.y = 0.65;
@@ -617,7 +775,7 @@ export function createCricketCharacter(config: Player3DConfig): CricketPlayer3DI
       leftShoulder.rotation.set(0.8, 0, 0);
     }
 
-    else if (state === 'DIVING_CATCH' || state === 'HIGH_CATCH') {
+    else if (state === 'DIVING_CATCH' || state === 'HIGH_CATCH' || state === 'LOW_CATCH') {
       // Leaping dive with outstretched hands
       spineGroup.rotation.set(0.5, 0, 0);
       pelvis.position.y = 0.55;
@@ -633,24 +791,22 @@ export function createCricketCharacter(config: Player3DConfig): CricketPlayer3DI
       leftShoulder.rotation.set(0.6 * (1 - throwP), 0, 0);
     }
 
-    else if (state === 'KEEPER_READY') {
-      // Crouched wicketkeeper behind stumps
-      spineGroup.rotation.set(0.45, 0, 0);
-      pelvis.position.y = 0.72;
-      leftHip.rotation.set(-0.55, 0, 0.15);
-      leftKnee.rotation.set(0.95, 0, 0);
-      rightHip.rotation.set(-0.55, 0, -0.15);
-      rightKnee.rotation.set(0.95, 0, 0);
-      rightShoulder.rotation.set(0.6, 0.2, 0);
-      leftShoulder.rotation.set(0.6, -0.2, 0);
-    }
-
-    else if (state === 'CELEBRATION') {
+    // ── 6. CELEBRATIONS & DISMISSALS ──
+    else if (state === 'CELEBRATION' || state === 'BOWLER_CELEBRATION') {
       // Fist pump & high five
       const celebP = Math.sin(progress * Math.PI * 4);
       spineGroup.rotation.set(-0.15, 0, 0);
       rightShoulder.rotation.set(-2.0 + (celebP * 0.3), 0, 0.2);
       leftShoulder.rotation.set(-1.2, 0, -0.4);
+    }
+
+    else if (state === 'BOWLED_REACTION' || state === 'BATTER_DISMISSED') {
+      // Head down in disappointment, looking at dislodged bails
+      spineGroup.rotation.set(0.35, 0, 0);
+      headGroup.rotation.set(0.4, 0, 0);
+      rightShoulder.rotation.set(0.3, 0, 0);
+      leftShoulder.rotation.set(0.3, 0, 0);
+      if (joints.bat) joints.bat.rotation.set(-0.2, 0, 0);
     }
   };
 

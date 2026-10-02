@@ -14,7 +14,12 @@ import {
   Layers, 
   Zap,
   Move,
-  User
+  User,
+  Play,
+  Pause,
+  StepForward,
+  Compass,
+  Maximize2
 } from 'lucide-react';
 import { BallOutcome } from '../types/match';
 import { Player } from '../types/common';
@@ -22,9 +27,10 @@ import { ArenaFormat } from '../engine/models/ArenaState';
 import { cn } from '../lib/utils';
 import { BOWLING_TACTICS_CONFIG, BowlingTactic, FieldPreset } from './CricketActionVisualizer';
 import { createCricketCharacter, CricketPlayer3DInstance, PlayerAnimState } from './CricketPlayer3D';
+import { adaptDeliveryTo3DSequence, Action3DSequence } from './Delivery3DActionAdapter';
 
-export type CameraMode = 'BROADCAST' | 'BALL_FOLLOW' | 'BATTER_FOCUS' | 'FIELDER_FOCUS' | 'WICKET_FOCUS';
-export type AnimationSpeed = 1 | 2 | 4 | 0;
+export type CameraMode = 'CAMERA_WIDE' | 'BROADCAST' | 'BALL_FOLLOW' | 'BATTER_FOCUS' | 'BOWLER_FOCUS' | 'WICKET_FOCUS';
+export type AnimationSpeed = 1 | 1.5 | 2 | 0; // 1 = Normal (1x), 1.5 = Fast (1.5x, Default), 2 = Very Fast (2x), 0 = Skip/Instant
 
 export interface Visualizer3DProps {
   striker: Player | null;
@@ -43,15 +49,13 @@ export interface Visualizer3DProps {
   onToggle2D?: () => void;
 }
 
-// Tactical Field presets in 3D Ground Coordinates (meters from ground center)
-// Ground center is (0, 0, 0). Pitch is along Z-axis from z = -10 (bowler) to z = +10 (batter)
-const FIELD_PRESETS_3D: Record<Exclude<FieldPreset, 'CUSTOM'>, { name: string; icon: string; positions: { name: string; x: number; z: number }[] }> = {
+// Tactical Field presets in 3D Ground Coordinates (meters from pitch center)
+export const FIELD_PRESETS_3D: Record<Exclude<FieldPreset, 'CUSTOM'>, { name: string; icon: string; positions: { name: string; x: number; z: number }[] }> = {
   BALANCED: {
     name: 'Balanced (4-5 Split)',
     icon: '🛡️',
     positions: [
-      { name: 'Wicketkeeper', x: 0, z: 14.5 },
-      { name: 'Slip', x: -3.8, z: 15.2 },
+      { name: '1st Slip', x: -3.8, z: 15.2 },
       { name: 'Gully', x: -8.5, z: 12.5 },
       { name: 'Point', x: -14.2, z: 9.5 },
       { name: 'Cover', x: -13.5, z: -1.5 },
@@ -59,15 +63,13 @@ const FIELD_PRESETS_3D: Record<Exclude<FieldPreset, 'CUSTOM'>, { name: string; i
       { name: 'Mid On', x: 5.5, z: -11.0 },
       { name: 'Mid Wicket', x: 13.0, z: -1.5 },
       { name: 'Square Leg', x: 14.5, z: 9.5 },
-      { name: 'Deep Fine Leg', x: 12.0, z: 24.5 },
-      { name: 'Deep Cover', x: -25.0, z: -8.0 },
+      { name: 'Deep Fine Leg', x: 14.0, z: 24.5 },
     ],
   },
   POWERPLAY: {
     name: 'Powerplay (Ring Field)',
     icon: '⚡',
     positions: [
-      { name: 'Wicketkeeper', x: 0, z: 14.5 },
       { name: 'First Slip', x: -3.5, z: 15.0 },
       { name: 'Backward Point', x: -12.5, z: 12.0 },
       { name: 'Cover Point', x: -14.0, z: 6.5 },
@@ -76,7 +78,6 @@ const FIELD_PRESETS_3D: Record<Exclude<FieldPreset, 'CUSTOM'>, { name: string; i
       { name: 'Mid On', x: 5.0, z: -9.5 },
       { name: 'Mid Wicket', x: 12.0, z: -1.0 },
       { name: 'Square Leg', x: 13.5, z: 10.0 },
-      { name: 'Deep Mid-Wicket', x: 25.0, z: -9.0 },
       { name: 'Deep Third Man', x: -18.0, z: 24.0 },
     ],
   },
@@ -84,7 +85,6 @@ const FIELD_PRESETS_3D: Record<Exclude<FieldPreset, 'CUSTOM'>, { name: string; i
     name: 'Slip Cordon (Test / Attack)',
     icon: '⚔️',
     positions: [
-      { name: 'Wicketkeeper', x: 0, z: 14.5 },
       { name: '1st Slip', x: -2.5, z: 15.5 },
       { name: '2nd Slip', x: -4.5, z: 16.5 },
       { name: '3rd Slip', x: -6.5, z: 17.5 },
@@ -94,14 +94,12 @@ const FIELD_PRESETS_3D: Record<Exclude<FieldPreset, 'CUSTOM'>, { name: string; i
       { name: 'Cover', x: -12.5, z: 1.0 },
       { name: 'Mid Off', x: -5.5, z: -10.5 },
       { name: 'Mid On', x: 5.5, z: -10.5 },
-      { name: 'Fine Leg', x: 14.0, z: 22.0 },
     ],
   },
   DEATH_OVERS: {
     name: 'Death Overs (5 Deep Protect)',
     icon: '🔒',
     positions: [
-      { name: 'Wicketkeeper', x: 0, z: 14.5 },
       { name: 'Short Third Man', x: -6.5, z: 13.5 },
       { name: 'Point', x: -12.5, z: 8.5 },
       { name: 'Extra Cover', x: -11.0, z: -1.5 },
@@ -111,14 +109,12 @@ const FIELD_PRESETS_3D: Record<Exclude<FieldPreset, 'CUSTOM'>, { name: string; i
       { name: 'Long On', x: 12.0, z: -27.0 },
       { name: 'Deep Mid-Wicket', x: 26.0, z: -9.5 },
       { name: 'Deep Square Leg', x: 27.0, z: 11.0 },
-      { name: 'Deep Fine Leg', x: 16.0, z: 25.0 },
     ],
   },
   SPIN_TRAP: {
     name: 'Spin Web Trap',
     icon: '🕸️',
     positions: [
-      { name: 'Wicketkeeper', x: 0, z: 13.5 },
       { name: 'Slip', x: -3.5, z: 14.5 },
       { name: 'Backward Point', x: -11.0, z: 11.5 },
       { name: 'Cover', x: -11.5, z: 0.0 },
@@ -128,10 +124,15 @@ const FIELD_PRESETS_3D: Record<Exclude<FieldPreset, 'CUSTOM'>, { name: string; i
       { name: 'Mid On', x: 5.0, z: -10.0 },
       { name: 'Deep Sweeper Cover', x: -27.0, z: -2.0 },
       { name: 'Deep Mid-Wicket', x: 25.0, z: -7.0 },
-      { name: 'Deep Backward Square', x: 24.0, z: 17.0 },
     ],
   },
 };
+
+interface FielderItem {
+  name: string;
+  char: CricketPlayer3DInstance;
+  basePos: { x: number; y: number; z: number };
+}
 
 /**
  * Creates 3D Stumps and Bails Model
@@ -187,14 +188,20 @@ export default function CricketActionVisualizer3D({
   const sceneRef = useRef<THREE.Scene | null>(null);
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
   const animFrameIdRef = useRef<number | null>(null);
+
+  // Simulation Timeline State
   const isSimulatingRef = useRef<boolean>(false);
+  const isPausedRef = useRef<boolean>(false);
+  const currentProgressRef = useRef<number>(0);
+  const currentSeqRef = useRef<Action3DSequence | null>(null);
+  const isUserOrbitingRef = useRef<boolean>(false);
 
   // Character 3D Instances
   const strikerCharRef = useRef<CricketPlayer3DInstance | null>(null);
   const nonStrikerCharRef = useRef<CricketPlayer3DInstance | null>(null);
   const bowlerCharRef = useRef<CricketPlayer3DInstance | null>(null);
   const keeperCharRef = useRef<CricketPlayer3DInstance | null>(null);
-  const fieldersCharListRef = useRef<CricketPlayer3DInstance[]>([]);
+  const fieldersListRef = useRef<FielderItem[]>([]);
 
   // Ball & Stumps Entities
   const ballMeshRef = useRef<THREE.Mesh | null>(null);
@@ -202,9 +209,10 @@ export default function CricketActionVisualizer3D({
   const bailsRef = useRef<THREE.Mesh[]>([]);
   const stumpsRef = useRef<THREE.Mesh[]>([]);
 
-  // Visualizer UI Controls
-  const [cameraMode, setCameraMode] = useState<CameraMode>('BROADCAST');
-  const [speed, setSpeed] = useState<AnimationSpeed>(1);
+  // Visualizer UI Controls (Default 1.5x = Fast ~2.0-2.5s)
+  const [cameraMode, setCameraMode] = useState<CameraMode>('CAMERA_WIDE');
+  const [speed, setSpeed] = useState<AnimationSpeed>(1.5);
+  const [isPaused, setIsPaused] = useState<boolean>(false);
   const [debugMode, setDebugMode] = useState<boolean>(false);
   const [showBowlerTactics, setShowBowlerTactics] = useState<boolean>(false);
   const [showFieldMenu, setShowFieldMenu] = useState<boolean>(false);
@@ -212,7 +220,19 @@ export default function CricketActionVisualizer3D({
   const [resultBanner, setResultBanner] = useState<string | null>(null);
   const [stateProgress, setStateProgress] = useState<number>(0);
   const [currentActionState, setCurrentActionState] = useState<string>('READY');
-  const [selectedPlayerHUD, setSelectedPlayerHUD] = useState<{ name: string; role: string; rating: number } | null>(null);
+
+  // Live Player States for Debugging
+  const [playerDebugStates, setPlayerDebugStates] = useState<{
+    bowlerState: string;
+    strikerState: string;
+    keeperState: string;
+    targetFielder: { name: string; state: string } | null;
+  }>({
+    bowlerState: 'BOWLING_READY',
+    strikerState: 'BATTING_READY',
+    keeperState: 'KEEPER_CROUCH',
+    targetFielder: null,
+  });
 
   const isTest = format === 'Test';
   const ballColorHex = isTest ? 0xDC2626 : 0xFFFFFF;
@@ -231,23 +251,91 @@ export default function CricketActionVisualizer3D({
   }, [activeBowlingTactic]);
 
   /**
-   * 1. Initialize High-Performance Three.js 3D Cricket World with Provided 3D Characters
+   * Helper to reset all characters to their static, stable resting poses
+   */
+  const resetAllPlayersToReady = useCallback(() => {
+    // Bowler at bowling mark
+    const isSpinner = selectedTactic.includes('SPIN') || selectedTactic.includes('BREAK') || selectedTactic.includes('DOOSRA') || selectedTactic.includes('GOOGLY');
+    const startZ = isSpinner ? -15.0 : -21.0;
+    if (bowlerCharRef.current) {
+      bowlerCharRef.current.group.position.set(-0.5, 0.04, startZ);
+      bowlerCharRef.current.group.rotation.y = 0; // Look towards batter (+Z)
+      bowlerCharRef.current.updateAnimation('BOWLING_READY', 0);
+    }
+
+    // Striker at batting crease
+    if (strikerCharRef.current) {
+      strikerCharRef.current.group.position.set(0, 0.04, 9.4);
+      strikerCharRef.current.group.rotation.y = Math.PI; // Face down the pitch (-Z)
+      strikerCharRef.current.updateAnimation('BATTING_READY', 0);
+    }
+
+    // Non-striker at bowling crease
+    if (nonStrikerCharRef.current) {
+      nonStrikerCharRef.current.group.position.set(1.4, 0.04, -9.4);
+      nonStrikerCharRef.current.group.rotation.y = 0;
+      nonStrikerCharRef.current.updateAnimation('IDLE', 0);
+    }
+
+    // Wicketkeeper crouched behind stumps
+    if (keeperCharRef.current) {
+      keeperCharRef.current.group.position.set(0, 0.04, 14.2);
+      keeperCharRef.current.group.rotation.y = Math.PI; // Face pitch
+      keeperCharRef.current.updateAnimation('KEEPER_CROUCH', 0);
+    }
+
+    // All 9 tactical fielders in stable FIELD_READY
+    fieldersListRef.current.forEach((f) => {
+      f.char.group.position.set(f.basePos.x, f.basePos.y, f.basePos.z);
+      f.char.group.lookAt(0, 0.04, 9.5); // All watch striker
+      f.char.updateAnimation('FIELD_READY', 0);
+    });
+
+    // Ball in bowler's hand
+    if (ballMeshRef.current && bowlerCharRef.current) {
+      const handPos = bowlerCharRef.current.getHandWorldPosition();
+      ballMeshRef.current.position.copy(handPos);
+    }
+    if (ballShadowRef.current && ballMeshRef.current) {
+      ballShadowRef.current.position.set(ballMeshRef.current.position.x, 0.025, ballMeshRef.current.position.z);
+    }
+
+    // Reset Stumps & Bails
+    bailsRef.current.forEach((bail, idx) => {
+      bail.position.set(idx === 0 ? -0.055 : 0.055, 0.73, 0);
+      bail.rotation.set(0, 0, Math.PI / 2);
+    });
+    stumpsRef.current.forEach((stump, idx) => {
+      stump.position.set(idx === 0 ? -0.11 : idx === 1 ? 0 : 0.11, 0.36, 0);
+      stump.rotation.set(0, 0, 0);
+    });
+
+    setPlayerDebugStates({
+      bowlerState: 'BOWLING_READY',
+      strikerState: 'BATTING_READY',
+      keeperState: 'KEEPER_CROUCH',
+      targetFielder: null,
+    });
+  }, [selectedTactic]);
+
+  /**
+   * 1. Initialize High-Performance Three.js 3D Cricket World
    */
   useEffect(() => {
     if (!mountRef.current) return;
     const container = mountRef.current;
-    const width = container.clientWidth || 500;
+    const width = container.clientWidth || 600;
     const height = container.clientHeight || 500;
 
     // Scene
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0x050c1e);
-    scene.fog = new THREE.FogExp2(0x050c1e, 0.007);
+    scene.fog = new THREE.FogExp2(0x050c1e, 0.006);
     sceneRef.current = scene;
 
-    // Camera
-    const camera = new THREE.PerspectiveCamera(45, width / height, 0.5, 300);
-    camera.position.set(0, 15, 23);
+    // Camera — Default WIDE view showing full field
+    const camera = new THREE.PerspectiveCamera(48, width / height, 0.5, 350);
+    camera.position.set(0, 32, 42);
     camera.lookAt(0, 0, 0);
     cameraRef.current = camera;
 
@@ -261,25 +349,25 @@ export default function CricketActionVisualizer3D({
 
     container.replaceChildren(renderer.domElement);
 
-    // ── Lighting & Atmosphere ──
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
+    // ── Lighting & Stadium Atmosphere ──
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.75);
     scene.add(ambientLight);
 
     const hemiLight = new THREE.HemisphereLight(0xffffff, 0x1a331a, 0.45);
     hemiLight.position.set(0, 50, 0);
     scene.add(hemiLight);
 
-    const sunLight = new THREE.DirectionalLight(0xfffaed, 1.3);
+    const sunLight = new THREE.DirectionalLight(0xfffaed, 1.4);
     sunLight.position.set(25, 45, 25);
     sunLight.castShadow = true;
     sunLight.shadow.mapSize.width = 2048;
     sunLight.shadow.mapSize.height = 2048;
     sunLight.shadow.camera.near = 1;
     sunLight.shadow.camera.far = 120;
-    sunLight.shadow.camera.left = -35;
-    sunLight.shadow.camera.right = 35;
-    sunLight.shadow.camera.top = 35;
-    sunLight.shadow.camera.bottom = -35;
+    sunLight.shadow.camera.left = -40;
+    sunLight.shadow.camera.right = 40;
+    sunLight.shadow.camera.top = 40;
+    sunLight.shadow.camera.bottom = -40;
     sunLight.shadow.bias = -0.0005;
     scene.add(sunLight);
 
@@ -304,7 +392,7 @@ export default function CricketActionVisualizer3D({
 
     // 30-Yard Circle Line
     const circleGeo = new THREE.RingGeometry(18.5, 18.7, 64);
-    const circleMat = new THREE.MeshBasicMaterial({ color: 0xffffff, opacity: 0.25, transparent: true, side: THREE.DoubleSide });
+    const circleMat = new THREE.MeshBasicMaterial({ color: 0xffffff, opacity: 0.35, transparent: true, side: THREE.DoubleSide });
     const circle = new THREE.Mesh(circleGeo, circleMat);
     circle.rotation.x = -Math.PI / 2;
     circle.position.y = 0.01;
@@ -376,8 +464,7 @@ export default function CricketActionVisualizer3D({
     scene.add(ballShadow);
     ballShadowRef.current = ballShadow;
 
-    // ── INTEGRATE THE PROVIDED 3D CRICKET CHARACTERS ──
-    // 1. Striker (Batsman in white kit with batting pads, helmet, and bat)
+    // ── 1. Striker (Batsman in white kit with batting pads, helmet, and bat) ──
     const strikerChar = createCricketCharacter({
       id: striker?.id || 'striker-1',
       name: striker?.name || 'Striker',
@@ -390,12 +477,12 @@ export default function CricketActionVisualizer3D({
       hasHelmet: true,
     });
     strikerChar.group.position.set(0, 0.04, 9.4);
-    strikerChar.group.rotation.y = Math.PI; // Face down the pitch toward bowler
+    strikerChar.group.rotation.y = Math.PI;
     strikerChar.updateAnimation('BATTING_READY', 0);
     scene.add(strikerChar.group);
     strikerCharRef.current = strikerChar;
 
-    // 2. Non-Striker
+    // ── 2. Non-Striker (At non-striker bowling crease) ──
     const nonStrikerChar = createCricketCharacter({
       id: nonStriker?.id || 'non-striker-1',
       name: nonStriker?.name || 'Non-Striker',
@@ -412,7 +499,7 @@ export default function CricketActionVisualizer3D({
     scene.add(nonStrikerChar.group);
     nonStrikerCharRef.current = nonStrikerChar;
 
-    // 3. Bowler
+    // ── 3. Bowler (Aligned along pitch axis at bowling mark) ──
     const bowlerChar = createCricketCharacter({
       id: bowler?.id || 'bowler-1',
       name: bowler?.name || 'Bowler',
@@ -424,12 +511,12 @@ export default function CricketActionVisualizer3D({
       hasPads: false,
       hasHelmet: false,
     });
-    bowlerChar.group.position.set(-0.8, 0.04, -18);
+    bowlerChar.group.position.set(-0.5, 0.04, -21);
     bowlerChar.updateAnimation('BOWLING_READY', 0);
     scene.add(bowlerChar.group);
     bowlerCharRef.current = bowlerChar;
 
-    // 4. Wicketkeeper
+    // ── 4. Wicketkeeper (Crouched behind striker's stumps) ──
     const keeperChar = createCricketCharacter({
       id: 'keeper-1',
       name: 'Wicketkeeper',
@@ -442,14 +529,15 @@ export default function CricketActionVisualizer3D({
       hasHelmet: true,
       isWicketkeeper: true,
     });
-    keeperChar.group.position.set(0, 0.04, 14.5);
-    keeperChar.updateAnimation('KEEPER_READY', 0);
+    keeperChar.group.position.set(0, 0.04, 14.2);
+    keeperChar.group.rotation.y = Math.PI;
+    keeperChar.updateAnimation('KEEPER_CROUCH', 0);
     scene.add(keeperChar.group);
     keeperCharRef.current = keeperChar;
 
-    // 5. 9 Tactical Fielders
-    const presetPositions = FIELD_PRESETS_3D.BALANCED.positions.slice(2);
-    const fieldersList: CricketPlayer3DInstance[] = [];
+    // ── 5. 9 Tactical Fielders (All placed in stationary FIELD_READY) ──
+    const presetPositions = FIELD_PRESETS_3D.BALANCED.positions;
+    const fieldersList: FielderItem[] = [];
     presetPositions.forEach((pos, idx) => {
       const fielderChar = createCricketCharacter({
         id: `fielder-${idx}`,
@@ -466,9 +554,78 @@ export default function CricketActionVisualizer3D({
       fielderChar.group.lookAt(0, 0.04, 9.5);
       fielderChar.updateAnimation('FIELD_READY', 0);
       scene.add(fielderChar.group);
-      fieldersList.push(fielderChar);
+      fieldersList.push({
+        name: pos.name,
+        char: fielderChar,
+        basePos: { x: pos.x, y: 0.04, z: pos.z },
+      });
     });
-    fieldersCharListRef.current = fieldersList;
+    fieldersListRef.current = fieldersList;
+
+    // ── Manual User Orbit Controls ──
+    let isDragging = false;
+    let prevMouseX = 0;
+    let prevMouseY = 0;
+    let sphericalTheta = 0;
+    let sphericalPhi = 0.65;
+    let sphericalRadius = 52;
+
+    const onPointerDown = (e: MouseEvent | TouchEvent) => {
+      isDragging = true;
+      isUserOrbitingRef.current = true;
+      const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
+      const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY;
+      prevMouseX = clientX;
+      prevMouseY = clientY;
+    };
+
+    const onPointerMove = (e: MouseEvent | TouchEvent) => {
+      if (!isDragging) return;
+      const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
+      const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY;
+      const deltaX = clientX - prevMouseX;
+      const deltaY = clientY - prevMouseY;
+      prevMouseX = clientX;
+      prevMouseY = clientY;
+
+      sphericalTheta -= deltaX * 0.007;
+      sphericalPhi = Math.max(0.1, Math.min(Math.PI / 2 - 0.05, sphericalPhi + deltaY * 0.007));
+
+      if (camera) {
+        camera.position.x = sphericalRadius * Math.sin(sphericalPhi) * Math.sin(sphericalTheta);
+        camera.position.y = sphericalRadius * Math.cos(sphericalPhi);
+        camera.position.z = sphericalRadius * Math.sin(sphericalPhi) * Math.cos(sphericalTheta);
+        camera.lookAt(0, 0, 0);
+      }
+    };
+
+    const onPointerUp = () => {
+      isDragging = false;
+      setTimeout(() => {
+        isUserOrbitingRef.current = false;
+      }, 2500);
+    };
+
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      isUserOrbitingRef.current = true;
+      sphericalRadius = Math.max(15, Math.min(90, sphericalRadius + e.deltaY * 0.04));
+      if (camera) {
+        camera.position.x = sphericalRadius * Math.sin(sphericalPhi) * Math.sin(sphericalTheta);
+        camera.position.y = sphericalRadius * Math.cos(sphericalPhi);
+        camera.position.z = sphericalRadius * Math.sin(sphericalPhi) * Math.cos(sphericalTheta);
+        camera.lookAt(0, 0, 0);
+      }
+      setTimeout(() => {
+        isUserOrbitingRef.current = false;
+      }, 2500);
+    };
+
+    const dom = renderer.domElement;
+    dom.addEventListener('mousedown', onPointerDown);
+    window.addEventListener('mousemove', onPointerMove);
+    window.addEventListener('mouseup', onPointerUp);
+    dom.addEventListener('wheel', onWheel, { passive: false });
 
     // Resize Handler
     const handleResize = () => {
@@ -493,6 +650,10 @@ export default function CricketActionVisualizer3D({
     return () => {
       cancelAnimationFrame(animId);
       window.removeEventListener('resize', handleResize);
+      dom.removeEventListener('mousedown', onPointerDown);
+      window.removeEventListener('mousemove', onPointerMove);
+      window.removeEventListener('mouseup', onPointerUp);
+      dom.removeEventListener('wheel', onWheel);
       renderer.dispose();
       scene.clear();
     };
@@ -500,6 +661,267 @@ export default function CricketActionVisualizer3D({
 
   /**
    * 2. Full 3D Physical Delivery & Skeletal Animation Synchronization Engine
+   */
+  const executeDeliveryFrame = useCallback((p: number, seq: Action3DSequence) => {
+    currentProgressRef.current = p;
+    setStateProgress(Math.round(p * 100));
+
+    const { phases, ballTrajectory } = seq;
+    const ballMesh = ballMeshRef.current;
+    const ballShadow = ballShadowRef.current;
+    const bowlerChar = bowlerCharRef.current;
+    const strikerChar = strikerCharRef.current;
+    const nonStrikerChar = nonStrikerCharRef.current;
+    const keeperChar = keeperCharRef.current;
+    const camera = cameraRef.current;
+
+    const isSpinner = selectedTactic.includes('SPIN') || selectedTactic.includes('BREAK') || selectedTactic.includes('DOOSRA') || selectedTactic.includes('GOOGLY');
+    const startBowlerZ = isSpinner ? -15.0 : -21.0;
+
+    // Find closest fielder to the target shot position
+    let targetFielderItem: FielderItem | null = null;
+    if (fieldersListRef.current.length > 0) {
+      let minDist = Infinity;
+      fieldersListRef.current.forEach((f) => {
+        const d = Math.hypot(f.basePos.x - ballTrajectory.targetPos.x, f.basePos.z - ballTrajectory.targetPos.z);
+        if (d < minDist) {
+          minDist = d;
+          targetFielderItem = f;
+        }
+      });
+    }
+
+    // ── Phase 1: Bowler Run-Up (0.00 - 0.18) [~0.35s]
+    if (p < phases.runupEnd) {
+      setCurrentActionState('BOWLER_RUNUP');
+      const pRun = p / phases.runupEnd;
+      const curZ = startBowlerZ + (pRun * (Math.abs(startBowlerZ) - 10.0));
+
+      if (bowlerChar) {
+        bowlerChar.group.position.z = curZ;
+        bowlerChar.updateAnimation('RUN_UP', pRun);
+      }
+
+      if (ballMesh && bowlerChar) {
+        const handPos = bowlerChar.getHandWorldPosition();
+        ballMesh.position.copy(handPos);
+      }
+      if (ballShadow && ballMesh) {
+        ballShadow.position.set(ballMesh.position.x, 0.025, ballMesh.position.z);
+      }
+
+      if (strikerChar) strikerChar.updateAnimation('BATTING_READY', pRun);
+      if (keeperChar) keeperChar.updateAnimation('KEEPER_CROUCH', 0);
+      fieldersListRef.current.forEach((f) => f.char.updateAnimation('FIELD_READY', 0));
+
+      setPlayerDebugStates({
+        bowlerState: 'RUN_UP',
+        strikerState: 'BATTING_READY',
+        keeperState: 'KEEPER_CROUCH',
+        targetFielder: null,
+      });
+    }
+
+    // ── Phase 2: Delivery Stride & Windmill to Bounce (0.18 - 0.38) [~0.45s]
+    else if (p < phases.bounceEnd) {
+      setCurrentActionState('BALL_FLIGHT');
+      const pFlight = (p - phases.runupEnd) / (phases.bounceEnd - phases.runupEnd);
+      const startZ = -9.5;
+      const endZ = ballTrajectory.bouncePos.z;
+
+      if (bowlerChar) {
+        if (pFlight < 0.4) {
+          bowlerChar.updateAnimation('DELIVERY_STRIDE', pFlight / 0.4);
+        } else {
+          bowlerChar.updateAnimation('FOLLOW_THROUGH', (pFlight - 0.4) / 0.6);
+        }
+      }
+
+      if (strikerChar) strikerChar.updateAnimation('BACKLIFT', pFlight);
+      if (keeperChar) keeperChar.updateAnimation('KEEPER_CROUCH', pFlight);
+
+      const swingCurve = ballTrajectory.swingFactor * Math.sin(pFlight * Math.PI) * 0.14;
+      const curX = ballTrajectory.bouncePos.x * pFlight + swingCurve;
+      const curZ = startZ + (endZ - startZ) * pFlight;
+      const curY = 1.9 * (1 - pFlight) + 0.04 + Math.sin(pFlight * Math.PI) * 0.8;
+
+      if (ballMesh) {
+        ballMesh.position.set(curX, curY, curZ);
+        ballMesh.rotation.z = (tacticConfig.seamAngle * Math.PI) / 180;
+      }
+      if (ballShadow) {
+        ballShadow.position.set(curX, 0.025, curZ);
+        const shadowScale = Math.max(0.2, 1 - (curY / 4));
+        ballShadow.scale.set(shadowScale, shadowScale, 1);
+      }
+
+      setPlayerDebugStates({
+        bowlerState: 'FOLLOW_THROUGH',
+        strikerState: 'BACKLIFT',
+        keeperState: 'KEEPER_CROUCH',
+        targetFielder: null,
+      });
+    }
+
+    // ── Phase 3: Bounce to Bat Contact (0.38 - 0.48) [~0.20s]
+    else if (p < phases.contactEnd) {
+      setCurrentActionState('BOUNCE');
+      const pBounce = (p - phases.bounceEnd) / (phases.contactEnd - phases.bounceEnd);
+      const startZ = ballTrajectory.bouncePos.z;
+      const endZ = 9.5;
+
+      const curX = ballTrajectory.bouncePos.x + (ballTrajectory.seamDeviation * pBounce);
+      const curZ = startZ + (endZ - startZ) * pBounce;
+      const curY = 0.05 + Math.sin(pBounce * Math.PI) * ballTrajectory.apexHeight;
+
+      if (ballMesh) ballMesh.position.set(curX, curY, curZ);
+      if (ballShadow) {
+        ballShadow.position.set(curX, 0.025, curZ);
+        ballShadow.scale.set(1 - curY / 3, 1 - curY / 3, 1);
+      }
+
+      if (strikerChar) strikerChar.updateAnimation(seq.batterAnim, pBounce * 0.5);
+
+      setPlayerDebugStates({
+        bowlerState: 'FOLLOW_THROUGH',
+        strikerState: seq.batterAnim,
+        keeperState: 'KEEPER_CROUCH',
+        targetFielder: null,
+      });
+    }
+
+    // ── Phase 4: Bat Strike, Ball Flight, Running, & Fielding (0.48 - 0.80) [~0.75s]
+    else if (p < phases.fieldingEnd) {
+      setCurrentActionState('SHOT_TRAVEL');
+      const pShot = (p - phases.contactEnd) / (phases.fieldingEnd - phases.contactEnd);
+      const startX = 0;
+      const startZ = 9.5;
+
+      if (strikerChar) strikerChar.updateAnimation(seq.batterAnim, 0.5 + pShot * 0.5);
+
+      const curX = startX + (ballTrajectory.targetPos.x - startX) * pShot;
+      const curZ = startZ + (ballTrajectory.targetPos.z - startZ) * pShot;
+      let curY = 0.08;
+
+      if (seq.isSix) {
+        const apexHeight = 11.5;
+        curY = 0.08 + Math.sin(pShot * Math.PI) * apexHeight;
+      } else {
+        let bounceSkip = 0;
+        if (pShot < 0.35) bounceSkip = Math.sin((pShot / 0.35) * Math.PI) * 0.45;
+        else if (pShot < 0.7) bounceSkip = Math.sin(((pShot - 0.35) / 0.35) * Math.PI) * 0.2;
+        curY = 0.08 + bounceSkip;
+      }
+
+      if (ballMesh) {
+        ballMesh.position.set(curX, curY, curZ);
+        ballMesh.rotation.x += 0.45;
+      }
+      if (ballShadow) {
+        ballShadow.position.set(curX, 0.025, curZ);
+        const shadowScale = Math.max(0.2, 1 - (curY / 14));
+        ballShadow.scale.set(shadowScale, shadowScale, 1);
+      }
+
+      // Accelerated running between wickets (1 run: 0.5s, 2 runs: 0.8s, 3 runs: 1.1s)
+      if (seq.runs > 0 && !seq.isWicket) {
+        const runMultiplier = seq.runs === 1 ? 1.0 : seq.runs === 2 ? 1.8 : 2.6;
+        const runCycle = Math.min(1, pShot * runMultiplier);
+        const sZ = 9.4 - (runCycle * 18.8);
+        const nsZ = -9.4 + (runCycle * 18.8);
+
+        if (strikerChar) {
+          strikerChar.group.position.z = sZ;
+          strikerChar.updateAnimation('RUN_BETWEEN_WICKETS', pShot * 3);
+        }
+        if (nonStrikerChar) {
+          nonStrikerChar.group.position.z = nsZ;
+          nonStrikerChar.updateAnimation('RUN_BETWEEN_WICKETS', pShot * 3);
+        }
+      }
+
+      // Target Fielder moves; other 8 fielders stay stationary
+      if (targetFielderItem) {
+        const tf = targetFielderItem as FielderItem;
+        const targetX = tf.basePos.x + (ballTrajectory.targetPos.x - tf.basePos.x) * (pShot * 0.6);
+        const targetZ = tf.basePos.z + (ballTrajectory.targetPos.z - tf.basePos.z) * (pShot * 0.6);
+        tf.char.group.position.set(targetX, tf.basePos.y, targetZ);
+        tf.char.group.lookAt(ballTrajectory.targetPos.x, 0.04, ballTrajectory.targetPos.z);
+
+        if (seq.isCatch) {
+          if (pShot < 0.65) tf.char.updateAnimation('RUN_TO_BALL', pShot);
+          else tf.char.updateAnimation('HIGH_CATCH', (pShot - 0.65) / 0.35);
+        } else {
+          if (pShot < 0.65) tf.char.updateAnimation('RUN_TO_BALL', pShot);
+          else if (pShot < 0.85) tf.char.updateAnimation('GROUND_FIELD', (pShot - 0.65) / 0.2);
+          else tf.char.updateAnimation('THROW', (pShot - 0.85) / 0.15);
+        }
+      }
+
+      if (keeperChar) {
+        if (seq.isWicket && seq.wicketType?.toLowerCase().includes('caught behind')) {
+          keeperChar.updateAnimation('KEEPER_CATCH', pShot);
+        } else if (seq.isWicket && seq.wicketType?.toLowerCase().includes('stump')) {
+          keeperChar.updateAnimation('KEEPER_STUMPING', pShot);
+        } else if (seq.runs === 0 && !seq.isFour && !seq.isSix) {
+          keeperChar.updateAnimation('KEEPER_COLLECT', pShot);
+        }
+      }
+
+      if (seq.isBowled && pShot > 0.05) {
+        bailsRef.current.forEach((bail, i) => {
+          bail.position.y += 0.08;
+          bail.position.x += i === 0 ? -0.05 : 0.05;
+          bail.rotation.z += 0.2;
+        });
+        stumpsRef.current.forEach((stump) => {
+          stump.rotation.x = -0.3;
+        });
+        if (bowlerChar) bowlerChar.updateAnimation('BOWLER_CELEBRATION', pShot);
+        if (strikerChar) strikerChar.updateAnimation('BOWLED_REACTION', pShot);
+      }
+
+      setPlayerDebugStates({
+        bowlerState: seq.isBowled ? 'BOWLER_CELEBRATION' : 'IDLE',
+        strikerState: seq.runs > 0 ? 'RUN_BETWEEN_WICKETS' : seq.batterAnim,
+        keeperState: seq.isWicket ? 'KEEPER_CATCH' : 'KEEPER_COLLECT',
+        targetFielder: targetFielderItem ? { name: (targetFielderItem as FielderItem).name, state: seq.isCatch ? 'HIGH_CATCH' : 'GROUND_FIELD' } : null,
+      });
+    }
+
+    // ── Phase 5: Final Result & Banner Trigger (0.80 - 1.00) [~0.30s]
+    else {
+      setCurrentActionState('RESULT');
+      setResultBanner(seq.resultLabel);
+    }
+
+    // ── Fast Snappy Camera Lerp (0.12 lerp speed) ──
+    if (camera && ballMesh && !isUserOrbitingRef.current) {
+      if (cameraMode === 'CAMERA_WIDE') {
+        camera.position.lerp(new THREE.Vector3(0, 32, 42), 0.12);
+        camera.lookAt(0, 0, 0);
+      } else if (cameraMode === 'BROADCAST') {
+        camera.position.lerp(new THREE.Vector3(0, 14, 28), 0.12);
+        camera.lookAt(0, 1, 0);
+      } else if (cameraMode === 'BALL_FOLLOW') {
+        const desiredCamPos = new THREE.Vector3(ballMesh.position.x * 0.6, 7 + ballMesh.position.y * 0.4, ballMesh.position.z + 12);
+        camera.position.lerp(desiredCamPos, 0.14);
+        camera.lookAt(ballMesh.position.x, ballMesh.position.y, ballMesh.position.z);
+      } else if (cameraMode === 'BATTER_FOCUS') {
+        camera.position.lerp(new THREE.Vector3(-2.5, 3.0, 4.0), 0.12);
+        camera.lookAt(0, 1.2, 9.4);
+      } else if (cameraMode === 'BOWLER_FOCUS') {
+        camera.position.lerp(new THREE.Vector3(2.5, 3.0, -18.0), 0.12);
+        camera.lookAt(0, 1.2, -10.0);
+      } else if (cameraMode === 'WICKET_FOCUS') {
+        camera.position.lerp(new THREE.Vector3(0, 2.0, 13.5), 0.12);
+        camera.lookAt(0, 0.7, 10.1);
+      }
+    }
+  }, [selectedTactic, tacticConfig.seamAngle, cameraMode]);
+
+  /**
+   * 3. Run Delivery Animation Controller
    */
   const run3DDeliveryAnimation = useCallback(() => {
     if (!lastBall || speed === 0) {
@@ -510,326 +932,69 @@ export default function CricketActionVisualizer3D({
       return;
     }
 
-    const { runs, isWicket, isExtra, extraType, wicketType } = lastBall;
-    const currentTactic = lastBall.bowlingTactic || selectedTactic;
-    const tacticData = BOWLING_TACTICS_CONFIG[currentTactic] || BOWLING_TACTICS_CONFIG.OUTSWING;
+    const seq: Action3DSequence = adaptDeliveryTo3DSequence(lastBall, selectedTactic);
+    currentSeqRef.current = seq;
 
     isSimulatingRef.current = true;
-    setResultBanner(null); // CRITICAL: NEVER display result banner before action finishes!
+    isPausedRef.current = false;
+    setIsPaused(false);
+    setResultBanner(null);
 
-    const speedMultiplier = speed === 1 ? 1 : speed === 2 ? 0.5 : 0.25;
-    const baseDuration = (runs === 6 ? 3400 : runs === 4 ? 3000 : runs > 0 ? 2700 : 2200) * speedMultiplier;
+    resetAllPlayersToReady();
+
+    // Speed Multipliers: 1x (Normal ~2.5-3.0s), 1.5x (Fast ~2.0-2.5s, Default), 2x (Very Fast ~1.3-1.8s)
+    const speedMultiplier = speed === 1 ? 1.0 : speed === 1.5 ? 0.68 : 0.45;
+    const baseDuration = (seq.isSix ? 2800 : seq.isFour ? 2600 : seq.runs > 0 ? 2700 : seq.isCaught ? 3000 : 2200) * speedMultiplier;
 
     let startTime: number | null = null;
-
-    // Reset Entities
-    const ballMesh = ballMeshRef.current;
-    const ballShadow = ballShadowRef.current;
-    const bowlerChar = bowlerCharRef.current;
-    const strikerChar = strikerCharRef.current;
-    const nonStrikerChar = nonStrikerCharRef.current;
-    const keeperChar = keeperCharRef.current;
-    const camera = cameraRef.current;
-
-    if (bowlerChar) {
-      bowlerChar.group.position.set(-0.8, 0.04, -18);
-      bowlerChar.updateAnimation('BOWLING_READY', 0);
-    }
-    if (strikerChar) {
-      strikerChar.group.position.set(0, 0.04, 9.4);
-      strikerChar.updateAnimation('BATTING_READY', 0);
-    }
-    if (nonStrikerChar) {
-      nonStrikerChar.group.position.set(1.4, 0.04, -9.4);
-      nonStrikerChar.updateAnimation('IDLE', 0);
-    }
-
-    // Reset Stumps & Bails
-    bailsRef.current.forEach((bail, idx) => {
-      bail.position.set(idx === 0 ? -0.055 : 0.055, 0.73, 0);
-      bail.rotation.set(0, 0, Math.PI / 2);
-    });
-    stumpsRef.current.forEach((stump, idx) => {
-      stump.position.set(idx === 0 ? -0.11 : idx === 1 ? 0 : 0.11, 0.36, 0);
-      stump.rotation.set(0, 0, 0);
-    });
-
-    // Determine 3D Shot Trajectory Angle & Batting Animation
-    let shotAngleDeg = -45;
-    let battingAnimClip: PlayerAnimState = 'FORWARD_DEFENCE';
-
-    if (runs === 6) {
-      const angles = [-65, -20, 15, 55, 75, 95, -130, 145];
-      shotAngleDeg = angles[Math.floor(Math.random() * angles.length)];
-      battingAnimClip = 'LOFTED_SIX';
-    } else if (runs === 4) {
-      const options: { angle: number; clip: PlayerAnimState }[] = [
-        { angle: -55, clip: 'COVER_DRIVE' },
-        { angle: -5, clip: 'STRAIGHT_DRIVE' },
-        { angle: -95, clip: 'SQUARE_CUT' },
-        { angle: 65, clip: 'PULL_SHOT' },
-        { angle: 95, clip: 'HOOK_SHOT' },
-        { angle: 25, clip: 'STRAIGHT_DRIVE' },
-      ];
-      const opt = options[Math.floor(Math.random() * options.length)];
-      shotAngleDeg = opt.angle;
-      battingAnimClip = opt.clip;
-    } else if (runs > 0) {
-      const options: { angle: number; clip: PlayerAnimState }[] = [
-        { angle: -75, clip: 'COVER_DRIVE' },
-        { angle: -25, clip: 'STRAIGHT_DRIVE' },
-        { angle: 55, clip: 'PULL_SHOT' },
-        { angle: 90, clip: 'FLICK' },
-      ];
-      const opt = options[Math.floor(Math.random() * options.length)];
-      shotAngleDeg = opt.angle;
-      battingAnimClip = opt.clip;
-    } else {
-      battingAnimClip = isWicket && wicketType?.toLowerCase().includes('bowled') ? 'LEAVE' : 'FORWARD_DEFENCE';
-    }
-
-    const rad = (shotAngleDeg - 90) * (Math.PI / 180);
-    const targetDist = runs === 6 ? 41 : runs === 4 ? 37.5 : runs * 4.5 + 4;
-    const targetX = Math.cos(rad) * targetDist;
-    const targetZ = 9.5 + Math.sin(rad) * targetDist;
-
-    let bounceZ = currentTactic === 'YORKER' ? 8.8 : currentTactic === 'BOUNCER' ? -2.0 : 4.5;
-    let bounceX = currentTactic === 'OUTSWING' ? 0.35 : currentTactic === 'INSWING' ? -0.35 : 0;
+    let pausedTimeOffset = 0;
+    let pauseStart: number | null = null;
 
     const step3D = (timestamp: number) => {
+      if (isPausedRef.current) {
+        if (!pauseStart) pauseStart = timestamp;
+        animFrameIdRef.current = requestAnimationFrame(step3D);
+        return;
+      } else if (pauseStart) {
+        pausedTimeOffset += timestamp - pauseStart;
+        pauseStart = null;
+      }
+
       if (!startTime) startTime = timestamp;
-      const elapsed = timestamp - startTime;
-      const p = Math.min(1, elapsed / baseDuration);
-      setStateProgress(Math.round(p * 100));
+      const elapsed = timestamp - startTime - pausedTimeOffset;
+      const p = Math.min(1, Math.max(0, elapsed / baseDuration));
 
-      // ── Phase 1: Bowler Run-Up & Batter Anticipation (0.00 - 0.25)
-      if (p < 0.25) {
-        setCurrentActionState('BOWLER_RUNUP');
-        const pRun = p / 0.25;
-        const curZ = -18 + (pRun * 8.5); // Strides forward from -18 to -9.5
-
-        if (bowlerChar) {
-          bowlerChar.group.position.z = curZ;
-          bowlerChar.updateAnimation('RUN_UP', pRun);
-        }
-
-        // Ball attached to bowler's right hand during run-in
-        if (ballMesh && bowlerChar) {
-          const handPos = bowlerChar.getHandWorldPosition();
-          ballMesh.position.copy(handPos);
-        }
-        if (ballShadow && ballMesh) {
-          ballShadow.position.set(ballMesh.position.x, 0.025, ballMesh.position.z);
-        }
-
-        // Batter tapping bat & ready stance
-        if (strikerChar) {
-          strikerChar.updateAnimation('BATTING_READY', pRun);
-        }
-      }
-
-      // ── Phase 2: Delivery Release & Flight with Swing Curvature (0.25 - 0.50)
-      else if (p < 0.50) {
-        setCurrentActionState('BALL_FLIGHT');
-        const pFlight = (p - 0.25) / 0.25;
-        const startZ = -9.5;
-        const endZ = bounceZ;
-
-        // Bowler delivery stride windmill & follow-through
-        if (bowlerChar) {
-          if (pFlight < 0.3) {
-            bowlerChar.updateAnimation('DELIVERY_STRIDE', pFlight / 0.3);
-          } else {
-            bowlerChar.updateAnimation('FOLLOW_THROUGH', (pFlight - 0.3) / 0.7);
-          }
-        }
-
-        // Batter initiates backlift
-        if (strikerChar) {
-          strikerChar.updateAnimation('BACKLIFT', pFlight);
-        }
-
-        // Ball flight with aerodynamic swing curve
-        const swingCurve = tacticData.swingFactor * Math.sin(pFlight * Math.PI) * 0.14;
-        const curX = bounceX * pFlight + swingCurve;
-        const curZ = startZ + (endZ - startZ) * pFlight;
-        const curY = 1.9 * (1 - pFlight) + 0.04 + Math.sin(pFlight * Math.PI) * (0.8 * tacticData.bounceMultiplier);
-
-        if (ballMesh) {
-          ballMesh.position.set(curX, curY, curZ);
-          ballMesh.rotation.z = (tacticData.seamAngle * Math.PI) / 180;
-        }
-        if (ballShadow) {
-          ballShadow.position.set(curX, 0.025, curZ);
-          const shadowScale = Math.max(0.2, 1 - (curY / 4));
-          ballShadow.scale.set(shadowScale, shadowScale, 1);
-        }
-      }
-
-      // ── Phase 3: Bounce to Bat Contact (0.50 - 0.65)
-      else if (p < 0.65) {
-        setCurrentActionState('BOUNCE');
-        const pBounce = (p - 0.50) / 0.15;
-        const startZ = bounceZ;
-        const endZ = 9.5;
-
-        // Seam / Spin deviation off pitch
-        let deviation = 0;
-        if (currentTactic === 'OFF_BREAK' || currentTactic === 'GOOGLY') deviation = pBounce * 0.25;
-        else if (currentTactic === 'LEG_BREAK' || currentTactic === 'DOOSRA') deviation = -pBounce * 0.25;
-
-        const curX = bounceX + deviation;
-        const curZ = startZ + (endZ - startZ) * pBounce;
-        const apexY = currentTactic === 'BOUNCER' ? 1.6 : currentTactic === 'YORKER' ? 0.2 : 0.85;
-        const curY = 0.05 + Math.sin(pBounce * Math.PI) * apexY;
-
-        if (ballMesh) ballMesh.position.set(curX, curY, curZ);
-        if (ballShadow) {
-          ballShadow.position.set(curX, 0.025, curZ);
-          ballShadow.scale.set(1 - curY / 3, 1 - curY / 3, 1);
-        }
-
-        // Striker initiates downswing toward contact point
-        if (strikerChar) {
-          strikerChar.updateAnimation(battingAnimClip, pBounce * 0.5);
-        }
-      }
-
-      // ── Phase 4: Bat Strike, Shot Travel, Running, & Fielding (0.65 - 0.90)
-      else if (p < 0.90) {
-        setCurrentActionState('SHOT_TRAVEL');
-        const pShot = (p - 0.65) / 0.25;
-        const startX = 0;
-        const startZ = 9.5;
-
-        // Full shot follow-through
-        if (strikerChar) {
-          strikerChar.updateAnimation(battingAnimClip, 0.5 + pShot * 0.5);
-        }
-
-        const curX = startX + (targetX - startX) * pShot;
-        const curZ = startZ + (targetZ - startZ) * pShot;
-        let curY = 0.08;
-
-        if (runs === 6) {
-          // 3D Parabolic Six Arc
-          const apexHeight = 11.5;
-          curY = 0.08 + Math.sin(pShot * Math.PI) * apexHeight;
-        } else {
-          // Four / Rolling ground ball with grass skips
-          let bounceSkip = 0;
-          if (pShot < 0.35) bounceSkip = Math.sin((pShot / 0.35) * Math.PI) * 0.45;
-          else if (pShot < 0.7) bounceSkip = Math.sin(((pShot - 0.35) / 0.35) * Math.PI) * 0.2;
-          curY = 0.08 + bounceSkip;
-        }
-
-        if (ballMesh) {
-          ballMesh.position.set(curX, curY, curZ);
-          ballMesh.rotation.x += 0.35;
-        }
-        if (ballShadow) {
-          ballShadow.position.set(curX, 0.025, curZ);
-          const shadowScale = Math.max(0.2, 1 - (curY / 14));
-          ballShadow.scale.set(shadowScale, shadowScale, 1);
-        }
-
-        // Batters running between wickets on runs
-        if (runs > 0 && !isWicket) {
-          const runCycle = Math.min(1, pShot * (runs >= 2 ? 1.8 : 1.0));
-          const sZ = 9.4 - (runCycle * 18.8); // 9.4 to -9.4
-          const nsZ = -9.4 + (runCycle * 18.8);
-
-          if (strikerChar) {
-            strikerChar.group.position.z = sZ;
-            strikerChar.updateAnimation('RUN_BETWEEN_WICKETS', pShot * 2);
-          }
-          if (nonStrikerChar) {
-            nonStrikerChar.group.position.z = nsZ;
-            nonStrikerChar.updateAnimation('RUN_BETWEEN_WICKETS', pShot * 2);
-          }
-        }
-
-        // Nearest Fielder pursues and fields
-        if (fieldersCharListRef.current.length > 0) {
-          const nearestFielder = fieldersCharListRef.current[0];
-          nearestFielder.group.position.x += (targetX - nearestFielder.group.position.x) * (pShot * 0.06);
-          nearestFielder.group.position.z += (targetZ - nearestFielder.group.position.z) * (pShot * 0.06);
-          nearestFielder.group.lookAt(targetX, 0.04, targetZ);
-
-          if (pShot < 0.7) {
-            nearestFielder.updateAnimation('RUN_TO_BALL', pShot);
-          } else if (pShot < 0.88) {
-            nearestFielder.updateAnimation('GROUND_FIELD', (pShot - 0.7) / 0.18);
-          } else {
-            nearestFielder.updateAnimation('THROW', (pShot - 0.88) / 0.12);
-          }
-        }
-
-        // Bowled dismissal bails reaction
-        if (isWicket && wicketType?.toLowerCase().includes('bowled') && pShot > 0.05) {
-          bailsRef.current.forEach((bail, i) => {
-            bail.position.y += 0.08;
-            bail.position.x += i === 0 ? -0.05 : 0.05;
-            bail.rotation.z += 0.2;
-          });
-          stumpsRef.current.forEach((stump) => {
-            stump.rotation.x = -0.3;
-          });
-          if (bowlerChar) bowlerChar.updateAnimation('CELEBRATION', pShot);
-          if (strikerChar) strikerChar.updateAnimation('BOWLED_REACTION', pShot);
-        }
-      }
-
-      // ── Phase 5: Final Result & Banner Trigger (0.90 - 1.00)
-      else {
-        setCurrentActionState('RESULT');
-        // ONLY AT THIS MOMENT is the result banner displayed!
-        if (isWicket) {
-          setResultBanner(wicketType?.toUpperCase() || 'WICKET!');
-        } else if (runs === 6) {
-          setResultBanner('SIX!');
-        } else if (runs === 4) {
-          setResultBanner('FOUR!');
-        } else if (runs > 0) {
-          setResultBanner(`${runs} RUN${runs > 1 ? 'S' : ''}`);
-        } else {
-          setResultBanner('DOT BALL');
-        }
-      }
-
-      // ── Dynamic 3D Camera Modes with Smooth Lerp ──
-      if (camera && ballMesh) {
-        if (cameraMode === 'BALL_FOLLOW') {
-          const desiredCamPos = new THREE.Vector3(ballMesh.position.x * 0.6, 7 + ballMesh.position.y * 0.4, ballMesh.position.z + 12);
-          camera.position.lerp(desiredCamPos, 0.06);
-          camera.lookAt(ballMesh.position.x, ballMesh.position.y, ballMesh.position.z);
-        } else if (cameraMode === 'BATTER_FOCUS') {
-          camera.position.lerp(new THREE.Vector3(0, 3.2, 0), 0.06);
-          camera.lookAt(0, 1.2, 9.5);
-        } else if (cameraMode === 'WICKET_FOCUS') {
-          camera.position.lerp(new THREE.Vector3(0, 2.0, 13.5), 0.06);
-          camera.lookAt(0, 0.7, 10.1);
-        } else {
-          // BROADCAST Default
-          camera.position.lerp(new THREE.Vector3(0, 15, 24), 0.04);
-          camera.lookAt(0, 0, 0);
-        }
-      }
+      executeDeliveryFrame(p, seq);
 
       if (p < 1) {
         animFrameIdRef.current = requestAnimationFrame(step3D);
       } else {
         isSimulatingRef.current = false;
+        // Immediate event-driven completion — ready for next delivery without delay!
         onAnimationComplete?.();
       }
     };
 
+    if (animFrameIdRef.current) cancelAnimationFrame(animFrameIdRef.current);
     animFrameIdRef.current = requestAnimationFrame(step3D);
 
     return () => {
       if (animFrameIdRef.current) cancelAnimationFrame(animFrameIdRef.current);
     };
-  }, [lastBall, speed, selectedTactic, cameraMode, onAnimationComplete]);
+  }, [lastBall, speed, selectedTactic, resetAllPlayersToReady, executeDeliveryFrame, onAnimationComplete]);
+
+  // Step action (+5% advance when paused)
+  const handleStepAction = () => {
+    if (!currentSeqRef.current) return;
+    const nextP = Math.min(1, currentProgressRef.current + 0.05);
+    executeDeliveryFrame(nextP, currentSeqRef.current);
+  };
+
+  // Toggle pause
+  const handleTogglePause = () => {
+    isPausedRef.current = !isPausedRef.current;
+    setIsPaused(isPausedRef.current);
+  };
 
   // Trigger on delivery change
   useEffect(() => {
@@ -845,7 +1010,7 @@ export default function CricketActionVisualizer3D({
         <div className="flex items-center gap-2">
           <div className={cn("w-2.5 h-2.5 rounded-full animate-pulse", isTest ? "bg-red-500" : "bg-cyan-400")} />
           <span className="text-[10px] font-black uppercase tracking-widest text-white/90">
-            {format} 3D CRICKET ARENA
+            {format} 3D CRICKET BROADCAST
           </span>
           {isFreeHit && (
             <span className="px-1.5 py-0.5 rounded bg-red-500 text-white text-[8px] font-black uppercase animate-bounce">
@@ -854,23 +1019,50 @@ export default function CricketActionVisualizer3D({
           )}
         </div>
 
-        {/* 3D Camera, Bowler Tactics & Speed Controls */}
+        {/* 3D Camera, Bowler Tactics & Match Speed Controls */}
         <div className="flex items-center gap-1.5 flex-wrap">
-          {/* Camera Switcher */}
+          {/* Camera Presets */}
           <div className="flex items-center bg-white/5 border border-white/10 rounded-lg p-0.5">
-            {(['BROADCAST', 'BALL_FOLLOW', 'BATTER_FOCUS'] as CameraMode[]).map((mode) => (
-              <button
-                key={mode}
-                onClick={() => setCameraMode(mode)}
-                className={cn(
-                  "px-2 py-0.5 rounded text-[9px] font-bold transition-all",
-                  cameraMode === mode ? "bg-cyan-500 text-black font-black" : "text-white/60 hover:text-white"
-                )}
-                title={`Switch Camera: ${mode}`}
-              >
-                {mode === 'BROADCAST' ? '🎥 Broadcast' : mode === 'BALL_FOLLOW' ? '⚽ Follow' : '🏏 Batter'}
-              </button>
-            ))}
+            <button
+              onClick={() => setCameraMode('CAMERA_WIDE')}
+              className={cn(
+                "px-2 py-0.5 rounded text-[9px] font-bold transition-all",
+                cameraMode === 'CAMERA_WIDE' ? "bg-cyan-500 text-black font-black" : "text-white/60 hover:text-white"
+              )}
+              title="Wide View (All Fielders Visible)"
+            >
+              🌐 Wide
+            </button>
+            <button
+              onClick={() => setCameraMode('BROADCAST')}
+              className={cn(
+                "px-2 py-0.5 rounded text-[9px] font-bold transition-all",
+                cameraMode === 'BROADCAST' ? "bg-cyan-500 text-black font-black" : "text-white/60 hover:text-white"
+              )}
+              title="Main Broadcast Camera"
+            >
+              🎥 TV
+            </button>
+            <button
+              onClick={() => setCameraMode('BALL_FOLLOW')}
+              className={cn(
+                "px-2 py-0.5 rounded text-[9px] font-bold transition-all",
+                cameraMode === 'BALL_FOLLOW' ? "bg-cyan-500 text-black font-black" : "text-white/60 hover:text-white"
+              )}
+              title="Follow Ball Flight"
+            >
+              ⚽ Ball
+            </button>
+            <button
+              onClick={() => setCameraMode('BATTER_FOCUS')}
+              className={cn(
+                "px-2 py-0.5 rounded text-[9px] font-bold transition-all",
+                cameraMode === 'BATTER_FOCUS' ? "bg-cyan-500 text-black font-black" : "text-white/60 hover:text-white"
+              )}
+              title="Batter Focus"
+            >
+              🏏 Batter
+            </button>
           </div>
 
           {/* Bowler Tactics */}
@@ -888,6 +1080,18 @@ export default function CricketActionVisualizer3D({
             <span>{tacticConfig.name.split(' ')[0]}</span>
           </button>
 
+          {/* Debug Panel Toggle */}
+          <button
+            onClick={() => setDebugMode(!debugMode)}
+            className={cn(
+              "px-2 py-1 rounded-lg text-[9px] font-bold border transition-all",
+              debugMode ? "bg-emerald-500 text-black border-emerald-400 font-black" : "bg-white/5 border-white/10 text-white/70"
+            )}
+            title="Toggle Debug Mode"
+          >
+            🛠️ Debug
+          </button>
+
           {/* 2D / 3D Switch */}
           {onToggle2D && (
             <button
@@ -899,19 +1103,22 @@ export default function CricketActionVisualizer3D({
             </button>
           )}
 
-          {/* Speed Controls */}
-          {([1, 2, 4] as AnimationSpeed[]).map((sp) => (
-            <button
-              key={sp}
-              onClick={() => setSpeed(sp)}
-              className={cn(
-                "px-2 py-0.5 rounded text-[9px] font-bold transition-all",
-                speed === sp ? "bg-white text-black font-black shadow-sm" : "bg-white/5 text-white/50 hover:text-white"
-              )}
-            >
-              {sp}x
-            </button>
-          ))}
+          {/* Fast Match Speed Controls: 1x, 1.5x (Default Fast), 2x (Very Fast) */}
+          <div className="flex items-center bg-white/5 border border-white/10 rounded-lg p-0.5">
+            {([1, 1.5, 2] as AnimationSpeed[]).map((sp) => (
+              <button
+                key={sp}
+                onClick={() => setSpeed(sp)}
+                className={cn(
+                  "px-2 py-0.5 rounded text-[9px] font-bold transition-all",
+                  speed === sp ? "bg-white text-black font-black shadow-sm" : "bg-white/5 text-white/50 hover:text-white"
+                )}
+                title={sp === 1.5 ? "Fast Match Speed (~2.2s per ball)" : sp === 2 ? "Very Fast Speed (~1.5s per ball)" : "Normal Speed (~2.8s per ball)"}
+              >
+                {sp}x
+              </button>
+            ))}
+          </div>
 
           <button
             onClick={() => setSpeed(0)}
@@ -976,8 +1183,45 @@ export default function CricketActionVisualizer3D({
       </AnimatePresence>
 
       {/* ── 3D Viewport with Realistic Character Rigging ── */}
-      <div className="relative w-full aspect-[4/3] max-w-[560px] overflow-hidden flex items-center justify-center">
+      <div className="relative w-full aspect-[4/3] max-w-[620px] overflow-hidden flex items-center justify-center">
         <div ref={mountRef} className="w-full h-full cursor-grab active:cursor-grabbing" />
+
+        {/* ── On-Screen Interactive Controls ── */}
+        <div className="absolute bottom-3 left-3 z-30 flex items-center gap-1 bg-black/70 backdrop-blur-md p-1 rounded-xl border border-white/10">
+          <button
+            onClick={run3DDeliveryAnimation}
+            className="p-1.5 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/40 text-emerald-300 transition-all text-xs flex items-center gap-1 font-bold"
+            title="Play / Replay Delivery"
+          >
+            <Play className="w-3.5 h-3.5" /> Replay
+          </button>
+          <button
+            onClick={handleTogglePause}
+            className={cn(
+              "p-1.5 rounded-lg transition-all text-xs flex items-center gap-1 font-bold",
+              isPaused ? "bg-amber-500 text-black font-black" : "bg-white/10 hover:bg-white/20 text-white"
+            )}
+            title={isPaused ? "Resume" : "Pause Delivery"}
+          >
+            {isPaused ? <Play className="w-3.5 h-3.5" /> : <Pause className="w-3.5 h-3.5" />}
+          </button>
+          {isPaused && (
+            <button
+              onClick={handleStepAction}
+              className="p-1.5 rounded-lg bg-cyan-500/20 hover:bg-cyan-500/40 text-cyan-300 transition-all text-xs flex items-center gap-1 font-bold"
+              title="Step +5%"
+            >
+              <StepForward className="w-3.5 h-3.5" /> Step
+            </button>
+          )}
+          <button
+            onClick={resetAllPlayersToReady}
+            className="p-1.5 rounded-lg bg-white/5 hover:bg-white/15 text-white/70 transition-all text-xs"
+            title="Reset Players to Ready Positions"
+          >
+            <RotateCcw className="w-3.5 h-3.5" />
+          </button>
+        </div>
 
         {/* ── Action Result Banner (Appears only after action completes) ── */}
         <AnimatePresence>
@@ -1001,14 +1245,53 @@ export default function CricketActionVisualizer3D({
           )}
         </AnimatePresence>
 
-        {/* ── Debug Overlay ── */}
+        {/* ── Debug Overlay & Inspection Panel ── */}
         {debugMode && (
-          <div className="absolute top-3 left-3 bg-black/90 border border-white/10 rounded-xl p-3 text-[9px] font-mono text-cyan-300 space-y-0.5 z-40 pointer-events-none shadow-xl">
-            <div>3D CHARACTER: <span className="text-emerald-400 font-bold">RIGGED CRICKET PLAYER</span></div>
-            <div>STATE: <span className="text-white font-bold">{currentActionState}</span></div>
-            <div>PROGRESS: <span className="text-white font-bold">{stateProgress}%</span></div>
-            <div>CAMERA: <span className="text-cyan-300 font-bold">{cameraMode}</span></div>
-            <div>TACTIC: <span className="text-amber-300 font-bold">{tacticConfig.name}</span></div>
+          <div className="absolute top-3 left-3 bg-black/95 border border-white/15 rounded-xl p-3 text-[9px] font-mono text-cyan-300 space-y-1.5 z-40 shadow-2xl max-w-[280px]">
+            <div className="flex items-center justify-between border-b border-white/10 pb-1">
+              <span className="text-emerald-400 font-bold uppercase">🛠️ 3D MATCH DEBUG</span>
+              <span className="text-white/60">{stateProgress}%</span>
+            </div>
+
+            <div className="space-y-0.5">
+              <div>STATE: <span className="text-white font-bold">{currentActionState}</span></div>
+              <div>SPEED: <span className="text-amber-300 font-bold">{speed}x ({speed === 1.5 ? 'FAST' : speed === 2 ? 'VERY_FAST' : 'NORMAL'})</span></div>
+              <div>BOWLER: <span className="text-amber-300 font-bold">{playerDebugStates.bowlerState}</span></div>
+              <div>BATTER: <span className="text-emerald-300 font-bold">{playerDebugStates.strikerState}</span></div>
+              <div>KEEPER: <span className="text-cyan-300 font-bold">{playerDebugStates.keeperState}</span></div>
+              {playerDebugStates.targetFielder && (
+                <div>TARGET FIELDER: <span className="text-purple-300 font-bold">{playerDebugStates.targetFielder.name} ({playerDebugStates.targetFielder.state})</span></div>
+              )}
+              <div>CAMERA: <span className="text-cyan-300 font-bold">{cameraMode}</span></div>
+            </div>
+
+            {/* Quick Camera Jump Buttons */}
+            <div className="grid grid-cols-2 gap-1 pt-1 border-t border-white/10">
+              <button
+                onClick={() => setCameraMode('CAMERA_WIDE')}
+                className="px-1.5 py-1 rounded bg-white/10 hover:bg-white/20 text-white text-[8px] font-bold"
+              >
+                🌐 Wide View
+              </button>
+              <button
+                onClick={() => setCameraMode('BROADCAST')}
+                className="px-1.5 py-1 rounded bg-white/10 hover:bg-white/20 text-white text-[8px] font-bold"
+              >
+                🎥 Broadcast
+              </button>
+              <button
+                onClick={() => setCameraMode('BATTER_FOCUS')}
+                className="px-1.5 py-1 rounded bg-white/10 hover:bg-white/20 text-white text-[8px] font-bold"
+              >
+                🏏 Batter Cam
+              </button>
+              <button
+                onClick={() => setCameraMode('BOWLER_FOCUS')}
+                className="px-1.5 py-1 rounded bg-white/10 hover:bg-white/20 text-white text-[8px] font-bold"
+              >
+                🎯 Bowler Cam
+              </button>
+            </div>
           </div>
         )}
       </div>
@@ -1024,7 +1307,7 @@ export default function CricketActionVisualizer3D({
         <div className="flex items-center gap-2 text-[10px] font-bold text-white/50 uppercase">
           <span>Camera: <strong className="text-cyan-300">{cameraMode}</strong></span>
           <span>•</span>
-          <span>Tactic: <strong className="text-amber-300">{tacticConfig.name}</strong></span>
+          <span>Speed: <strong className="text-amber-300">{speed}x</strong></span>
         </div>
       </div>
     </div>
