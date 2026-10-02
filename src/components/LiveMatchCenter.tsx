@@ -11,6 +11,7 @@ import { MatchStatus, PitchType, WeatherCondition, type InningsData, type Player
 import { getIntlTeamLogoUrl } from '../data/crexIntlTeams';
 import CricketActionVisualizer, { BowlingTactic, BOWLING_TACTICS_CONFIG } from './CricketActionVisualizer';
 import { ArenaFormat } from '../engine/models/ArenaState';
+import { isEligibleBowler } from '../engine/rules/bowlerEligibility';
 
 const IPL_TEAM_LOGOS: Record<string, string> = {
   MI:   'https://cricketvectors.akamaized.net/Teams/F.png',
@@ -371,15 +372,13 @@ export default function LiveMatchCenter() {
 
   const getAvailableBowlers = useCallback((score: InningsState | undefined, squad: Player[], previousOverBowlerId?: string | null) => {
     const maxBalls = MatchEngine.getMaxOversPerBowler(selectedFormat || 'T20') * 6;
-    const bowlerOrder = MatchEngine.getBowlerOrder(squad.map((player) => player.id), players);
+    const eligibleSquad = squad.filter(isEligibleBowler);
+    const bowlerOrder = MatchEngine.getBowlerOrder(eligibleSquad.map((player) => player.id), players);
     
-    // Strict rule: Only the top 6 bowlers in the playing XI can bowl.
-    // This perfectly prevents pure batters from ever bowling in ODI or T20.
+    // Strict rule: Only valid bowlers in the playing XI can bowl.
     const top6 = bowlerOrder.slice(0, 6);
-    
     const available = top6.filter((player) => (score?.bowlers[player.id]?.balls || 0) < maxBalls && player.id !== previousOverBowlerId);
     
-    // Fallback if somehow all top 6 are exhausted (should not happen normally)
     if (available.length === 0) {
         return bowlerOrder.filter((player) => (score?.bowlers[player.id]?.balls || 0) < maxBalls && player.id !== previousOverBowlerId);
     }
@@ -389,7 +388,10 @@ export default function LiveMatchCenter() {
   const chooseAiBowler = useCallback((score: InningsState | undefined, squad: Player[], previousOverBowlerId?: string | null) => {
     const over = Math.floor((score?.balls || 0) / 6);
     const candidates = getAvailableBowlers(score, squad, previousOverBowlerId);
-    if (candidates.length === 0) return squad.find((player) => player.id !== previousOverBowlerId) || squad[0];
+    if (candidates.length === 0) {
+      const eligible = squad.filter(isEligibleBowler);
+      return eligible.find((player) => player.id !== previousOverBowlerId) || eligible[0] || null;
+    }
 
     const oversBowled = (p: Player) => Math.floor((score?.bowlers[p.id]?.balls || 0) / 6);
     const isSpinner = (p: Player) => {

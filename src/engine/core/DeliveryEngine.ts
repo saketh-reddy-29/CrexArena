@@ -2,6 +2,7 @@ import { RulesEngine } from '../rules/RulesEngine';
 import { MatchSituationEngine } from './MatchSituationEngine';
 import { testBattingAI } from '../formats/test/testBattingAI';
 import { formatStrategyEngine, FormatStrategyDecision } from '../formats/FormatStrategyEngine';
+import { clampProbability } from '../rules/bowlerEligibility';
 
 export class DeliveryEngine {
   private rules: RulesEngine;
@@ -122,8 +123,10 @@ export class DeliveryEngine {
       if (six) six.weight *= (1 + attackingIntent * 2.0);
     }
 
-    // 6. Cap probabilities
-    pWicket = Math.max(0.01, Math.min(0.15, pWicket));
+    // 6. Cap probabilities per format
+    const maxWicketProb = format === 'TEST' ? 0.045 : format === 'ODI' ? 0.055 : 0.085;
+    const minWicketProb = format === 'TEST' ? 0.005 : format === 'ODI' ? 0.008 : 0.010;
+    pWicket = clampProbability(Math.max(minWicketProb, Math.min(maxWicketProb, pWicket)));
     this.capSixProbability(outcomes, format);
 
     let isWicket = false;

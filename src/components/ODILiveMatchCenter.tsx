@@ -34,6 +34,7 @@ import {
 } from '../engine/formats/odi/ODIDeliveryModel';
 import { FieldChangeOverlay } from '../game/ui/FieldChangeOverlay';
 import { DeliveryStatus } from '../game/ui/DeliveryStatus';
+import { DebugDeliveryPanel } from '../game/ui/DebugDeliveryPanel';
 import { cn } from '../lib/utils';
 
 export default function ODILiveMatchCenter() {
@@ -638,6 +639,29 @@ export default function ODILiveMatchCenter() {
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* Development Debug Delivery Panel */}
+      <DebugDeliveryPanel
+        data={{
+          format: 'ODI',
+          innings: (matchSummary?.currentInningsIndex || 0) + 1,
+          over: currentInning?.overs || 0,
+          ball: currentInning?.balls || 0,
+          batterName: striker?.name,
+          bowlerName: currentBowler?.name,
+          bowlerRole: currentBowler?.role,
+          bowlingPlan: lastDelivery?.line || 'GOOD_LENGTH',
+          shot: lastDelivery?.shot || 'FORWARD_DEFENCE',
+          targetZone: lastDelivery?.targetZone || 'COVER',
+          wicketProbability: 0.026,
+          finalRoll: 0.58,
+          result: lastDelivery?.result || 'DOT',
+          ballState: currentStep.step,
+          actionState: currentStep.subtext,
+          score: `${currentInning?.score || 0}/${currentInning?.wickets || 0}`,
+          nextState: 'READY_FOR_NEXT_BALL',
+        }}
+      />
     </div>
   );
 }

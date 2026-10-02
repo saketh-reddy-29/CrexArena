@@ -937,12 +937,14 @@ export default function CricketActionVisualizer3D({
     // Helper to synchronize 3D ball mesh, shadow, laser drop line, neon tracer trail, and impact effects
     const updateBallTransformAndFX = (curX: number, curY: number, curZ: number, seamAngleDeg?: number) => {
       if (ballMesh) {
+        ballMesh.visible = true;
         ballMesh.position.set(curX, curY, curZ);
         if (seamAngleDeg !== undefined) {
           ballMesh.rotation.z = (seamAngleDeg * Math.PI) / 180;
         }
       }
       if (ballShadow) {
+        ballShadow.visible = true;
         ballShadow.position.set(curX, 0.025, curZ);
         const shadowScale = Math.max(0.2, 1 - (curY / 14));
         ballShadow.scale.set(shadowScale, shadowScale, 1);
@@ -966,10 +968,21 @@ export default function CricketActionVisualizer3D({
       if (ballTrailRef.current) {
         const trailPositions = ballTrailPositionsRef.current;
         const currentIdx = Math.min(71, Math.floor(p * 72));
-        for (let i = currentIdx; i < 72; i++) {
-          trailPositions[i * 3] = curX;
-          trailPositions[i * 3 + 1] = curY;
-          trailPositions[i * 3 + 2] = curZ;
+        if (p <= 0.01) {
+          for (let i = 0; i < 72; i++) {
+            trailPositions[i * 3] = curX;
+            trailPositions[i * 3 + 1] = curY;
+            trailPositions[i * 3 + 2] = curZ;
+          }
+        } else {
+          trailPositions[currentIdx * 3] = curX;
+          trailPositions[currentIdx * 3 + 1] = curY;
+          trailPositions[currentIdx * 3 + 2] = curZ;
+          for (let i = currentIdx + 1; i < 72; i++) {
+            trailPositions[i * 3] = curX;
+            trailPositions[i * 3 + 1] = curY;
+            trailPositions[i * 3 + 2] = curZ;
+          }
         }
         ballTrailRef.current.geometry.attributes.position.needsUpdate = true;
         const trailMat = ballTrailRef.current.material as THREE.LineBasicMaterial;
@@ -1277,6 +1290,7 @@ export default function CricketActionVisualizer3D({
     // ── Phase 5: Emotion, Celebration & Reactions (phases.fieldingEnd - phases.emotionEnd) ──
     else if (p < phases.emotionEnd) {
       setCurrentActionState('EMOTION_REACTION');
+      updateBallTransformAndFX(ballTrajectory.targetPos.x, 0.08, ballTrajectory.targetPos.z);
       const pEmotion = (p - phases.fieldingEnd) / (phases.emotionEnd - phases.fieldingEnd);
 
       if (!audioTriggersRef.current.emotion && (seq.milestone || seq.isMatchWinning)) {
@@ -1329,6 +1343,7 @@ export default function CricketActionVisualizer3D({
     else {
       setCurrentActionState('RESULT');
       setResultBanner(seq.resultLabel);
+      updateBallTransformAndFX(ballTrajectory.targetPos.x, 0.08, ballTrajectory.targetPos.z);
     }
 
     // ── Ball-Locked Camera Director ──
@@ -1452,7 +1467,7 @@ export default function CricketActionVisualizer3D({
     resetAllPlayersToReady();
     ballCameraControllerRef.current.reset(cameraRef.current || undefined);
 
-    const speedMultiplier = currentSpeed === 1 ? 1.0 : currentSpeed === 1.5 ? 0.72 : 0.48;
+    const speedMultiplier = currentSpeed === 1 ? 1.0 : currentSpeed === 1.5 ? 0.85 : 0.70;
     const baseDuration = seq.baseDurationMs * speedMultiplier;
 
     let startTime: number | null = null;

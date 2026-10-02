@@ -515,14 +515,14 @@ export function adaptDeliveryTo3DSequence(
 
   return {
     phases: {
-      readyEnd: 0.04,
-      runupEnd: 0.16,       // 0.00 - 0.16: Compressed bowler sprint
-      releaseEnd: 0.24,     // 0.16 - 0.24: Windmill stride & release
-      bounceEnd: 0.36,      // 0.24 - 0.36: Ball flight with swing & pitch bounce
-      contactEnd: 0.46,     // 0.36 - 0.46: Batter reads ball & executes stroke
-      fieldingEnd: 0.76,    // 0.46 - 0.76: Ball travels, fielding/catch/running action
-      emotionEnd: 0.90,     // 0.76 - 0.90: Emotions, celebrations, appeals, reactions
-      resultEnd: 1.00,      // 0.90 - 1.00: TV Graphics & final score sync
+      readyEnd: 0.05,       // 0.00 - 0.05: Field ready & bowler setup
+      runupEnd: 0.20,       // 0.05 - 0.20: Bowler run-up sprint
+      releaseEnd: 0.26,     // 0.20 - 0.26: Delivery stride & ball release
+      bounceEnd: 0.38,      // 0.26 - 0.38: Ball flight with swing & pitch bounce
+      contactEnd: 0.48,     // 0.38 - 0.48: Batter reads ball & executes stroke
+      fieldingEnd: 0.78,    // 0.48 - 0.78: Post-contact ball travel to target & fielding / running
+      emotionEnd: 0.90,     // 0.78 - 0.90: Emotions, celebrations, bails off, catch appeal
+      resultEnd: 1.00,      // 0.90 - 1.00: TV Graphics & score sync
     },
     baseDurationMs,
     eventType,

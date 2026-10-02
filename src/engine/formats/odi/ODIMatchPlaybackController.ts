@@ -19,6 +19,7 @@ import {
 import { wicketPreservationEngine } from './WicketPreservationEngine';
 import { safeNumber, safeRating, safeProbability } from '../../utils/safeMath';
 import { Action3DSequence, adaptDeliveryTo3DSequence } from '../../../components/Delivery3DActionAdapter';
+import { isEligibleBowler, getValidBowlingPool, canBowlerBowlAnotherOver, clampProbability } from '../../rules/bowlerEligibility';
 
 export type ODIPlaybackSpeed = 0.75 | 1.0 | 1.25 | 1.5 | 2.0;
 
@@ -189,9 +190,10 @@ export class ODIMatchPlaybackController {
       }
     });
 
-    // Opening bowler (preferably pace)
-    const pacer = bowlingSquad.find((p) => !p.bowlingStyle?.toLowerCase().includes('spin')) || bowlingSquad[0];
-    this.bowlerId = pacer?.id || bowlingSquad[0]?.id || null;
+    // Opening bowler (strictly eligible bowlers only, prioritizing pace)
+    const bowlingPool = getValidBowlingPool(bowlingSquad, 2);
+    const pacer = bowlingPool.find((p) => !p.bowlingStyle?.toLowerCase().includes('spin')) || bowlingPool[0];
+    this.bowlerId = pacer?.id || null;
     this.lastOverBowlerId = null;
 
     // Bowlers setup
@@ -369,7 +371,16 @@ export class ODIMatchPlaybackController {
 
     const striker = battingSquad.find((p) => p.id === this.strikerId) || battingSquad[0];
     const nonStriker = battingSquad.find((p) => p.id === this.nonStrikerId) || battingSquad[1];
-    const bowler = bowlingSquad.find((p) => p.id === this.bowlerId) || bowlingSquad[0];
+    
+    const bowlingPool = getValidBowlingPool(bowlingSquad, 1);
+    let bowler = bowlingSquad.find((p) => p.id === this.bowlerId);
+    if (!bowler || !isEligibleBowler(bowler)) {
+      bowler = bowlingPool[0];
+      this.bowlerId = bowler?.id || null;
+    }
+    if (!bowler) {
+      bowler = bowlingSquad[0];
+    }
 
     const overNum = Math.floor(currentInning.legalBalls / 6);
     const ballInOver = (currentInning.legalBalls % 6) + 1;
@@ -380,7 +391,13 @@ export class ODIMatchPlaybackController {
     const isSpinner = bowler.bowlingStyle?.toLowerCase().includes('spin') || false;
     const strikerLine = currentInning.batters[striker.id];
     const ballsFaced = strikerLine?.balls || 0;
-    const settledness = Math.min(100, ballsFaced * 4.0);
+    
+    // Settledness curve (Phase 10 & 11)
+    let settledness = 0;
+    if (ballsFaced <= 5) settledness = ballsFaced * 4.0;
+    else if (ballsFaced <= 15) settledness = 20 + (ballsFaced - 5) * 3.5;
+    else if (ballsFaced <= 30) settledness = 55 + (ballsFaced - 15) * 2.0;
+    else settledness = Math.min(100, 85 + (ballsFaced - 30) * 0.5);
 
     const activePship = currentInning.partnerships.find((p) => p.active);
     const target = this.getTarget();
@@ -424,14 +441,18 @@ export class ODIMatchPlaybackController {
     const chosenLength = (lengths[Math.floor(Math.random() * lengths.length)] || 'GOOD_LENGTH') as ODIDeliveryLength;
     const chosenLine = (lines[Math.floor(Math.random() * lines.length)] || 'OUTSIDE_OFF') as ODIDeliveryLine;
 
-    // 3. Wicket Probability (ODI average ~3.0% per ball)
-    const bowlerRating = safeRating(bowler.bowlingRating || bowler.rating || 75);
-    const batterRating = safeRating(striker.technique || striker.rating || 75);
+    // 3. Wicket Probability (calibrated to realistic 50-over ODI: ~2.4% - 2.8% per ball)
+    const bowlerRating = safeNumber(bowler.bowlingRating || bowler.rating, 75);
+    const batterRating = safeNumber(striker.technique || striker.rating, 75);
 
-    const baseWicketRisk = 0.016 * decision.wicketRiskMultiplier;
-    const skillDiff = (bowlerRating - batterRating) * 0.0003;
-    const wicketProb = safeProbability(baseWicketRisk + skillDiff, 0.008, 0.095);
+    const baseRisk = 0.024 * decision.wicketRiskMultiplier;
+    const skillDiff = (bowlerRating - batterRating) * 0.00012;
+    const settlednessBonus = (settledness / 100) * 0.008;
 
+    const baseWicketProb = baseRisk + skillDiff - settlednessBonus;
+    const wicketProb = clampProbability(Math.max(0.008, Math.min(0.055, baseWicketProb)));
+
+    // Exactly ONE wicket roll per legal delivery
     const isWicket = Math.random() < wicketProb;
     let wicketType: ODIWicketType | null = null;
     let dismissalFielder: string | null = null;
@@ -852,15 +873,19 @@ export class ODIMatchPlaybackController {
       // Bowler change with max 10 overs (60 balls) restriction
       this.lastOverBowlerId = this.bowlerId;
       const bowlingSquad = this.getSquad(currentInning.bowlingTeamId);
-      const specialistBowlers = bowlingSquad.filter((p) => p.role === 'BOWLER' || p.role === 'ALL_ROUNDER');
-      const pool = specialistBowlers.length >= 3 ? specialistBowlers : bowlingSquad.slice(5);
-      const candidates = pool.filter((p) => {
+      const bowlingPool = getValidBowlingPool(bowlingSquad, 2);
+      const candidates = bowlingPool.filter((p) => {
         const line = currentInning.bowlers[p.id];
-        return p.id !== this.lastOverBowlerId && (line?.balls || 0) < 60;
+        const overs = Math.floor((line?.balls || 0) / 6);
+        return p.id !== this.lastOverBowlerId && canBowlerBowlAnotherOver(p, overs, 'ODI');
       });
+      const validPool = candidates.length > 0 ? candidates : bowlingPool.filter((p) => p.id !== this.lastOverBowlerId);
+      const nextBowler = validPool[Math.floor(Math.random() * validPool.length)] || validPool[0] || bowlingPool[0];
 
-      const nextBowler = candidates[Math.floor(Math.random() * candidates.length)];
-      this.bowlerId = nextBowler?.id || candidates[0]?.id || pool[0]?.id || null;
+      if (nextBowler && !isEligibleBowler(nextBowler)) {
+        throw new Error(`[CRITICAL] Batter erroneously selected as bowler: ${nextBowler.name}`);
+      }
+      this.bowlerId = nextBowler?.id || null;
     }
   }
 

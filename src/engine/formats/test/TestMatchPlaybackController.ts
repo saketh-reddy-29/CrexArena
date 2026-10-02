@@ -18,6 +18,7 @@ import { testBattingAI } from './testBattingAI';
 import { safeNumber, safeRating, safeProbability } from '../../utils/safeMath';
 import { fieldStrategyEngine } from '../../strategy/FieldStrategyEngine';
 import { Action3DSequence, adaptDeliveryTo3DSequence } from '../../../components/Delivery3DActionAdapter';
+import { isEligibleBowler, getValidBowlingPool, clampProbability } from '../../rules/bowlerEligibility';
 
 export type PlaybackSpeed = 0.75 | 1.0 | 1.25 | 1.5 | 2.0;
 
@@ -209,12 +210,11 @@ export class TestMatchPlaybackController {
       }
     });
 
-    // Opening bowler
-    const paceBowler = bowlingSquad.find(
-      (p) => !p.bowlingStyle?.toLowerCase().includes('spin') && (p.role === 'BOWLER' || p.role === 'ALL_ROUNDER')
-    ) || bowlingSquad[0];
+    // Opening bowler (strictly eligible bowlers only, prioritizing pace)
+    const bowlingPool = getValidBowlingPool(bowlingSquad, 2);
+    const paceBowler = bowlingPool.find((p) => !p.bowlingStyle?.toLowerCase().includes('spin')) || bowlingPool[0];
 
-    this.bowlerId = paceBowler?.id || bowlingSquad[0]?.id || null;
+    this.bowlerId = paceBowler?.id || null;
     this.lastOverBowlerId = null;
 
     // Initialize bowler lines
@@ -413,7 +413,15 @@ export class TestMatchPlaybackController {
 
     const striker = battingSquad.find((p) => p.id === this.strikerId) || battingSquad[0];
     const nonStriker = battingSquad.find((p) => p.id === this.nonStrikerId) || battingSquad[1];
-    const bowler = bowlingSquad.find((p) => p.id === this.bowlerId) || bowlingSquad[0];
+    const bowlingPool = getValidBowlingPool(bowlingSquad, 1);
+    let bowler = bowlingSquad.find((p) => p.id === this.bowlerId);
+    if (!bowler || !isEligibleBowler(bowler)) {
+      bowler = bowlingPool[0];
+      this.bowlerId = bowler?.id || null;
+    }
+    if (!bowler) {
+      bowler = bowlingSquad[0];
+    }
 
     const overNum = Math.floor(currentInning.legalBalls / 6);
     const ballInOver = (currentInning.legalBalls % 6) + 1;
@@ -436,18 +444,27 @@ export class TestMatchPlaybackController {
     const chosenLength = lengths[Math.floor(Math.random() * lengths.length)];
     const chosenLine = lines[Math.floor(Math.random() * lines.length)];
 
-    // 2. Wicket Probability Calculation (calibrated to Test realism ~2.8% per ball)
-    const bowlerRating = safeRating(bowler.bowlingRating || bowler.rating || 75);
-    const batterRating = safeRating(striker.technique || striker.rating || 75);
-    const settledness = testBattingAI.calculateSettledness(ballsFaced);
+    // 2. Wicket Probability Calculation (calibrated to realistic Test match: ~2.2% - 2.5% per ball)
+    const bowlerRating = safeNumber(bowler.bowlingRating || bowler.rating, 75);
+    const batterRating = safeNumber(striker.technique || striker.rating, 75);
 
-    const pitchBonus = (this.pitch.seam + this.pitch.deterioration + (isSpinner ? this.pitch.spin : 0)) * 0.08;
-    const newBallBonus = this.ballAge < 12 ? 14 : 0;
-    const intentRisk = intent === 'SURVIVAL' ? -15 : intent === 'ACCELERATE' ? 25 : intent === 'SETTLING' ? -8 : 0;
+    // Batter Settledness Curve (Phase 10 & 11)
+    let settledness = 0;
+    if (ballsFaced <= 5) settledness = ballsFaced * 3.0; // 0-15 (survival focus)
+    else if (ballsFaced <= 15) settledness = 15 + (ballsFaced - 5) * 3.0; // 15-45
+    else if (ballsFaced <= 30) settledness = 45 + (ballsFaced - 15) * 2.0; // 45-75
+    else settledness = Math.min(100, 75 + (ballsFaced - 30) * 0.4); // 75-100
 
-    const baseThreat = (bowlerRating * 0.35 + pitchBonus + newBallBonus + intentRisk) - (batterRating * 0.25 + settledness * 0.3);
-    const wicketProb = safeProbability(0.012 + Math.max(0, baseThreat) * 0.00065, 0.005, 0.085);
+    const pitchBonus = (this.pitch.seam + this.pitch.deterioration + (isSpinner ? this.pitch.spin : 0)) * 0.00008;
+    const newBallBonus = this.ballAge < 10 ? 0.003 : 0;
+    const intentRisk = intent === 'SURVIVAL' ? -0.006 : intent === 'ACCELERATE' ? 0.012 : intent === 'SETTLING' ? -0.003 : 0;
+    const skillDiff = (bowlerRating - batterRating) * 0.00012;
+    const settlednessReduction = (settledness / 100) * 0.010;
 
+    const baseWicketProb = 0.024 + pitchBonus + newBallBonus + intentRisk + skillDiff - settlednessReduction;
+    const wicketProb = clampProbability(Math.max(0.006, Math.min(0.045, baseWicketProb)));
+
+    // Exactly ONE wicket roll per legal delivery
     const isWicket = Math.random() < wicketProb;
     let wicketType: TestWicketType | null = null;
     let dismissalFielder: string | null = null;
@@ -980,13 +997,16 @@ export class TestMatchPlaybackController {
       // Bowler change
       this.lastOverBowlerId = this.bowlerId;
       const bowlingSquad = this.getSquad(currentInning.bowlingTeamId);
-      const specialistBowlers = bowlingSquad.filter((p) => p.role === 'BOWLER' || p.role === 'ALL_ROUNDER');
-      const pool = specialistBowlers.length >= 3 ? specialistBowlers : bowlingSquad.slice(5);
-      const candidates = pool.filter((p) => p.id !== this.lastOverBowlerId);
+      const bowlingPool = getValidBowlingPool(bowlingSquad, 2);
+      const candidates = bowlingPool.filter((p) => p.id !== this.lastOverBowlerId);
+      const pool = candidates.length > 0 ? candidates : bowlingPool;
 
       // Rotate bowlers between pace and spin
-      const nextBowler = candidates[Math.floor(Math.random() * candidates.length)];
-      this.bowlerId = nextBowler?.id || candidates[0]?.id || pool[0]?.id || null;
+      const nextBowler = pool[Math.floor(Math.random() * pool.length)] || pool[0];
+      if (nextBowler && !isEligibleBowler(nextBowler)) {
+        throw new Error(`[CRITICAL] Batter erroneously selected as bowler: ${nextBowler.name}`);
+      }
+      this.bowlerId = nextBowler?.id || null;
     }
   }
 

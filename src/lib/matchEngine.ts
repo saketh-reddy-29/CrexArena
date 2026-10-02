@@ -16,6 +16,7 @@ import {
 } from '../types/match';
 import { calculateEffectiveRating } from './ratingEngine';
 import { ArenaFormat } from '../stores/useGameStore';
+import { isEligibleBowler, safeNumber, clampProbability } from '../engine/rules/bowlerEligibility';
 
 // ═══════════════════════════════════════════════════════════════════════
 //  IPL Match Engine — Real IPL Rules
@@ -1004,7 +1005,11 @@ export class MatchEngine {
 
   static getBowlerOrder(squadIds: string[], players: Player[]): Player[] {
     const squadPlayers = squadIds.map(id => players.find(p => p.id === id)).filter(Boolean) as Player[];
-    squadPlayers.sort((a, b) => {
+    // Strict Hard Role Separation: pure batters must never be returned as bowlers
+    const eligibleBowlers = squadPlayers.filter(isEligibleBowler);
+    const pool = eligibleBowlers.length >= 3 ? eligibleBowlers : squadPlayers.filter(p => p.role !== 'Batsman' && p.role !== 'Wicketkeeper');
+    
+    pool.sort((a, b) => {
        const getBowlScore = (p: Player) => {
            let s = (p.stats?.bowling || 0);
            if (p.role === 'Bowler') s += 50;
@@ -1013,7 +1018,7 @@ export class MatchEngine {
        };
        return getBowlScore(b) - getBowlScore(a);
     });
-    return squadPlayers;
+    return pool;
   }
 
   // ─── Innings Data Factory ────────────────────────────────────────

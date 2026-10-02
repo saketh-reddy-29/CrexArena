@@ -34,6 +34,7 @@ import {
 } from '../engine/formats/test/TestDeliveryModel';
 import { FieldChangeOverlay } from '../game/ui/FieldChangeOverlay';
 import { DeliveryStatus } from '../game/ui/DeliveryStatus';
+import { DebugDeliveryPanel } from '../game/ui/DebugDeliveryPanel';
 import { cn } from '../lib/utils';
 import { getPlayerImage, handlePlayerImageError } from '../lib/playerImages';
 
@@ -674,6 +675,29 @@ export default function TestMatchLiveCenter() {
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* Development Debug Delivery Panel */}
+      <DebugDeliveryPanel
+        data={{
+          format: 'TEST',
+          innings: (matchSummary?.currentInningsIndex || 0) + 1,
+          over: currentInning?.overs || 0,
+          ball: currentInning?.balls || 0,
+          batterName: striker?.name,
+          bowlerName: currentBowler?.name,
+          bowlerRole: currentBowler?.role,
+          bowlingPlan: lastDelivery?.line || 'GOOD_LENGTH',
+          shot: lastDelivery?.shot || 'FORWARD_DEFENCE',
+          targetZone: lastDelivery?.targetZone || 'COVER',
+          wicketProbability: 0.024,
+          finalRoll: 0.55,
+          result: lastDelivery?.result || 'DOT',
+          ballState: currentStep.step,
+          actionState: currentStep.subtext,
+          score: `${currentInning?.score || 0}/${currentInning?.wickets || 0}`,
+          nextState: 'READY_FOR_NEXT_BALL',
+        }}
+      />
     </div>
   );
 }
