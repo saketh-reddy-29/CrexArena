@@ -90,9 +90,15 @@ export default function TVScoreboard({
 
   // Format overs string (e.g. 17.3)
   const oversStr = useMemo(() => {
-    const fullOvers = Math.floor(balls / 6);
-    const remainderBalls = balls % 6;
-    return `${fullOvers}.${remainderBalls}`;
+    if (balls >= 6) {
+      const fullOvers = Math.floor(balls / 6);
+      const remainderBalls = balls % 6;
+      return `${fullOvers}.${remainderBalls}`;
+    }
+    if (overs > 0) {
+      return `${overs}.${balls % 6}`;
+    }
+    return `0.${balls}`;
   }, [balls, overs]);
 
   // Compute CRR if not directly provided

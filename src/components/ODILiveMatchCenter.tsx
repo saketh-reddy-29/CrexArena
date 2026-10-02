@@ -255,6 +255,31 @@ export default function ODILiveMatchCenter() {
                   }
                 : null
             }
+            strikerStats={strikerStats ? {
+              name: strikerStats.name,
+              runs: strikerStats.runs,
+              balls: strikerStats.balls,
+              fours: strikerStats.fours,
+              sixes: strikerStats.sixes,
+              strikeRate: strikerStats.strikeRate,
+              isStriker: true,
+            } : undefined}
+            nonStrikerStats={nonStrikerStats ? {
+              name: nonStrikerStats.name,
+              runs: nonStrikerStats.runs,
+              balls: nonStrikerStats.balls,
+              fours: nonStrikerStats.fours,
+              sixes: nonStrikerStats.sixes,
+              strikeRate: nonStrikerStats.strikeRate,
+              isStriker: false,
+            } : undefined}
+            bowlerStats={bowlerStats ? {
+              name: bowlerStats.name,
+              overs: bowlerStats.overs,
+              runs: bowlerStats.runs,
+              wickets: bowlerStats.wickets,
+              economy: bowlerStats.economy,
+            } : undefined}
             ballCount={currentInning?.deliveries.length || 0}
             format="ODI"
             battingTeamName={currentInning?.battingTeamName || 'Batting Team'}
@@ -262,7 +287,7 @@ export default function ODILiveMatchCenter() {
             score={currentInning?.score || 0}
             wickets={currentInning?.wickets || 0}
             overs={currentInning?.overs || 0}
-            balls={currentInning?.balls || 0}
+            balls={((currentInning?.overs || 0) * 6) + (currentInning?.balls || 0)}
             totalOvers={50}
             target={matchSummary?.target}
             currentRunRate={matchSummary?.currentRunRate}

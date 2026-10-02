@@ -1911,18 +1911,18 @@ export default function CricketActionVisualizer3D({
         battingTeamShortName={battingTeamShortName}
         teamLogo={teamLogo}
         teamAccentColor={teamAccentColor || (isTest ? '#991B1B' : '#2563EB')}
-        score={score ?? (ballCount > 0 ? (lastBall?.runs ? 156 + (lastBall.runs || 0) : 156) : 0)}
-        wickets={wickets ?? (lastBall?.isWicket ? 4 : 3)}
+        score={score ?? 0}
+        wickets={wickets ?? 0}
         overs={overs ?? Math.floor(ballCount / 6)}
         balls={balls ?? ballCount}
         totalOvers={totalOvers ?? (format === 'T20' || format === 'IPL' ? 20 : format === 'ODI' ? 50 : 90)}
         target={target}
         currentRunRate={currentRunRate}
         requiredRunRate={requiredRunRate}
-        striker={strikerStats || (striker ? { name: striker.name, runs: 62, balls: 38, fours: 5, sixes: 2, strikeRate: 163.15, isStriker: true } : null)}
-        nonStriker={nonStrikerStats || (nonStriker ? { name: nonStriker.name, runs: 21, balls: 15, fours: 2, sixes: 0, strikeRate: 140.0, isStriker: false } : null)}
-        bowler={bowlerStats || (bowler ? { name: bowler.name, overs: 3.3, runs: 28, wickets: 2, economy: 8.0 } : null)}
-        recentBalls={recentBalls || (lastBall ? [lastBall.isWicket ? 'W' : lastBall.runs === 6 ? '6' : lastBall.runs === 4 ? '4' : `${lastBall.runs}`] : ['1', '0', '4', '0', 'W', '2'])}
+        striker={strikerStats || (striker ? { name: striker.name, runs: 0, balls: 0, fours: 0, sixes: 0, strikeRate: 0, isStriker: true } : null)}
+        nonStriker={nonStrikerStats || (nonStriker ? { name: nonStriker.name, runs: 0, balls: 0, fours: 0, sixes: 0, strikeRate: 0, isStriker: false } : null)}
+        bowler={bowlerStats || (bowler ? { name: bowler.name, overs: 0, runs: 0, wickets: 0, economy: 0 } : null)}
+        recentBalls={recentBalls || (lastBall ? [lastBall.isWicket ? 'W' : lastBall.runs === 6 ? '6' : lastBall.runs === 4 ? '4' : `${lastBall.runs}`] : [])}
         partnership={partnership}
         format={format}
         innings={innings}
