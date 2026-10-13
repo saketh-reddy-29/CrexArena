@@ -7,8 +7,6 @@ import LandingPage from './components/LandingPage';
 
 import AuctionRoom from './components/AuctionRoom';
 import LiveMatchCenter from './components/LiveMatchCenter';
-import TestMatchLiveCenter from './components/TestMatchLiveCenter';
-import ODILiveMatchCenter from './components/ODILiveMatchCenter';
 import LeagueView from './components/LeagueView';
 import SquadPlanner from './components/SquadPlanner';
 import PlayersView from './components/PlayersView';
@@ -23,7 +21,7 @@ import PlayerProfileModal from './components/PlayerProfileModal';
 import { useGameStore, GameState } from './stores/useGameStore';
 
 export default function App() {
-  const { gameState, viewedPlayerId, setViewedPlayer, players, franchises, selectedFormat } = useGameStore();
+  const { gameState, viewedPlayerId, setViewedPlayer, players, franchises } = useGameStore();
   
   const viewedPlayer = viewedPlayerId ? players.find(p => p.id === viewedPlayerId) : null;
   const viewedPlayerFranchise = viewedPlayer ? franchises.find(f => f.squad.includes(viewedPlayer.id))?.id : undefined;
@@ -44,15 +42,7 @@ export default function App() {
       {gameState === GameState.PLAYING_XI_BUILDER && <PlayingXIBuilder />}
       
       {gameState === GameState.PRE_MATCH && <PreMatch />}
-      {gameState === GameState.MATCH_SIMULATION && (
-        (selectedFormat === 'TEST' || (selectedFormat as string) === 'Test') ? (
-          <TestMatchLiveCenter />
-        ) : (selectedFormat === 'ODI' || (selectedFormat as string) === 'Odi') ? (
-          <ODILiveMatchCenter />
-        ) : (
-          <LiveMatchCenter />
-        )
-      )}
+      {gameState === GameState.MATCH_SIMULATION && <LiveMatchCenter />}
 
       {![
         GameState.LANDING,

@@ -2,1632 +2,1757 @@ import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react'
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   Play, 
+  Pause,
   FastForward, 
-  SkipForward, 
-  Eye, 
-  Sliders, 
-  Activity, 
-  Shield, 
-  Zap, 
-  Move,
   RotateCcw,
-  Layers,
-  Sparkles,
-  Flame,
-  Wind,
   Compass,
-  CheckCircle2
+  Target,
+  ChevronRight,
+  Shield, 
+  Sparkles,
+  Lock,
+  Unlock,
+  CheckCircle2,
+  RefreshCw,
+  Flame,
+  Award,
+  Terminal,
+  Bug,
+  AlertTriangle
 } from 'lucide-react';
-import { BallOutcome } from '../types/match';
+import { PitchType, WeatherCondition } from '../types/match';
 import { Player } from '../types/common';
 import { ArenaFormat } from '../engine/models/ArenaState';
 import { cn } from '../lib/utils';
-import CricketActionVisualizer3D from './CricketActionVisualizer3D';
+import { 
+  BowlerFieldStrategyEngine, 
+  FieldConfiguration, 
+  Point
+} from '../engine/strategy/BowlerFieldStrategyEngine';
+import { DeliveryResult, DeliveryLifecycle } from '../types/delivery';
+import { CaptainDecision } from '../engine/ai/AICaptainEngine';
+import { DetailedBowlingPlan } from '../engine/ai/BowlingPlanEngine';
+import { BattingIntent, BatterInningsState } from '../engine/ai/BatterDecisionEngine';
 
-export type AnimationSpeed = 1 | 2 | 4 | 0; // 0 = Instant/Skip
-
-export type AnimatorState = 
-  | 'IDLE'
-  | 'BOWLER_READY'
-  | 'BOWLER_RUNUP'
-  | 'DELIVERY_RELEASE'
-  | 'BALL_FLIGHT'
-  | 'BOUNCE'
-  | 'BALL_TO_BATTER'
-  | 'BAT_CONTACT'
-  | 'SHOT_TRAJECTORY'
-  | 'BALL_FIELD_TRAVEL'
-  | 'FIELDER_CHASE'
-  | 'FIELDING_ACTION'
-  | 'THROW'
-  | 'CATCH'
-  | 'BOUNDARY'
-  | 'WICKET'
-  | 'RESULT'
-  | 'RESET';
-
-export type FieldPreset = 'BALANCED' | 'POWERPLAY' | 'ATTACKING_TEST' | 'DEATH_OVERS' | 'SPIN_TRAP' | 'CUSTOM';
-
-export type BowlingTactic = 
-  | 'OUTSWING'
-  | 'INSWING'
-  | 'REVERSE_SWING'
-  | 'SLOWER_BALL'
-  | 'YORKER'
-  | 'BOUNCER'
-  | 'OFF_CUTTER'
-  | 'LEG_CUTTER'
-  | 'OFF_BREAK'
-  | 'DOOSRA'
-  | 'LEG_BREAK'
-  | 'GOOGLY'
-  | 'ARM_BALL'
-  | 'TOP_SPINNER'
-  | 'CARROM_BALL';
-
-import { TVScoreboardBatter, TVScoreboardBowler } from './TVScoreboard';
+export type AnimationSpeed = 1 | 1.5 | 2 | 0; // 0 = Skip/Instant
+export type BottomPanelTab = 'FIELD_MAP' | 'BOWLER_PLAN' | 'SCORING_ZONES' | 'AI_CAPTAIN';
 
 export interface VisualizerProps {
   striker: Player | null;
   nonStriker: Player | null;
   bowler: Player | null;
-  lastBall: (BallOutcome & { runs: number; isWicket?: boolean; wicketType?: string; isExtra?: boolean; extraType?: string; bowlingTactic?: BowlingTactic }) | null;
-  ballCount: number;
+  deliveryResult?: DeliveryResult | null;
+  lifecycle?: DeliveryLifecycle;
+  onPlaybackComplete?: () => void;
+  onContactReached?: () => void;
   format: ArenaFormat;
   battingTeamName: string;
   bowlingTeamName: string;
-  battingTeamShortName?: string;
-  teamLogo?: string;
-  teamAccentColor?: string;
   isFreeHit?: boolean;
-  score?: number;
-  wickets?: number;
-  overs?: number;
-  balls?: number;
-  totalOvers?: number;
-  target?: number | null;
-  currentRunRate?: number;
-  requiredRunRate?: number | null;
-  strikerStats?: TVScoreboardBatter;
-  nonStrikerStats?: TVScoreboardBatter;
-  bowlerStats?: TVScoreboardBowler;
-  recentBalls?: string[];
-  partnership?: { runs: number; balls: number };
-  innings?: number;
-  day?: number;
-  session?: number;
-  lead?: number | null;
-  onAnimationComplete?: () => void;
-  speed?: AnimationSpeed;
-  onSpeedChange?: (speed: AnimationSpeed) => void;
+  score?: { runs: number; wickets: number; overs: number; balls: number };
+  target?: number;
+  pitch?: PitchType;
+  weather?: WeatherCondition;
+  fieldingSquad?: Player[];
+  partnershipRuns?: number;
+  partnershipBalls?: number;
+  testDaySession?: { day: number; session: 'Morning' | 'Afternoon' | 'Evening' };
+  onFieldChangingChange?: (isChanging: boolean) => void;
+  // AI Captain & Tactical Controls
+  userTeamControlMode?: 'MANUAL' | 'AI_RECOMMENDATIONS' | 'FULL_AUTO';
+  onUserTeamControlModeChange?: (mode: 'MANUAL' | 'AI_RECOMMENDATIONS' | 'FULL_AUTO') => void;
+  aiCaptainRecommendation?: CaptainDecision | null;
+  onApplyAIRecommendation?: (rec: CaptainDecision) => void;
+  onIgnoreAIRecommendation?: () => void;
+  userBattingIntent?: BattingIntent;
+  onUserBattingIntentChange?: (intent: BattingIntent) => void;
+  userBowlingPlan?: DetailedBowlingPlan | null;
+  onUserBowlingPlanChange?: (plan: DetailedBowlingPlan) => void;
+  isUserTeamBatting?: boolean;
+  isUserTeamBowling?: boolean;
+  opponentTacticalNotice?: string | null;
+  eligibleBowlers?: Player[];
+  onSelectBowlerManual?: (bowlerId: string) => void;
+  batterState?: BatterInningsState | null;
+  // Fallback compatibility
+  lastBall?: any;
+  ballCount?: number;
   className?: string;
-  activeBowlingTactic?: BowlingTactic;
-  onTacticChange?: (tactic: BowlingTactic) => void;
 }
 
-interface Point {
-  x: number;
-  y: number;
-}
-
-interface FielderPos {
+interface FielderLiveState {
   id: string;
   name: string;
   role: string;
-  x: number;
-  y: number;
-  baseX: number;
-  baseY: number;
+  currentX: number;
+  currentY: number;
+  targetX: number;
+  targetY: number;
+  fromX: number;
+  fromY: number;
+  category: 'CATCHING' | 'RING' | 'BOUNDARY';
+  isOutsideCircle: boolean;
+  isCatching: boolean;
+  tacticalRole: string;
+  isMoving: boolean;
 }
 
-// Field Dimensions in SVG viewBox (600 x 600)
+// 600 x 600 Circular Field Constants
 const PITCH_CENTER: Point = { x: 300, y: 300 };
 const BOWLER_CREASE: Point = { x: 300, y: 190 };
 const BATTER_CREASE: Point = { x: 300, y: 410 };
 const NON_STRIKER_CREASE: Point = { x: 300, y: 200 };
 const BOUNDARY_RADIUS = 268;
 
-// Field Presets for full 360-degree tactical setups
-const FIELD_PRESETS: Record<Exclude<FieldPreset, 'CUSTOM'>, { name: string; icon: string; positions: { name: string; x: number; y: number }[] }> = {
-  BALANCED: {
-    name: 'Balanced (4-5 Split)',
-    icon: '🛡️',
-    positions: [
-      { name: 'Wicketkeeper', x: 300, y: 460 },
-      { name: 'Slip', x: 260, y: 470 },
-      { name: 'Gully', x: 215, y: 435 },
-      { name: 'Point', x: 160, y: 405 },
-      { name: 'Cover', x: 170, y: 285 },
-      { name: 'Mid Off', x: 245, y: 190 },
-      { name: 'Mid On', x: 355, y: 190 },
-      { name: 'Mid Wicket', x: 425, y: 285 },
-      { name: 'Square Leg', x: 440, y: 405 },
-      { name: 'Deep Fine Leg', x: 410, y: 520 },
-      { name: 'Deep Cover', x: 100, y: 220 },
-    ],
-  },
-  POWERPLAY: {
-    name: 'Powerplay (Ring Field)',
-    icon: '⚡',
-    positions: [
-      { name: 'Wicketkeeper', x: 300, y: 460 },
-      { name: 'First Slip', x: 265, y: 465 },
-      { name: 'Backward Point', x: 175, y: 430 },
-      { name: 'Cover Point', x: 165, y: 375 },
-      { name: 'Extra Cover', x: 190, y: 270 },
-      { name: 'Mid Off', x: 250, y: 215 },
-      { name: 'Mid On', x: 350, y: 215 },
-      { name: 'Mid Wicket', x: 415, y: 290 },
-      { name: 'Square Leg', x: 430, y: 410 },
-      { name: 'Deep Mid-Wicket', x: 475, y: 210 },
-      { name: 'Deep Third Man', x: 145, y: 505 },
-    ],
-  },
-  ATTACKING_TEST: {
-    name: 'Slip Cordon (Test / Attack)',
-    icon: '⚔️',
-    positions: [
-      { name: 'Wicketkeeper', x: 300, y: 460 },
-      { name: '1st Slip', x: 275, y: 470 },
-      { name: '2nd Slip', x: 255, y: 480 },
-      { name: '3rd Slip', x: 235, y: 490 },
-      { name: 'Gully', x: 210, y: 450 },
-      { name: 'Silly Point', x: 250, y: 385 },
-      { name: 'Short Leg', x: 350, y: 385 },
-      { name: 'Cover', x: 180, y: 310 },
-      { name: 'Mid Off', x: 245, y: 195 },
-      { name: 'Mid On', x: 355, y: 195 },
-      { name: 'Fine Leg', x: 430, y: 500 },
-    ],
-  },
-  DEATH_OVERS: {
-    name: 'Death Overs (5 Deep Protect)',
-    icon: '🔒',
-    positions: [
-      { name: 'Wicketkeeper', x: 300, y: 460 },
-      { name: 'Short Third Man', x: 235, y: 445 },
-      { name: 'Point', x: 180, y: 395 },
-      { name: 'Extra Cover', x: 195, y: 290 },
-      { name: 'Mid Wicket', x: 410, y: 310 },
-      { name: 'Deep Point', x: 80, y: 410 },
-      { name: 'Long Off', x: 200, y: 75 },
-      { name: 'Long On', x: 400, y: 75 },
-      { name: 'Deep Mid-Wicket', x: 500, y: 220 },
-      { name: 'Deep Square Leg', x: 510, y: 420 },
-      { name: 'Deep Fine Leg', x: 440, y: 510 },
-    ],
-  },
-  SPIN_TRAP: {
-    name: 'Spin Web Trap',
-    icon: '🕸️',
-    positions: [
-      { name: 'Wicketkeeper', x: 300, y: 445 },
-      { name: 'Slip', x: 265, y: 455 },
-      { name: 'Backward Point', x: 190, y: 420 },
-      { name: 'Cover', x: 185, y: 300 },
-      { name: 'Forward Short Leg', x: 345, y: 380 },
-      { name: 'Catching Mid-Wicket', x: 395, y: 330 },
-      { name: 'Mid Off', x: 250, y: 200 },
-      { name: 'Mid On', x: 350, y: 200 },
-      { name: 'Deep Sweeper Cover', x: 85, y: 290 },
-      { name: 'Deep Mid-Wicket', x: 490, y: 240 },
-      { name: 'Deep Backward Square', x: 480, y: 470 },
-    ],
-  },
-};
-
-// Bowler Delivery Tactics Configuration
-export const BOWLING_TACTICS_CONFIG: Record<BowlingTactic, {
-  name: string;
-  category: 'Pace' | 'Spin' | 'Special';
-  icon: string;
-  color: string;
-  seamAngle: number;
-  swingFactor: number;
-  bounceMultiplier: number;
-  speedLabel: string;
-  description: string;
-}> = {
-  OUTSWING: {
-    name: 'Outswinger',
-    category: 'Pace',
-    icon: '↗️',
-    color: '#38BDF8',
-    seamAngle: -22,
-    swingFactor: -4.8,
-    bounceMultiplier: 1.0,
-    speedLabel: '138-145 km/h',
-    description: 'Shapes late away from right-hander into the slip cordon'
-  },
-  INSWING: {
-    name: 'Inswinger',
-    category: 'Pace',
-    icon: '↖️',
-    color: '#FB923C',
-    seamAngle: 22,
-    swingFactor: 4.8,
-    bounceMultiplier: 1.0,
-    speedLabel: '138-144 km/h',
-    description: 'Jags back sharply into right-hander pads and stumps'
-  },
-  REVERSE_SWING: {
-    name: 'Reverse Swing',
-    category: 'Pace',
-    icon: '🌪️',
-    color: '#F43F5E',
-    seamAngle: 28,
-    swingFactor: 6.5,
-    bounceMultiplier: 0.9,
-    speedLabel: '143-150 km/h',
-    description: 'Late explosive inward tail at maximum pace'
-  },
-  SLOWER_BALL: {
-    name: 'Slower Knuckle',
-    category: 'Pace',
-    icon: '🐢',
-    color: '#A855F7',
-    seamAngle: 0,
-    swingFactor: -1.2,
-    bounceMultiplier: 0.85,
-    speedLabel: '112-118 km/h',
-    description: 'Deceptive dip with massive change of pace'
-  },
-  YORKER: {
-    name: 'Toe-Crushing Yorker',
-    category: 'Pace',
-    icon: '🎯',
-    color: '#EAB308',
-    seamAngle: 0,
-    swingFactor: 0.5,
-    bounceMultiplier: 0.3,
-    speedLabel: '142-148 km/h',
-    description: 'Speared right at the base of the batter popping crease'
-  },
-  BOUNCER: {
-    name: 'Heavy Bouncer',
-    category: 'Pace',
-    icon: '🚀',
-    color: '#EF4444',
-    seamAngle: 0,
-    swingFactor: 0,
-    bounceMultiplier: 1.7,
-    speedLabel: '144-150 km/h',
-    description: 'Sharp riser climbing fast past batter shoulder/helmet'
-  },
-  OFF_CUTTER: {
-    name: 'Off-Cutter',
-    category: 'Pace',
-    icon: '✂️',
-    color: '#34D399',
-    seamAngle: -35,
-    swingFactor: -3.5,
-    bounceMultiplier: 1.1,
-    speedLabel: '122-128 km/h',
-    description: 'Rolled over the fingers, grips turf and cuts away'
-  },
-  LEG_CUTTER: {
-    name: 'Leg-Cutter',
-    category: 'Pace',
-    icon: '🪓',
-    color: '#2DD4BF',
-    seamAngle: 35,
-    swingFactor: 3.5,
-    bounceMultiplier: 1.1,
-    speedLabel: '122-128 km/h',
-    description: 'Nips inward off the pitch off the seam'
-  },
-  OFF_BREAK: {
-    name: 'Flighted Off-Break',
-    category: 'Spin',
-    icon: '🔄',
-    color: '#06B6D4',
-    seamAngle: -45,
-    swingFactor: -2.0,
-    bounceMultiplier: 1.15,
-    speedLabel: '86-92 km/h',
-    description: 'Classical drift in the air, sharp turn into right-hander'
-  },
-  DOOSRA: {
-    name: 'Doosra (Wrong\'un)',
-    category: 'Spin',
-    icon: '↩️',
-    color: '#EC4899',
-    seamAngle: 45,
-    swingFactor: 3.2,
-    bounceMultiplier: 1.05,
-    speedLabel: '88-94 km/h',
-    description: 'Turns away from right-hander with off-spinner arm action'
-  },
-  LEG_BREAK: {
-    name: 'Leg-Break Turn',
-    category: 'Spin',
-    icon: '💫',
-    color: '#6366F1',
-    seamAngle: 45,
-    swingFactor: 2.2,
-    bounceMultiplier: 1.2,
-    speedLabel: '82-88 km/h',
-    description: 'Big drifting leg-break turning from leg to off-stump'
-  },
-  GOOGLY: {
-    name: 'Googly Mystery',
-    category: 'Spin',
-    icon: '🔮',
-    color: '#8B5CF6',
-    seamAngle: -45,
-    swingFactor: -4.0,
-    bounceMultiplier: 1.1,
-    speedLabel: '84-90 km/h',
-    description: 'Disguised back-of-the-hand spinner turning back in'
-  },
-  ARM_BALL: {
-    name: 'Skidding Arm Ball',
-    category: 'Spin',
-    icon: '⚡',
-    color: '#10B981',
-    seamAngle: 10,
-    swingFactor: 1.0,
-    bounceMultiplier: 0.8,
-    speedLabel: '96-102 km/h',
-    description: 'Slides straight through rapidly with arm angle'
-  },
-  TOP_SPINNER: {
-    name: 'Top Spinner',
-    category: 'Spin',
-    icon: '⬆️',
-    color: '#F59E0B',
-    seamAngle: 0,
-    swingFactor: 0,
-    bounceMultiplier: 1.5,
-    speedLabel: '88-94 km/h',
-    description: 'Extra forward dip and steep bouncy loop'
-  },
-  CARROM_BALL: {
-    name: 'Carrom Ball',
-    category: 'Spin',
-    icon: '💥',
-    color: '#D946EF',
-    seamAngle: 60,
-    swingFactor: 3.8,
-    bounceMultiplier: 1.0,
-    speedLabel: '92-98 km/h',
-    description: 'Flicked with middle finger to zip away quickly'
-  },
-};
-
-/**
- * Computes dynamic tactical cricket position name based on SVG field coordinate
- */
-function getFielderPositionName(x: number, y: number): string {
-  const dx = x - 300;
-  const dy = y - 410; // Relative to batter crease
-  const distFromCenter = Math.hypot(x - 300, y - 300);
-
-  // Wicketkeeper area
-  if (Math.abs(x - 300) < 35 && y > 430 && y < 510) return 'Wicketkeeper';
-
-  // Slips & Gully (Off-side behind wicket)
-  if (x < 290 && y >= 420) {
-    if (distFromCenter > 200) return 'Deep Third Man';
-    if (x < 240) return 'Gully';
-    return x < 265 ? '2nd Slip' : '1st Slip';
-  }
-
-  // Leg-slip / Short fine leg (Leg-side behind wicket)
-  if (x > 310 && y >= 420) {
-    if (distFromCenter > 200) return 'Deep Fine Leg';
-    return x > 380 ? 'Backward Square' : 'Short Fine Leg';
-  }
-
-  // Calculate angle around batter in degrees (-180 to 180)
-  const angle = Math.atan2(dy, dx) * (180 / Math.PI); // 0 = right (Square Leg), -90 = straight (Bowler), 180 = left (Point)
-
-  const isDeep = distFromCenter > 185;
-
-  if (angle >= -135 && angle < -100) {
-    return isDeep ? 'Deep Cover' : 'Extra Cover';
-  }
-  if (angle >= -170 && angle < -135) {
-    return isDeep ? 'Deep Point' : 'Point';
-  }
-  if (angle >= -100 && angle < -65) {
-    return isDeep ? 'Long Off' : 'Mid Off';
-  }
-  if (angle >= -65 && angle < -35) {
-    return isDeep ? 'Long On' : 'Mid On';
-  }
-  if (angle >= -35 && angle < 10) {
-    return isDeep ? 'Deep Mid-Wicket' : 'Mid Wicket';
-  }
-  if (angle >= 10 && angle < 55) {
-    return isDeep ? 'Deep Square Leg' : 'Square Leg';
-  }
-  if (angle >= 55 && angle < 95) {
-    return isDeep ? 'Deep Fine Leg' : 'Short Fine Leg';
-  }
-  if (angle >= 95 || angle < -170) {
-    return isDeep ? 'Deep Backward Point' : 'Backward Point';
-  }
-
-  return isDeep ? 'Deep Outfielder' : 'Ring Fielder';
-}
-
 export default function CricketActionVisualizer({
   striker,
   nonStriker,
   bowler,
-  lastBall,
-  ballCount,
-  format,
+  deliveryResult,
+  lifecycle = 'READY',
+  onPlaybackComplete,
+  onContactReached,
+  format: initialFormat,
   battingTeamName,
   bowlingTeamName,
-  battingTeamShortName,
-  teamLogo,
-  teamAccentColor,
   isFreeHit = false,
   score,
-  wickets,
-  overs,
-  balls,
-  totalOvers,
   target,
-  currentRunRate,
-  requiredRunRate,
-  strikerStats,
-  nonStrikerStats,
-  bowlerStats,
-  recentBalls,
-  partnership,
-  innings,
-  day,
-  session,
-  lead,
-  trail,
-  onAnimationComplete,
-  speed: propSpeed,
-  onSpeedChange,
+  pitch = PitchType.BALANCED,
+  weather = WeatherCondition.SUNNY,
+  fieldingSquad,
+  partnershipRuns = 0,
+  partnershipBalls = 0,
+  testDaySession = { day: 1, session: 'Morning' },
+  onFieldChangingChange,
+  userTeamControlMode = 'AI_RECOMMENDATIONS',
+  onUserTeamControlModeChange,
+  aiCaptainRecommendation,
+  onApplyAIRecommendation,
+  onIgnoreAIRecommendation,
+  userBattingIntent = 'NORMAL',
+  onUserBattingIntentChange,
+  userBowlingPlan,
+  onUserBowlingPlanChange,
+  isUserTeamBatting = false,
+  isUserTeamBowling = false,
+  opponentTacticalNotice,
+  eligibleBowlers = [],
+  onSelectBowlerManual,
+  batterState,
+  lastBall,
+  ballCount = 0,
   className,
-  activeBowlingTactic,
-  onTacticChange,
 }: VisualizerProps) {
-  const svgRef = useRef<SVGSVGElement | null>(null);
-  const animFrameRef = useRef<number | null>(null);
-  const isAnimatingRef = useRef<boolean>(false);
-
-  // Animation & View Mode Controls
-  const [viewMode, setViewMode] = useState<'3D' | '2D'>('3D');
-  const [speed, setInternalSpeed] = useState<AnimationSpeed>(propSpeed ?? 1);
-
+  // Format state
+  const [selectedFormat, setSelectedFormat] = useState<ArenaFormat>(initialFormat);
   useEffect(() => {
-    if (propSpeed !== undefined) {
-      setInternalSpeed(propSpeed);
-    }
-  }, [propSpeed]);
+    setSelectedFormat(initialFormat);
+  }, [initialFormat]);
 
-  const setSpeed = useCallback((newSpeed: AnimationSpeed) => {
-    setInternalSpeed(newSpeed);
-    onSpeedChange?.(newSpeed);
-  }, [onSpeedChange]);
-  const [debugMode, setDebugMode] = useState<boolean>(false);
-  const [showFieldMenu, setShowFieldMenu] = useState<boolean>(false);
-  const [showBowlerTactics, setShowBowlerTactics] = useState<boolean>(false);
-  const [activePreset, setActivePreset] = useState<FieldPreset>('BALANCED');
-  const [draggedFielderId, setDraggedFielderId] = useState<string | null>(null);
-  const [hoveredFielderId, setHoveredFielderId] = useState<string | null>(null);
-  
-  // Selected Bowler Tactic
-  const [selectedTactic, setSelectedTactic] = useState<BowlingTactic>(
-    activeBowlingTactic || (bowler?.bowlingStyle?.toLowerCase().includes('spin') ? 'OFF_BREAK' : 'OUTSWING')
-  );
+  // Controls State
+  const [speed, setSpeed] = useState<AnimationSpeed>(1);
+  const [isPaused, setIsPaused] = useState<boolean>(false);
+  const [activeBottomTab, setActiveBottomTab] = useState<BottomPanelTab>('FIELD_MAP');
+  const [activePresetKey, setActivePresetKey] = useState<string | null>(null);
+  const [showDebugHUD, setShowDebugHUD] = useState<boolean>(false);
 
-  // Sync tactic with prop if passed
-  useEffect(() => {
-    if (activeBowlingTactic) {
-      setSelectedTactic(activeBowlingTactic);
-    }
-  }, [activeBowlingTactic]);
+  // Field Strategy Configuration
+  const [fieldConfig, setFieldConfig] = useState<FieldConfiguration>(() => {
+    return BowlerFieldStrategyEngine.generateFieldConfiguration({
+      format: initialFormat,
+      bowler,
+      striker,
+      nonStriker,
+      overs: score?.overs || 0,
+      balls: score?.balls || 0,
+      wickets: score?.wickets || 0,
+      runs: score?.runs || 0,
+      target,
+      pitch,
+      weather,
+      partnershipRuns,
+      partnershipBalls,
+      fieldingSquad,
+      testDaySession,
+    });
+  });
 
-  // Synchronized Dynamic Fielders state
-  const [fielders, setFielders] = useState<FielderPos[]>(() => {
-    return FIELD_PRESETS.BALANCED.positions.map((pos, idx) => ({
-      id: `fielder-${idx}`,
-      name: pos.name,
-      role: 'Fielder',
-      x: pos.x,
-      y: pos.y,
-      baseX: pos.x,
-      baseY: pos.y,
+  // Physical Fielders in 2D Space
+  const [fielders, setFielders] = useState<FielderLiveState[]>(() => {
+    return fieldConfig.fielders.map((f) => ({
+      id: f.id,
+      name: f.name,
+      role: f.positionName,
+      currentX: f.targetPos.x,
+      currentY: f.targetPos.y,
+      targetX: f.targetPos.x,
+      targetY: f.targetPos.y,
+      fromX: f.targetPos.x,
+      fromY: f.targetPos.y,
+      category: f.isCatching ? 'CATCHING' : f.isOutsideCircle ? 'BOUNDARY' : 'RING',
+      isOutsideCircle: f.isOutsideCircle,
+      isCatching: f.isCatching,
+      tacticalRole: f.tacticalRole,
+      isMoving: false,
     }));
   });
 
-  // Animated Entity Coordinates
-  const [animState, setAnimState] = useState<AnimatorState>('IDLE');
-  const [stateProgress, setStateProgress] = useState<number>(0);
+  const [isFieldChanging, setIsFieldChanging] = useState<boolean>(false);
+  const [fieldChangeProgress, setFieldChangeProgress] = useState<number>(100);
+  const [changedFieldersList, setChangedFieldersList] = useState<FieldConfiguration['changedFielders']>([]);
+
+  // 2D Continuous Ball Animation State
+  const [ballPos, setBallPos] = useState<Point>(BOWLER_CREASE);
+  const [ballVisible, setBallVisible] = useState<boolean>(false);
+  const [ballTrail, setBallTrail] = useState<Point[]>([]);
+  const [ballScale, setBallScale] = useState<number>(1);
+  const [animProgress, setAnimProgress] = useState<number>(0);
+  const [playbackStage, setPlaybackStage] = useState<'IDLE' | 'BOWLER_RELEASE' | 'PITCH_BOUNCE' | 'BAT_CONTACT' | 'BALL_TRAVEL' | 'OUTCOME'>('IDLE');
+  
+  // Interactive entities
   const [bowlerPos, setBowlerPos] = useState<Point>({ x: 300, y: 120 });
   const [strikerPos, setStrikerPos] = useState<Point>(BATTER_CREASE);
   const [nonStrikerPos, setNonStrikerPos] = useState<Point>(NON_STRIKER_CREASE);
-  const [ballPos, setBallPos] = useState<Point>(BOWLER_CREASE);
-  const [ballHeight, setBallHeight] = useState<number>(0);
-  const [ballScale, setBallScale] = useState<{ x: number; y: number }>({ x: 1, y: 1 });
-  const [ballRotation, setBallRotation] = useState<number>(0);
   const [batRotation, setBatRotation] = useState<number>(0);
-  const [ballTrail, setBallTrail] = useState<Point[]>([]);
-  const [ballVisible, setBallVisible] = useState<boolean>(false);
-  const [bailsFly, setBailsFly] = useState<boolean>(false);
-  const [impactBurst, setImpactBurst] = useState<Point | null>(null);
+  const [bailsFlying, setBailsFlying] = useState<boolean>(false);
   const [boundaryEffect, setBoundaryEffect] = useState<{ x: number; y: number; active: boolean; isSix?: boolean } | null>(null);
+  const [impactBurst, setImpactBurst] = useState<Point | null>(null);
   const [resultBanner, setResultBanner] = useState<string | null>(null);
-  const [activeFielder, setActiveFielder] = useState<FielderPos | null>(null);
-  const [activeShot, setActiveShot] = useState<string>('DEFENSIVE_PUSH');
 
-  const isTest = format === 'Test';
+  // Drag and drop tweaking
+  const [draggedFielderId, setDraggedFielderId] = useState<string | null>(null);
+
+  // Active delivery result reference (immutable)
+  const activeDelivery = useMemo(() => {
+    if (deliveryResult) return deliveryResult;
+    // Fallback if raw lastBall passed from legacy callers
+    if (lastBall) {
+      return {
+        id: `fb_${Date.now()}`,
+        ballNumber: ballCount,
+        overIndex: score?.overs || 0,
+        ballInOver: (score?.balls || 0) + 1,
+        strikerId: striker?.id || 'str',
+        strikerName: striker?.name || 'Striker',
+        nonStrikerId: nonStriker?.id || 'ns',
+        nonStrikerName: nonStriker?.name || 'Non-Striker',
+        bowlerId: bowler?.id || 'bw',
+        bowlerName: bowler?.name || 'Bowler',
+        legalBall: lastBall.extraType !== 'Wide' && lastBall.extraType !== 'No Ball',
+        batterRuns: lastBall.isExtra ? 0 : lastBall.runs || 0,
+        extraRuns: lastBall.isExtra ? lastBall.runs || 0 : 0,
+        totalRuns: lastBall.runs || 0,
+        wicket: Boolean(lastBall.isWicket),
+        wicketType: lastBall.wicketType,
+        shotType: lastBall.runs === 6 ? 'LOFTED_SIX' : lastBall.runs === 4 ? 'DRIVE_FOUR' : 'DEFENSE',
+        targetZone: lastBall.runs === 6 ? 'LONG_ON' : 'PITCH',
+        ballPath: {
+          start: { x: 300, y: 190 },
+          bounce: { x: 300, y: 330 },
+          contact: { x: 300, y: 410 },
+          target: lastBall.runs === 6 ? { x: 360, y: 55 } : lastBall.runs === 4 ? { x: 170, y: 285 } : { x: 300, y: 460 },
+          isAerial: lastBall.runs === 6,
+        },
+        resultType: (lastBall.isWicket ? 'WICKET' : lastBall.runs === 6 ? 'SIX' : lastBall.runs === 4 ? 'FOUR' : lastBall.runs > 0 ? 'SINGLE' : 'DOT') as any,
+        commentary: lastBall.commentary || 'Delivery in play',
+        timestamp: Date.now(),
+        strikeRotated: (lastBall.runs || 0) % 2 === 1,
+        overCompleted: false,
+      } as DeliveryResult;
+    }
+    return null;
+  }, [deliveryResult, lastBall, ballCount, score, striker, nonStriker, bowler]);
+
+  // Animation Frame Refs
+  const animFrameRef = useRef<number | null>(null);
+  const fieldMoveAnimFrameRef = useRef<number | null>(null);
+  const onPlaybackCompleteRef = useRef(onPlaybackComplete);
+  onPlaybackCompleteRef.current = onPlaybackComplete;
+  const onContactReachedRef = useRef(onContactReached);
+  onContactReachedRef.current = onContactReached;
+  const onFieldChangingChangeRef = useRef(onFieldChangingChange);
+  onFieldChangingChangeRef.current = onFieldChangingChange;
+  const svgRef = useRef<SVGSVGElement | null>(null);
+  const lastPlayedDeliveryIdRef = useRef<string | null>(null);
+
+  // Tracking paused progress
+  const pausedProgressRef = useRef<number>(0);
+  const isPausedRef = useRef<boolean>(false);
+  isPausedRef.current = isPaused;
+
+  const isTest = selectedFormat === 'TEST';
   const ballColor = isTest ? '#DC2626' : '#FFFFFF';
   const ballStroke = isTest ? '#7F1D1D' : '#CBD5E1';
-  const themePrimary = isTest ? '#DC2626' : '#06B6D4';
 
-  const tacticConfig = BOWLING_TACTICS_CONFIG[selectedTactic] || BOWLING_TACTICS_CONFIG.OUTSWING;
+  // ───────────────────────────────────────────────────────────────────────────
+  // 1. PHYSICAL 2D FIELDER MOVEMENT ENGINE
+  // ─────────────────────────────────────────────────────────────────────────
+  const applyNewFieldConfiguration = useCallback((newConfig: FieldConfiguration) => {
+    setFieldConfig(newConfig);
 
-  // Infield vs Outfield fielder balance count
-  const fieldCounts = useMemo(() => {
-    let infield = 0;
-    let outfield = 0;
-    fielders.forEach(f => {
-      const dist = Math.hypot(f.x - 300, f.y - 300);
-      if (dist > 185) outfield++;
-      else infield++;
-    });
-    return { infield, outfield };
-  }, [fielders]);
+    const currentPositionsMap = new Map(fielders.map(f => [f.id, { x: f.currentX, y: f.currentY, role: f.role }]));
+    let hasMovement = false;
+    const movingList: FieldConfiguration['changedFielders'] = [];
 
-  // Load Preset
-  const handleSelectPreset = (presetKey: Exclude<FieldPreset, 'CUSTOM'>) => {
-    setActivePreset(presetKey);
-    const p = FIELD_PRESETS[presetKey];
-    setFielders(p.positions.map((pos, idx) => ({
-      id: `fielder-${idx}`,
-      name: pos.name,
-      role: 'Fielder',
-      x: pos.x,
-      y: pos.y,
-      baseX: pos.x,
-      baseY: pos.y,
-    })));
-  };
+    const updatedFielders: FielderLiveState[] = newConfig.fielders.map((f) => {
+      const current = currentPositionsMap.get(f.id) || { x: f.targetPos.x, y: f.targetPos.y, role: f.positionName };
+      const dist = Math.hypot(f.targetPos.x - current.x, f.targetPos.y - current.y);
+      const isMoving = dist > 4;
 
-  // Select Bowler Tactic
-  const handleSelectTactic = (tactic: BowlingTactic) => {
-    setSelectedTactic(tactic);
-    onTacticChange?.(tactic);
-  };
-
-  // Zero-Glitch SVG Coordinate Converter using Screen Matrix
-  const getSvgCoordinates = useCallback((clientX: number, clientY: number): Point | null => {
-    if (!svgRef.current) return null;
-    const svg = svgRef.current;
-    const pt = svg.createSVGPoint();
-    pt.x = clientX;
-    pt.y = clientY;
-    const ctm = svg.getScreenCTM();
-    if (ctm) {
-      const transformed = pt.matrixTransform(ctm.inverse());
-      return { x: transformed.x, y: transformed.y };
-    }
-    const rect = svg.getBoundingClientRect();
-    return {
-      x: ((clientX - rect.left) / rect.width) * 600,
-      y: ((clientY - rect.top) / rect.height) * 600,
-    };
-  }, []);
-
-  // Global Pointer Events for Hand Field Adjustment (Works on mouse, stylus, & touch)
-  useEffect(() => {
-    if (!draggedFielderId) return;
-
-    const handlePointerMove = (e: PointerEvent) => {
-      const coords = getSvgCoordinates(e.clientX, e.clientY);
-      if (!coords) return;
-
-      // Constrain within field boundary oval (radius 270)
-      const distFromCenter = Math.hypot(coords.x - 300, coords.y - 300);
-      const maxR = 265;
-      const finalX = distFromCenter > maxR ? 300 + ((coords.x - 300) / distFromCenter) * maxR : coords.x;
-      const finalY = distFromCenter > maxR ? 300 + ((coords.y - 300) / distFromCenter) * maxR : coords.y;
-
-      // Auto-compute tactical cricket position name
-      const dynamicName = getFielderPositionName(finalX, finalY);
-
-      setActivePreset('CUSTOM');
-      setFielders(prev => prev.map(f => {
-        if (f.id === draggedFielderId) {
-          return {
-            ...f,
-            name: dynamicName,
-            x: Math.round(finalX),
-            y: Math.round(finalY),
-            baseX: Math.round(finalX),
-            baseY: Math.round(finalY),
-          };
-        }
-        return f;
-      }));
-    };
-
-    const handlePointerUp = () => {
-      setDraggedFielderId(null);
-    };
-
-    window.addEventListener('pointermove', handlePointerMove);
-    window.addEventListener('pointerup', handlePointerUp);
-    window.addEventListener('pointercancel', handlePointerUp);
-
-    return () => {
-      window.removeEventListener('pointermove', handlePointerMove);
-      window.removeEventListener('pointerup', handlePointerUp);
-      window.removeEventListener('pointercancel', handlePointerUp);
-    };
-  }, [draggedFielderId, getSvgCoordinates]);
-
-  /**
-   * 360-Degree Wagon Wheel Shot Calculation:
-   * Generates realistic, diverse angle trajectories covering all directions around the ground:
-   * Off-side, leg-side, straight down the ground, behind square, fine leg, third man, etc.
-   */
-  const get360ShotTrajectoryData = useCallback((runs: number, isWicket: boolean, isExtra: boolean, extraType?: string) => {
-    if (isExtra && (extraType === 'Wide' || extraType === 'No Ball')) {
-      const isWideOff = Math.random() > 0.5;
-      return {
-        shot: extraType.toUpperCase(),
-        bouncePoint: { x: isWideOff ? 345 : 255, y: 310 },
-        targetPoint: { x: isWideOff ? 365 : 235, y: 465 },
-        isBoundary: false,
-        isAerial: false,
-        duration: 850,
-      };
-    }
-
-    if (isWicket) {
-      return {
-        shot: 'WICKET_DELIVERY',
-        bouncePoint: { x: 300, y: 325 },
-        targetPoint: { x: 300, y: 420 },
-        isBoundary: false,
-        isAerial: false,
-        duration: 900,
-      };
-    }
-
-    // ── 360° Wagon Wheel Calculation based on runs
-    if (runs === 6) {
-      const sixShots = [
-        { name: 'LOFTED_COVER_DRIVE_SIX', angleDeg: -65, label: 'Lofted Cover Drive' },
-        { name: 'STRAIGHT_LONG_OFF_SIX', angleDeg: -20, label: 'Straight Long-Off' },
-        { name: 'DOWNHILL_LONG_ON_SIX', angleDeg: 15, label: 'Monster Long-On' },
-        { name: 'DEEP_MID_WICKET_SIX', angleDeg: 55, label: 'Huge Pull over Mid-Wicket' },
-        { name: 'COW_CORNER_SLOG_SIX', angleDeg: 75, label: 'Slog Sweep into Stands' },
-        { name: 'PULL_OVER_SQUARE_LEG_SIX', angleDeg: 95, label: 'Hooked over Square Leg' },
-        { name: 'UPPER_CUT_THIRD_MAN_SIX', angleDeg: -130, label: 'Upper Cut over Third Man' },
-        { name: 'FINE_LEG_SCOOP_SIX', angleDeg: 145, label: 'Ramp Scoop over Fine Leg' },
-      ];
-      const selected = sixShots[Math.floor(Math.random() * sixShots.length)];
-      const rad = (selected.angleDeg - 90) * (Math.PI / 180);
-      const r = 295; // Over boundary rope
-      const targetPoint = {
-        x: Math.round(300 + Math.cos(rad) * r),
-        y: Math.round(410 + Math.sin(rad) * r),
-      };
-
-      return {
-        shot: selected.name,
-        bouncePoint: { x: 300, y: 330 },
-        targetPoint,
-        isBoundary: true,
-        isAerial: true,
-        duration: 1500,
-      };
-    }
-
-    if (runs === 4) {
-      const fourShots = [
-        { name: 'COVER_DRIVE_FOUR', angleDeg: -55, label: 'Crisp Cover Drive' },
-        { name: 'EXTRA_COVER_FOUR', angleDeg: -40, label: 'Punched through Extra Cover' },
-        { name: 'STRAIGHT_DRIVE_FOUR', angleDeg: -5, label: 'Pure Straight Drive' },
-        { name: 'ON_DRIVE_FOUR', angleDeg: 25, label: 'Firm On-Drive' },
-        { name: 'MID_WICKET_PULL_FOUR', angleDeg: 65, label: 'Powerful Pull Shot' },
-        { name: 'SQUARE_CUT_FOUR', angleDeg: -95, label: 'Flashing Square Cut' },
-        { name: 'LATE_CUT_THIRD_MAN_FOUR', angleDeg: -135, label: 'Guided to Third Man' },
-        { name: 'SQUARE_LEG_FLICK_FOUR', angleDeg: 100, label: 'Whipped through Square Leg' },
-        { name: 'FINE_LEG_GLANCE_FOUR', angleDeg: 140, label: 'Tickled to Fine Leg' },
-      ];
-      const selected = fourShots[Math.floor(Math.random() * fourShots.length)];
-      const rad = (selected.angleDeg - 90) * (Math.PI / 180);
-      const r = BOUNDARY_RADIUS;
-      const targetPoint = {
-        x: Math.round(300 + Math.cos(rad) * r),
-        y: Math.round(410 + Math.sin(rad) * r),
-      };
-
-      return {
-        shot: selected.name,
-        bouncePoint: { x: 300, y: 330 },
-        targetPoint,
-        isBoundary: true,
-        isAerial: false,
-        duration: 1350,
-      };
-    }
-
-    if (runs === 1 || runs === 2 || runs === 3) {
-      const runningShots = [
-        { name: 'COVER_POINT_PUSH', angleDeg: -75, dist: 130 },
-        { name: 'MID_OFF_DRIVE', angleDeg: -25, dist: 150 },
-        { name: 'MID_ON_TAP', angleDeg: 20, dist: 150 },
-        { name: 'MID_WICKET_NUDGE', angleDeg: 55, dist: 120 },
-        { name: 'SQUARE_LEG_CLIP', angleDeg: 90, dist: 110 },
-        { name: 'FINE_LEG_SINGLE', angleDeg: 130, dist: 120 },
-        { name: 'THIRD_MAN_STEER', angleDeg: -125, dist: 130 },
-      ];
-      const selected = runningShots[Math.floor(Math.random() * runningShots.length)];
-      const rad = (selected.angleDeg - 90) * (Math.PI / 180);
-      const targetPoint = {
-        x: Math.round(300 + Math.cos(rad) * selected.dist),
-        y: Math.round(410 + Math.sin(rad) * selected.dist),
-      };
-
-      return {
-        shot: selected.name,
-        bouncePoint: { x: 300, y: 330 },
-        targetPoint,
-        isBoundary: false,
-        isAerial: false,
-        duration: 1050,
-      };
-    }
-
-    // Dot Ball / Defensive Block / Miss
-    const dotShots = [
-      { name: 'FORWARD_DEFENSE', target: { x: 295, y: 390 } },
-      { name: 'BACKFOOT_BLOCK', target: { x: 305, y: 400 } },
-      { name: 'LEAVE_OUTSIDE_OFF', target: { x: 300, y: 460 } },
-      { name: 'PLAYED_AND_MISSED', target: { x: 300, y: 460 } },
-    ];
-    const selected = dotShots[Math.floor(Math.random() * dotShots.length)];
-
-    return {
-      shot: selected.name,
-      bouncePoint: { x: 300, y: 340 },
-      targetPoint: selected.target,
-      isBoundary: false,
-      isAerial: false,
-      duration: 850,
-    };
-  }, []);
-
-  // Main 60-FPS Delivery Animation Sequence with Bowler Swing & Trajectory Physics
-  const runDeliveryAnimation = useCallback(() => {
-    if (!lastBall || speed === 0) {
-      if (lastBall) {
-        setResultBanner(lastBall.isWicket ? 'WICKET!' : lastBall.runs === 6 ? 'SIX!' : lastBall.runs === 4 ? 'FOUR!' : `${lastBall.runs} RUNS`);
+      if (isMoving) {
+        hasMovement = true;
+        movingList.push({
+          playerId: f.id,
+          playerName: f.name,
+          fromRole: current.role,
+          toRole: f.positionName,
+          fromPoint: { x: Math.round(current.x), y: Math.round(current.y) },
+          toPoint: { x: Math.round(f.targetPos.x), y: Math.round(f.targetPos.y) },
+        });
       }
-      onAnimationComplete?.();
+
+      return {
+        id: f.id,
+        name: f.name,
+        role: f.positionName,
+        currentX: current.x,
+        currentY: current.y,
+        targetX: f.targetPos.x,
+        targetY: f.targetPos.y,
+        fromX: current.x,
+        fromY: current.y,
+        category: f.isCatching ? 'CATCHING' : f.isOutsideCircle ? 'BOUNDARY' : 'RING',
+        isOutsideCircle: f.isOutsideCircle,
+        isCatching: f.isCatching,
+        tacticalRole: f.tacticalRole,
+        isMoving,
+      };
+    });
+
+    setChangedFieldersList(movingList.length > 0 ? movingList : newConfig.changedFielders);
+
+    if (!hasMovement || speed === 0) {
+      setFielders(updatedFielders.map(f => ({ ...f, currentX: f.targetX, currentY: f.targetY, isMoving: false })));
+      setIsFieldChanging(false);
+      setFieldChangeProgress(100);
+      onFieldChangingChangeRef.current?.(false);
       return;
     }
 
-    const { runs, isWicket, isExtra, extraType, wicketType } = lastBall;
-    const trajectoryData = get360ShotTrajectoryData(runs, isWicket, isExtra, extraType);
-    setActiveShot(trajectoryData.shot);
+    setFielders(updatedFielders);
+    setIsFieldChanging(true);
+    setFieldChangeProgress(0);
+    onFieldChangingChangeRef.current?.(true);
 
-    const speedMultiplier = speed === 1 ? 1 : speed === 2 ? 0.5 : 0.25;
-    const totalDuration = trajectoryData.duration * speedMultiplier;
+    if (fieldMoveAnimFrameRef.current) cancelAnimationFrame(fieldMoveAnimFrameRef.current);
 
-    // Bowler tactic specific physics
-    const currentTactic = lastBall.bowlingTactic || selectedTactic;
-    const currentTacticData = BOWLING_TACTICS_CONFIG[currentTactic] || BOWLING_TACTICS_CONFIG.OUTSWING;
+    const duration = speed === 1 ? 1400 : speed === 1.5 ? 950 : 600;
+    let startTime: number | null = null;
 
-    // Pitch landing adjustment based on tactic
-    let pitchBounceY = 325;
-    let pitchBounceX = 300;
-    if (currentTactic === 'YORKER') pitchBounceY = 395;
-    else if (currentTactic === 'BOUNCER') pitchBounceY = 270;
-    else if (currentTactic === 'OUTSWING' || currentTactic === 'OFF_CUTTER') pitchBounceX = 308;
-    else if (currentTactic === 'INSWING' || currentTactic === 'LEG_CUTTER') pitchBounceX = 292;
+    const moveStep = (timestamp: number) => {
+      if (!startTime) startTime = timestamp;
+      const elapsed = timestamp - startTime;
+      const rawProgress = Math.min(1, elapsed / duration);
+      const ease = rawProgress < 0.5 
+        ? 4 * rawProgress * rawProgress * rawProgress 
+        : 1 - Math.pow(-2 * rawProgress + 2, 3) / 2;
+
+      setFieldChangeProgress(Math.round(rawProgress * 100));
+
+      setFielders(prev => prev.map(f => {
+        if (!f.isMoving) return f;
+        return {
+          ...f,
+          currentX: rawProgress >= 1 ? f.targetX : f.fromX + (f.targetX - f.fromX) * ease,
+          currentY: rawProgress >= 1 ? f.targetY : f.fromY + (f.targetY - f.fromY) * ease,
+          isMoving: rawProgress < 1,
+        };
+      }));
+
+      if (rawProgress < 1) {
+        fieldMoveAnimFrameRef.current = requestAnimationFrame(moveStep);
+      } else {
+        setIsFieldChanging(false);
+        setFieldChangeProgress(100);
+        onFieldChangingChangeRef.current?.(false);
+      }
+    };
+
+    fieldMoveAnimFrameRef.current = requestAnimationFrame(moveStep);
+  }, [fielders, speed]);
+
+  const triggerTacticalRecalculation = useCallback((presetKey?: string) => {
+    const newConfig = BowlerFieldStrategyEngine.generateFieldConfiguration({
+      format: selectedFormat,
+      bowler,
+      striker,
+      nonStriker,
+      overs: score?.overs || 0,
+      balls: score?.balls || 0,
+      wickets: score?.wickets || 0,
+      runs: score?.runs || 0,
+      target,
+      pitch,
+      weather,
+      partnershipRuns,
+      partnershipBalls,
+      fieldingSquad,
+      previousConfig: fieldConfig,
+      manualPresetKey: presetKey,
+      testDaySession,
+    });
+    applyNewFieldConfiguration(newConfig);
+  }, [selectedFormat, bowler, striker, nonStriker, score, target, pitch, weather, partnershipRuns, partnershipBalls, fieldingSquad, fieldConfig, testDaySession, applyNewFieldConfiguration]);
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // 2. CONTINUOUS 2D BALL MOVEMENT & TRAIL PLAYBACK
+  // ─────────────────────────────────────────────────────────────────────────
+  const runContinuousBallAnimation = useCallback((delivery: DeliveryResult, resumeFromProgress: number = 0) => {
+    if (speed === 0) {
+      // Instant / Skip mode
+      setBallVisible(false);
+      setBallPos(delivery.ballPath.target);
+      setAnimProgress(100);
+      setPlaybackStage('OUTCOME');
+      setResultBanner(delivery.wicket ? (delivery.wicketType?.toUpperCase() || 'WICKET!') : delivery.totalRuns === 6 ? 'SIX!' : delivery.totalRuns === 4 ? 'FOUR!' : delivery.totalRuns > 0 ? `${delivery.totalRuns} RUNS` : 'DOT BALL');
+      onContactReachedRef.current?.();
+      onPlaybackCompleteRef.current?.();
+      return;
+    }
+
+    const path = delivery.ballPath;
+    const baseDuration = delivery.totalRuns === 6 ? 1500 : delivery.totalRuns === 4 ? 1300 : delivery.totalRuns > 0 ? 1150 : 950;
+    const speedMult = speed === 1 ? 1 : speed === 1.5 ? 0.7 : 0.45;
+    const totalDuration = baseDuration * speedMult;
 
     let startTime: number | null = null;
-    isAnimatingRef.current = true;
+    let contactTriggered = false;
+
     setBallVisible(true);
-    setBailsFly(false);
+    setBailsFlying(false);
     setBoundaryEffect(null);
     setImpactBurst(null);
     setResultBanner(null);
     setBallTrail([]);
 
-    // Initial positions
     setBowlerPos({ x: 300, y: 120 });
     setStrikerPos(BATTER_CREASE);
     setNonStrikerPos(NON_STRIKER_CREASE);
-    setBallPos(BOWLER_CREASE);
-
-    // Identify nearest fielder to target location
-    const target = trajectoryData.targetPoint;
-    let closestFielderIdx = 0;
-    let minDist = Infinity;
-    fielders.forEach((f, idx) => {
-      const dist = Math.hypot(f.x - target.x, f.y - target.y);
-      if (dist < minDist) {
-        minDist = dist;
-        closestFielderIdx = idx;
-      }
-    });
-    setActiveFielder(fielders[closestFielderIdx]);
+    setBallPos(path.start);
 
     const step = (timestamp: number) => {
-      if (!startTime) startTime = timestamp;
+      if (isPausedRef.current) {
+        animFrameRef.current = requestAnimationFrame(step);
+        return;
+      }
+
+      if (!startTime) {
+        startTime = timestamp - (resumeFromProgress * totalDuration);
+      }
+
       const elapsed = timestamp - startTime;
       const progress = Math.min(1, elapsed / totalDuration);
-      setStateProgress(Math.round(progress * 100));
+      pausedProgressRef.current = progress;
+      setAnimProgress(Math.round(progress * 100));
 
-      // ── 1. Bowler Run-Up (0.00 - 0.25)
-      if (progress < 0.25) {
-        setAnimState('BOWLER_RUNUP');
-        const pNorm = progress / 0.25;
-        const bY = 120 + (pNorm * pNorm * 65);
+      let curX = path.start.x;
+      let curY = path.start.y;
+      let curScale = 1;
+
+      // ── Stage 1: Bowler Run-up to Pitch Bounce (0.00 - 0.35)
+      if (progress < 0.35) {
+        setPlaybackStage('BOWLER_RELEASE');
+        const pNorm = progress / 0.35;
+        // Runup movement
+        const bY = 120 + (pNorm * 65);
         setBowlerPos({ x: 300, y: bY });
-        setBallPos({ x: 300, y: bY + 10 });
-        setBallHeight(0);
-      }
 
-      // ── 2. Delivery Release & Flight with Tactic Swing / Curve (0.25 - 0.50)
+        // Ball release to pitch bounce
+        curX = path.start.x + (path.bounce.x - path.start.x) * pNorm;
+        curY = path.start.y + (path.bounce.y - path.start.y) * pNorm;
+        curScale = 1 + Math.sin(pNorm * Math.PI) * 0.2;
+      }
+      // ── Stage 2: Pitch Bounce to Bat Contact (0.35 - 0.50)
       else if (progress < 0.50) {
-        setAnimState('BALL_FLIGHT');
-        const pFlight = (progress - 0.25) / 0.25;
-        const startP = BOWLER_CREASE;
-        const bounceP = { x: pitchBounceX, y: pitchBounceY };
-
-        // Swing curvature curve based on selected bowling tactic
-        const swingCurve = currentTacticData.swingFactor * Math.sin(pFlight * Math.PI) * 2.2;
-        const curX = startP.x + (bounceP.x - startP.x) * pFlight + swingCurve;
-        const curY = startP.y + (bounceP.y - startP.y) * pFlight;
-
-        setBallPos({ x: curX, y: curY });
-        setBallHeight(Math.sin(pFlight * Math.PI) * (14 * currentTacticData.bounceMultiplier));
-        setBallScale({ x: 1, y: 1 });
-        setBallRotation(currentTacticData.seamAngle);
-
-        setBallTrail(prev => [...prev.slice(-10), { x: curX, y: curY }]);
-      }
-
-      // ── 3. Pitch Bounce to Bat Contact (0.50 - 0.65)
-      else if (progress < 0.65) {
-        setAnimState('BOUNCE');
-        const pBounce = (progress - 0.50) / 0.15;
-        const bounceP = { x: pitchBounceX, y: pitchBounceY };
-        const batterP = BATTER_CREASE;
-
-        // Post-bounce deviation (Off-spin turns in, leg-spin turns away)
-        let postBounceDev = 0;
-        if (currentTactic === 'OFF_BREAK' || currentTactic === 'GOOGLY') postBounceDev = pBounce * 6;
-        else if (currentTactic === 'LEG_BREAK' || currentTactic === 'DOOSRA') postBounceDev = -pBounce * 6;
-
-        const curX = bounceP.x + (batterP.x - bounceP.x) * pBounce + postBounceDev;
-        const curY = bounceP.y + (batterP.y - bounceP.y) * pBounce;
-
-        setBallPos({ x: curX, y: curY });
-
-        // Turf squash
-        if (pBounce < 0.15) {
-          setBallScale({ x: 1.35, y: 0.65 });
-        } else {
-          setBallScale({ x: 1, y: 1 });
-        }
-
-        const apexHeight = currentTactic === 'BOUNCER' ? 24 : currentTactic === 'YORKER' ? 4 : 10;
-        setBallHeight(Math.sin(pBounce * Math.PI) * apexHeight);
-
-        // Batter backswing anticipation
+        setPlaybackStage('PITCH_BOUNCE');
+        const pBounce = (progress - 0.35) / 0.15;
+        curX = path.bounce.x + (path.contact.x - path.bounce.x) * pBounce;
+        curY = path.bounce.y + (path.contact.y - path.bounce.y) * pBounce;
+        // Batter swing anticipation
         setBatRotation(Math.sin(pBounce * Math.PI) * -38);
-        setBallTrail(prev => [...prev.slice(-8), { x: curX, y: curY }]);
       }
-
-      // ── 4. Bat Contact & Shot Travel (0.65 - 0.90)
+      // ── Stage 3: Bat Contact to Target Zone / Boundary (0.50 - 0.90)
       else if (progress < 0.90) {
-        setAnimState('BALL_FIELD_TRAVEL');
-        const pTravel = (progress - 0.65) / 0.25;
-        const startBat = BATTER_CREASE;
-        const endTarget = trajectoryData.targetPoint;
+        setPlaybackStage('BALL_TRAVEL');
+        const pTravel = (progress - 0.50) / 0.40;
 
-        // Trigger impact burst once
-        if (pTravel < 0.1 && !impactBurst) {
-          setImpactBurst({ x: startBat.x, y: startBat.y });
+        if (!contactTriggered) {
+          contactTriggered = true;
+          setImpactBurst({ x: path.contact.x, y: path.contact.y });
+          onContactReachedRef.current?.();
         }
 
-        const curX = startBat.x + (endTarget.x - startBat.x) * pTravel;
-        const curY = startBat.y + (endTarget.y - startBat.y) * pTravel;
+        curX = path.contact.x + (path.target.x - path.contact.x) * pTravel;
+        curY = path.contact.y + (path.target.y - path.contact.y) * pTravel;
 
-        if (trajectoryData.isAerial) {
-          // 3D Parabolic Six Arc
-          const arcHeight = Math.sin(pTravel * Math.PI) * 75;
-          setBallHeight(arcHeight);
-          const depthScale = 1.0 + (arcHeight / 80) * 0.75;
-          setBallScale({ x: depthScale, y: depthScale });
+        if (path.isAerial) {
+          // 2D depth scale for aerial ball
+          const arc = Math.sin(pTravel * Math.PI);
+          curScale = 1 + arc * 0.75;
         } else {
-          // Four / Rolling ground ball with grass skips
-          let groundSkip = 0;
-          if (pTravel < 0.35) {
-            groundSkip = Math.sin((pTravel / 0.35) * Math.PI) * 6;
-          } else if (pTravel < 0.70) {
-            groundSkip = Math.sin(((pTravel - 0.35) / 0.35) * Math.PI) * 3;
-          }
-          setBallHeight(groundSkip);
-          setBallScale({ x: 1, y: 1 });
-          setBallRotation(prev => prev + 35);
+          curScale = 1;
         }
 
-        setBallPos({ x: curX, y: curY });
         setBatRotation(Math.sin((1 - pTravel) * Math.PI) * 25);
-        setBallTrail(prev => [...prev.slice(-12), { x: curX, y: curY }]);
-
-        // Fielder moves smoothly toward intercept point
-        setFielders(prev => prev.map((f, i) => {
-          if (i === closestFielderIdx) {
-            const lerpX = f.baseX + (endTarget.x - f.baseX) * (pTravel * 0.88);
-            const lerpY = f.baseY + (endTarget.y - f.baseY) * (pTravel * 0.88);
-            return { ...f, x: lerpX, y: lerpY };
-          }
-          return f;
-        }));
 
         // Batters running between wickets
-        if (runs > 0 && !isWicket) {
-          const runCycle = Math.min(1, pTravel * (runs >= 2 ? 1.8 : 1.0));
-          const sY = BATTER_CREASE.y - (runCycle * (BATTER_CREASE.y - NON_STRIKER_CREASE.y));
-          const nsY = NON_STRIKER_CREASE.y + (runCycle * (BATTER_CREASE.y - NON_STRIKER_CREASE.y));
+        if (delivery.totalRuns > 0 && !delivery.wicket) {
+          const runSpeed = Math.min(1, pTravel * (delivery.totalRuns >= 2 ? 1.8 : 1.1));
+          const sY = BATTER_CREASE.y - (runSpeed * (BATTER_CREASE.y - NON_STRIKER_CREASE.y));
+          const nsY = NON_STRIKER_CREASE.y + (runSpeed * (BATTER_CREASE.y - NON_STRIKER_CREASE.y));
           setStrikerPos({ x: 300, y: sY });
           setNonStrikerPos({ x: 300, y: nsY });
         }
 
-        // Bowled dismissal bails fly
-        if (isWicket && wicketType?.toLowerCase().includes('bowled')) {
-          setBailsFly(true);
+        if (delivery.wicket && delivery.wicketType === 'Bowled') {
+          setBailsFlying(true);
         }
       }
-
-      // ── 5. Final Result & Boundary Impact (0.90 - 1.00)
+      // ── Stage 4: Outcome & Boundary Wave (0.90 - 1.00)
       else {
-        setAnimState('RESULT');
-        if (trajectoryData.isBoundary) {
-          setBoundaryEffect({ 
-            x: trajectoryData.targetPoint.x, 
-            y: trajectoryData.targetPoint.y, 
+        setPlaybackStage('OUTCOME');
+        curX = path.target.x;
+        curY = path.target.y;
+
+        if (delivery.totalRuns >= 4) {
+          setBoundaryEffect({
+            x: path.target.x,
+            y: path.target.y,
             active: true,
-            isSix: trajectoryData.isAerial 
+            isSix: delivery.totalRuns === 6,
           });
         }
 
-        if (isWicket) {
-          setResultBanner(wicketType?.toUpperCase() || 'WICKET!');
-        } else if (runs === 6) {
+        if (delivery.wicket) {
+          setResultBanner(delivery.wicketType?.toUpperCase() || 'WICKET!');
+        } else if (delivery.totalRuns === 6) {
           setResultBanner('SIX!');
-        } else if (runs === 4) {
+        } else if (delivery.totalRuns === 4) {
           setResultBanner('FOUR!');
-        } else if (runs > 0) {
-          setResultBanner(`${runs} RUN${runs > 1 ? 'S' : ''}`);
+        } else if (delivery.totalRuns > 0) {
+          setResultBanner(`${delivery.totalRuns} RUN${delivery.totalRuns > 1 ? 'S' : ''}`);
         } else {
           setResultBanner('DOT BALL');
         }
       }
 
+      setBallPos({ x: curX, y: curY });
+      setBallScale(curScale);
+
+      // Record visible trail points (keeps last 6 coordinates)
+      setBallTrail(prev => [...prev.slice(-5), { x: curX, y: curY }]);
+
       if (progress < 1) {
         animFrameRef.current = requestAnimationFrame(step);
       } else {
-        isAnimatingRef.current = false;
-        onAnimationComplete?.();
+        onPlaybackCompleteRef.current?.();
       }
     };
 
     animFrameRef.current = requestAnimationFrame(step);
+  }, [speed]);
 
+  // Execute animation upon new deliveryResult arrival
+  useEffect(() => {
+    if (activeDelivery && activeDelivery.id !== lastPlayedDeliveryIdRef.current && !isFieldChanging) {
+      lastPlayedDeliveryIdRef.current = activeDelivery.id;
+      setIsPaused(false);
+      pausedProgressRef.current = 0;
+      runContinuousBallAnimation(activeDelivery, 0);
+    }
+  }, [activeDelivery, isFieldChanging, runContinuousBallAnimation]);
+
+  // Clean up animation loop
+  useEffect(() => {
     return () => {
       if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
+      if (fieldMoveAnimFrameRef.current) cancelAnimationFrame(fieldMoveAnimFrameRef.current);
     };
-  }, [lastBall, speed, selectedTactic, get360ShotTrajectoryData, fielders, onAnimationComplete]);
+  }, []);
 
-  // Trigger on new delivery ONLY in 2D Mode (3D Mode handles its own animation lifecycle)
-  useEffect(() => {
-    if (viewMode === '2D' && ballCount > 0) {
-      runDeliveryAnimation();
-    }
-  }, [ballCount, runDeliveryAnimation, viewMode]);
+  // Replay Last Delivery
+  const handleReplay = () => {
+    if (!activeDelivery) return;
+    if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
+    setIsPaused(false);
+    pausedProgressRef.current = 0;
+    runContinuousBallAnimation(activeDelivery, 0);
+  };
 
-  // Default to High-Performance 3D Stadium Match Engine
-  if (viewMode === '3D') {
-    return (
-      <CricketActionVisualizer3D
-        striker={striker}
-        nonStriker={nonStriker}
-        bowler={bowler}
-        lastBall={lastBall}
-        ballCount={ballCount}
-        format={format}
-        battingTeamName={battingTeamName}
-        bowlingTeamName={bowlingTeamName}
-        battingTeamShortName={battingTeamShortName}
-        teamLogo={teamLogo}
-        teamAccentColor={teamAccentColor}
-        isFreeHit={isFreeHit}
-        score={score}
-        wickets={wickets}
-        overs={overs}
-        balls={balls}
-        totalOvers={totalOvers}
-        target={target}
-        currentRunRate={currentRunRate}
-        requiredRunRate={requiredRunRate}
-        strikerStats={strikerStats}
-        nonStrikerStats={nonStrikerStats}
-        bowlerStats={bowlerStats}
-        recentBalls={recentBalls}
-        partnership={partnership}
-        innings={innings}
-        day={day}
-        session={session}
-        lead={lead}
-        trail={trail}
-        onAnimationComplete={onAnimationComplete}
-        speed={speed}
-        onSpeedChange={setSpeed}
-        className={className}
-        activeBowlingTactic={activeBowlingTactic}
-        onTacticChange={onTacticChange}
-        onToggle2D={() => setViewMode('2D')}
-      />
-    );
-  }
+  // Skip Current Playback
+  const handleSkip = () => {
+    if (!activeDelivery) return;
+    if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
+    setIsPaused(false);
+    setAnimProgress(100);
+    setPlaybackStage('OUTCOME');
+    onPlaybackCompleteRef.current?.();
+  };
+
+  // Drag & drop interactive fielder adjustment on SVG
+  const handleSvgMouseMove = (e: React.MouseEvent<SVGSVGElement>) => {
+    if (!draggedFielderId || !svgRef.current) return;
+    const rect = svgRef.current.getBoundingClientRect();
+    const svgX = ((e.clientX - rect.left) / rect.width) * 600;
+    const svgY = ((e.clientY - rect.top) / rect.height) * 600;
+    const distFromCenter = Math.hypot(svgX - 300, svgY - 300);
+    const maxR = 265;
+    const finalX = distFromCenter > maxR ? 300 + ((svgX - 300) / distFromCenter) * maxR : svgX;
+    const finalY = distFromCenter > maxR ? 300 + ((svgY - 300) / distFromCenter) * maxR : svgY;
+
+    setFielders(prev => prev.map(f => f.id === draggedFielderId ? {
+      ...f,
+      currentX: Math.round(finalX),
+      currentY: Math.round(finalY),
+      targetX: Math.round(finalX),
+      targetY: Math.round(finalY),
+    } : f));
+  };
+
+  const bowlingPlan = fieldConfig.bowlingPlan;
+  const isLeftHander = (striker as any)?.battingHand === 'Left' || false;
 
   return (
-    <div className={cn("relative flex flex-col items-center select-none bg-[#040814] rounded-2xl overflow-hidden border border-white/10 shadow-2xl touch-none", className)}>
-      {/* ── Broadcast Top Bar ── */}
-      <div className="w-full px-4 py-2.5 bg-black/70 backdrop-blur-md border-b border-white/5 flex items-center justify-between z-30 flex-wrap gap-2">
-        <div className="flex items-center gap-2">
-          <div className={cn("w-2.5 h-2.5 rounded-full animate-pulse", isTest ? "bg-red-500" : "bg-cyan-400")} />
-          <span className="text-[10px] font-black uppercase tracking-widest text-white/90">
-            {format} 360° LIVE ARENA
-          </span>
-          {isFreeHit && (
-            <span className="px-1.5 py-0.5 rounded bg-red-500 text-white text-[8px] font-black uppercase animate-bounce">
-              Free Hit
+    <div className={cn(
+      "w-full rounded-2xl overflow-hidden border border-slate-800/80 bg-gradient-to-b from-[#0a0f1d] via-[#070b14] to-[#04060a] text-slate-100 shadow-2xl font-sans select-none relative",
+      className
+    )}>
+      {/* ═══════════════════════════════════════════════════════════════════════
+          TOP MATCH BAR: BRANDING, FORMAT, SCORE, SPEED & PLAYBACK CONTROLS
+      ═══════════════════════════════════════════════════════════════════════ */}
+      <div className="w-full px-4 py-3 bg-slate-950/90 backdrop-blur-xl border-b border-white/10 flex flex-wrap items-center justify-between gap-3 z-30">
+        {/* Branding & Format Selector */}
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2">
+            <div className="h-8 w-8 rounded-xl bg-gradient-to-tr from-cyan-500 to-blue-600 flex items-center justify-center shadow-lg shadow-cyan-500/25">
+              <Compass className="w-4 h-4 text-white animate-spin-slow" />
+            </div>
+            <div>
+              <div className="text-[10px] font-black tracking-widest text-cyan-400 uppercase leading-none">CRICKET ARENA</div>
+              <div className="text-xs font-black tracking-wide text-white">FIELD TACTICS 2D</div>
+            </div>
+          </div>
+
+          <div className="h-4 w-px bg-white/10 mx-1 hidden sm:block" />
+
+          {/* Format Selector */}
+          <div className="flex items-center bg-slate-900/90 p-1 rounded-xl border border-white/10">
+            {(['T20', 'ODI', 'TEST'] as ArenaFormat[]).map((fmt) => (
+              <button
+                key={fmt}
+                onClick={() => {
+                  setSelectedFormat(fmt);
+                  const newConfig = BowlerFieldStrategyEngine.generateFieldConfiguration({
+                    format: fmt,
+                    bowler,
+                    striker,
+                    nonStriker,
+                    overs: score?.overs || 0,
+                    balls: score?.balls || 0,
+                    wickets: score?.wickets || 0,
+                    runs: score?.runs || 0,
+                    target,
+                    pitch,
+                    weather,
+                    partnershipRuns,
+                    partnershipBalls,
+                    fieldingSquad,
+                    previousConfig: fieldConfig,
+                    testDaySession,
+                  });
+                  applyNewFieldConfiguration(newConfig);
+                }}
+                className={cn(
+                  "px-2.5 py-1 rounded-lg text-[10px] font-black transition-all",
+                  selectedFormat === fmt
+                    ? fmt === 'TEST'
+                      ? "bg-red-600 text-white shadow-md shadow-red-600/30"
+                      : fmt === 'ODI'
+                        ? "bg-blue-600 text-white shadow-md shadow-blue-600/30"
+                        : "bg-cyan-500 text-slate-950 shadow-md shadow-cyan-500/30"
+                    : "text-slate-400 hover:text-white"
+                )}
+              >
+                {fmt}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Live Scoreboard Header */}
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-1.5">
+            <span className="relative flex h-2 w-2">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
             </span>
+            <span className="text-[11px] font-bold text-emerald-400 uppercase tracking-wider">
+              {isFieldChanging ? 'FIELD IN MOTION' : lifecycle === 'RESULT_LOCKED' || lifecycle === 'BALL_PATH_PLAYBACK' ? 'IN PLAY' : 'READY'}
+            </span>
+          </div>
+
+          {score && (
+            <div className="flex items-baseline gap-2 bg-white/[0.04] px-3 py-1 rounded-xl border border-white/5">
+              <span className="text-xs font-bold text-slate-400 truncate max-w-[80px]">{battingTeamName}</span>
+              <span className="text-sm font-black text-white tabular-nums tracking-tight">
+                {score.runs}/{score.wickets}
+              </span>
+              <span className="text-[10px] font-bold text-slate-400 tabular-nums">
+                ({score.overs}.{score.balls} ov)
+              </span>
+            </div>
+          )}
+
+          {isTest && testDaySession && (
+            <div className="hidden md:flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-red-950/40 border border-red-500/30 text-[10px] font-bold text-red-200">
+              <Award className="w-3 h-3 text-red-400" />
+              <span>Day {testDaySession.day} • {testDaySession.session}</span>
+            </div>
           )}
         </div>
 
-        {/* Tactical Controls (Field Setup, 3D Toggle, & Bowler Options) */}
-        <div className="flex items-center gap-1.5 flex-wrap">
-          {/* Switch to 3D */}
+        {/* Playback Controls (1x, 1.5x, 2x, Pause/Resume, Replay, Skip, Debug) */}
+        <div className="flex items-center gap-1.5">
+          {/* Speed Buttons */}
+          <div className="flex items-center bg-slate-900/90 p-1 rounded-xl border border-white/10">
+            {([1, 1.5, 2] as AnimationSpeed[]).map((spd) => (
+              <button
+                key={spd}
+                onClick={() => setSpeed(spd)}
+                className={cn(
+                  "px-2 py-0.5 rounded-lg text-[10px] font-black transition-all",
+                  speed === spd
+                    ? "bg-white text-slate-950 shadow-sm"
+                    : "text-slate-400 hover:text-white"
+                )}
+              >
+                {spd}x
+              </button>
+            ))}
+          </div>
+
+          {/* Pause / Resume */}
           <button
-            onClick={() => setViewMode('3D')}
-            className="px-2.5 py-1 rounded-lg text-[10px] font-black bg-cyan-500 hover:bg-cyan-400 text-black shadow-md border border-cyan-300 transition-all flex items-center gap-1"
-            title="Switch to 3D Real-Time Broadcast View"
+            onClick={() => setIsPaused(v => !v)}
+            title={isPaused ? "Resume" : "Pause"}
+            className={cn(
+              "p-1.5 rounded-xl border text-xs transition-colors",
+              isPaused 
+                ? "bg-amber-500/20 border-amber-400 text-amber-300" 
+                : "bg-slate-900 border-white/10 text-slate-300 hover:text-white"
+            )}
           >
-            <span>🏟️</span> 3D Arena
+            {isPaused ? <Play className="w-3.5 h-3.5" /> : <Pause className="w-3.5 h-3.5" />}
           </button>
 
-          {/* Bowler Tactics Button */}
+          {/* Replay */}
           <button
-            onClick={() => { setShowBowlerTactics(!showBowlerTactics); setShowFieldMenu(false); }}
-            className={cn(
-              "flex items-center gap-1 px-2.5 py-1 rounded-lg text-[10px] font-bold transition-all border",
-              showBowlerTactics 
-                ? "bg-amber-500 text-black border-amber-400 font-black shadow-md" 
-                : "bg-white/5 border-white/10 text-white/80 hover:text-white"
-            )}
-            title="Choose Bowling Style & Swing Options"
+            onClick={handleReplay}
+            title="Replay Last Ball"
+            className="p-1.5 rounded-xl bg-slate-900 border border-white/10 text-slate-300 hover:text-white transition-colors"
           >
-            <span>{tacticConfig.icon}</span>
-            <span>Tactic: {tacticConfig.name.split(' ')[0]}</span>
+            <RotateCcw className="w-3.5 h-3.5" />
           </button>
 
-          {/* Field Setup Button */}
+          {/* Skip */}
           <button
-            onClick={() => { setShowFieldMenu(!showFieldMenu); setShowBowlerTactics(false); }}
-            className={cn(
-              "flex items-center gap-1 px-2.5 py-1 rounded-lg text-[10px] font-bold transition-all border",
-              showFieldMenu || activePreset === 'CUSTOM'
-                ? "bg-cyan-500 text-black border-cyan-400 font-black shadow-md" 
-                : "bg-white/5 border-white/10 text-white/80 hover:text-white"
-            )}
-            title="Configure Field Setup or Drag Fielders by Hand"
-          >
-            <Shield className="w-3 h-3" />
-            <span>Field: {activePreset === 'CUSTOM' ? 'Custom ✍️' : FIELD_PRESETS[activePreset]?.name.split(' ')[0]}</span>
-          </button>
-
-          {/* Speed Controls */}
-          {([1, 2, 4] as AnimationSpeed[]).map((sp) => (
-            <button
-              key={sp}
-              onClick={() => setSpeed(sp)}
-              className={cn(
-                "px-2 py-0.5 rounded text-[9px] font-bold transition-all",
-                speed === sp ? "bg-white text-black font-black shadow-sm" : "bg-white/5 text-white/50 hover:text-white"
-              )}
-            >
-              {sp}x
-            </button>
-          ))}
-
-          <button
-            onClick={() => setSpeed(0)}
-            className={cn(
-              "px-2 py-0.5 rounded text-[9px] font-bold transition-all",
-              speed === 0 ? "bg-amber-400 text-black font-black" : "bg-white/5 text-white/50 hover:text-white"
-            )}
-            title="Instant Simulation"
+            onClick={handleSkip}
+            title="Skip Animation"
+            className="px-2 py-1 rounded-xl bg-slate-900 border border-white/10 text-[10px] font-black text-slate-300 hover:text-white transition-colors"
           >
             Skip
           </button>
 
+          {/* Debug Panel Toggle */}
           <button
-            onClick={() => setDebugMode(!debugMode)}
+            onClick={() => setShowDebugHUD(v => !v)}
+            title="Toggle Debug Panel"
             className={cn(
-              "p-1 rounded text-white/40 hover:text-white transition-colors ml-0.5",
-              debugMode && "text-cyan-400"
+              "p-1.5 rounded-xl border text-xs transition-colors",
+              showDebugHUD 
+                ? "bg-purple-500/20 border-purple-400 text-purple-300" 
+                : "bg-slate-900 border-white/10 text-slate-400 hover:text-white"
             )}
-            title="Toggle Debug HUD"
           >
-            <Activity className="w-3.5 h-3.5" />
+            <Bug className="w-3.5 h-3.5" />
           </button>
         </div>
       </div>
 
-      {/* ── Bowler Tactics Selector Drawer ── */}
-      <AnimatePresence>
-        {showBowlerTactics && (
-          <motion.div
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: 'auto', opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            className="w-full bg-[#071126] border-b border-white/10 px-4 py-3 z-30 overflow-hidden"
+      {/* ═══════════════════════════════════════════════════════════════════════
+          MAIN RESPONSIVE SECTION: CIRCULAR 2D FIELD + RIGHT TACTICS PANEL
+      ═══════════════════════════════════════════════════════════════════════ */}
+      <div className="w-full flex flex-col lg:flex-row items-stretch justify-between relative bg-[#060913]">
+        {/* ── 2D CIRCULAR PLAYING GROUND (SVG) ── */}
+        <div className="flex-1 relative flex items-center justify-center p-3 sm:p-5 overflow-hidden min-h-[460px] lg:min-h-[560px]">
+          {/* Subtle Outer Stadium Glow */}
+          <div className="absolute inset-0 pointer-events-none overflow-hidden">
+            <div className="absolute -top-20 -left-20 w-72 h-72 rounded-full bg-cyan-500/10 blur-[90px]" />
+            <div className="absolute -top-20 -right-20 w-72 h-72 rounded-full bg-blue-500/10 blur-[90px]" />
+            <div className="absolute -bottom-20 -left-20 w-72 h-72 rounded-full bg-emerald-500/10 blur-[90px]" />
+          </div>
+
+          <svg
+            ref={svgRef}
+            viewBox="0 0 600 600"
+            className="w-full h-full max-w-[560px] aspect-square drop-shadow-[0_0_50px_rgba(0,0,0,0.95)] cursor-crosshair relative z-10"
+            onMouseMove={handleSvgMouseMove}
+            onMouseUp={() => setDraggedFielderId(null)}
           >
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-[10px] font-black uppercase text-amber-400 tracking-wider flex items-center gap-1.5">
-                <Flame className="w-3 h-3 text-amber-400" /> Select Bowling Variation, Seam & Swing Options
-              </span>
-              <span className="text-[9px] text-white/50">
-                Current: <strong className="text-white">{tacticConfig.name}</strong> ({tacticConfig.speedLabel})
-              </span>
-            </div>
+            <defs>
+              {/* Field Turf Radial Gradient */}
+              <radialGradient id="fieldGrass2D" cx="50%" cy="50%" r="50%">
+                <stop offset="0%" stopColor="#15803d" />
+                <stop offset="45%" stopColor="#166534" />
+                <stop offset="85%" stopColor="#14532d" />
+                <stop offset="100%" stopColor="#052e16" />
+              </radialGradient>
 
-            {/* Categorized Options */}
-            <div className="space-y-2">
-              <div>
-                <span className="text-[8px] font-black uppercase tracking-wider text-cyan-400 block mb-1">Fast / Swing / Seam Variations</span>
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
-                  {(['OUTSWING', 'INSWING', 'REVERSE_SWING', 'YORKER', 'BOUNCER', 'SLOWER_BALL', 'OFF_CUTTER', 'LEG_CUTTER'] as BowlingTactic[]).map((tac) => {
-                    const cfg = BOWLING_TACTICS_CONFIG[tac];
-                    const isSel = selectedTactic === tac;
-                    return (
-                      <button
-                        key={tac}
-                        onClick={() => handleSelectTactic(tac)}
-                        className={cn(
-                          "p-1.5 rounded-lg text-left border transition-all flex items-center justify-between gap-1",
-                          isSel 
-                            ? "bg-amber-500/20 border-amber-400 text-amber-200 font-black shadow-md" 
-                            : "bg-white/[0.03] border-white/5 text-white/70 hover:bg-white/10"
-                        )}
-                      >
-                        <div className="flex items-center gap-1 truncate">
-                          <span className="text-xs">{cfg.icon}</span>
-                          <span className="text-[10px] truncate">{cfg.name}</span>
-                        </div>
-                        {isSel && <CheckCircle2 className="w-3 h-3 text-amber-400 shrink-0" />}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
+              {/* Pitch Soil Texture Gradient */}
+              <linearGradient id="pitchSoil2D" x1="0%" y1="0%" x2="100%" y2="0%">
+                <stop offset="0%" stopColor="#92400e" />
+                <stop offset="20%" stopColor="#b45309" />
+                <stop offset="50%" stopColor="#d97706" />
+                <stop offset="80%" stopColor="#b45309" />
+                <stop offset="100%" stopColor="#92400e" />
+              </linearGradient>
 
-              <div>
-                <span className="text-[8px] font-black uppercase tracking-wider text-purple-400 block mb-1">Spin & Mystery Variations</span>
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
-                  {(['OFF_BREAK', 'DOOSRA', 'LEG_BREAK', 'GOOGLY', 'ARM_BALL', 'TOP_SPINNER', 'CARROM_BALL'] as BowlingTactic[]).map((tac) => {
-                    const cfg = BOWLING_TACTICS_CONFIG[tac];
-                    const isSel = selectedTactic === tac;
-                    return (
-                      <button
-                        key={tac}
-                        onClick={() => handleSelectTactic(tac)}
-                        className={cn(
-                          "p-1.5 rounded-lg text-left border transition-all flex items-center justify-between gap-1",
-                          isSel 
-                            ? "bg-purple-500/20 border-purple-400 text-purple-200 font-black shadow-md" 
-                            : "bg-white/[0.03] border-white/5 text-white/70 hover:bg-white/10"
-                        )}
-                      >
-                        <div className="flex items-center gap-1 truncate">
-                          <span className="text-xs">{cfg.icon}</span>
-                          <span className="text-[10px] truncate">{cfg.name}</span>
-                        </div>
-                        {isSel && <CheckCircle2 className="w-3 h-3 text-purple-400 shrink-0" />}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* ── Field Preset & Hand Adjustment Drawer ── */}
-      <AnimatePresence>
-        {showFieldMenu && (
-          <motion.div
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: 'auto', opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            className="w-full bg-[#080f22] border-b border-white/10 px-4 py-3 z-30 overflow-hidden"
-          >
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-[10px] font-black uppercase text-cyan-400 tracking-wider flex items-center gap-1.5">
-                <Move className="w-3 h-3" /> Tactical Field Setup Presets (or drag any fielder by hand on pitch)
-              </span>
-              <div className="flex items-center gap-2">
-                <span className="text-[9px] text-white/50">
-                  Ring: <strong className="text-cyan-300">{fieldCounts.infield}</strong> · Deep: <strong className="text-amber-300">{fieldCounts.outfield}</strong>
-                </span>
-                <button
-                  onClick={() => handleSelectPreset('BALANCED')}
-                  className="text-[9px] font-bold text-white/50 hover:text-white flex items-center gap-1 px-1.5 py-0.5 rounded bg-white/5 hover:bg-white/10"
-                  title="Reset Field to Default Balanced"
-                >
-                  <RotateCcw className="w-2.5 h-2.5" /> Reset
-                </button>
-              </div>
-            </div>
-            <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
-              {(Object.keys(FIELD_PRESETS) as Exclude<FieldPreset, 'CUSTOM'>[]).map((pKey) => {
-                const preset = FIELD_PRESETS[pKey];
-                return (
-                  <button
-                    key={pKey}
-                    onClick={() => handleSelectPreset(pKey)}
-                    className={cn(
-                      "p-2 rounded-xl text-left border transition-all text-xs flex flex-col gap-0.5",
-                      activePreset === pKey 
-                        ? "bg-cyan-500/20 border-cyan-400 text-cyan-200 font-black shadow-lg" 
-                        : "bg-white/[0.03] border-white/5 text-white/70 hover:bg-white/10"
-                    )}
-                  >
-                    <div className="flex items-center gap-1 font-bold text-[11px]">
-                      <span>{preset.icon}</span>
-                      <span className="truncate">{preset.name.split(' ')[0]}</span>
-                    </div>
-                    <span className="text-[8px] text-white/40">{preset.name.split('(')[1]?.replace(')', '') || 'Preset'}</span>
-                  </button>
-                );
-              })}
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* ── 360-Degree Stadium SVG Canvas (600 x 600) with Flawless Hand Drag ── */}
-      <div className="relative w-full aspect-square max-w-[520px] overflow-hidden flex items-center justify-center p-2 touch-none">
-        <svg
-          ref={svgRef}
-          viewBox="0 0 600 600"
-          className="w-full h-full drop-shadow-[0_0_40px_rgba(0,0,0,0.9)] cursor-crosshair select-none"
-        >
-          <defs>
-            {/* Field Turf Radial Gradient */}
-            <radialGradient id="fieldGrad360" cx="50%" cy="50%" r="50%">
-              <stop offset="0%" stopColor="#1e3b1e" />
-              <stop offset="65%" stopColor="#132713" />
-              <stop offset="100%" stopColor="#0a160a" />
-            </radialGradient>
-
-            {/* Pitch Texture Gradient */}
-            <linearGradient id="pitchGrad360" x1="0%" y1="0%" x2="100%" y2="0%">
-              <stop offset="0%" stopColor="#bfa175" />
-              <stop offset="25%" stopColor="#d5b889" />
-              <stop offset="75%" stopColor="#d5b889" />
-              <stop offset="100%" stopColor="#bfa175" />
-            </linearGradient>
-
-            {/* Ball Glow Filter */}
-            <filter id="ballGlow360" x="-50%" y="-50%" width="200%" height="200%">
-              <feGaussianBlur in="SourceGraphic" stdDeviation="2.5" />
-              <feMerge>
-                <feMergeNode />
-                <feMergeNode in="SourceGraphic" />
-              </feMerge>
-            </filter>
-
-            {/* Ground Shadow Filter */}
-            <filter id="shadowFilter" x="-50%" y="-50%" width="200%" height="200%">
-              <feGaussianBlur in="SourceAlpha" stdDeviation="3" />
-              <feColorMatrix type="matrix" values="0 0 0 0 0   0 0 0 0 0   0 0 0 0 0  0 0 0 0.5 0"/>
-            </filter>
-          </defs>
-
-          {/* 1. Outer Stadium & Boundary Rope */}
-          <circle cx="300" cy="300" r="280" fill="url(#fieldGrad360)" stroke="#1a331a" strokeWidth="6" />
-          
-          {/* Inner 30-Yard Circle */}
-          <ellipse
-            cx="300"
-            cy="300"
-            rx="160"
-            ry="190"
-            fill="none"
-            stroke="rgba(255,255,255,0.14)"
-            strokeWidth="1.5"
-            strokeDasharray="4 4"
-          />
-
-          {/* Boundary Rope with LED Ring */}
-          <circle
-            cx="300"
-            cy="300"
-            r={BOUNDARY_RADIUS}
-            fill="none"
-            stroke={boundaryEffect?.active ? themePrimary : "rgba(255,255,255,0.22)"}
-            strokeWidth={boundaryEffect?.active ? "4.5" : "2"}
-            className="transition-all duration-300"
-          />
-
-          {/* 2. Cricket Pitch Strip */}
-          <rect
-            x="272"
-            y="170"
-            width="56"
-            height="260"
-            rx="4"
-            fill="url(#pitchGrad360)"
-            stroke="rgba(0,0,0,0.3)"
-            strokeWidth="1"
-          />
-
-          {/* Crease Markings */}
-          {/* Bowler End */}
-          <line x1="260" y1="190" x2="340" y2="190" stroke="white" strokeWidth="1.5" />
-          <line x1="280" y1="180" x2="280" y2="190" stroke="white" strokeWidth="1" />
-          <line x1="320" y1="180" x2="320" y2="190" stroke="white" strokeWidth="1" />
-          <circle cx="300" cy="180" r="2" fill="#EAB308" />
-
-          {/* Batter End (Popping Crease) */}
-          <line x1="260" y1="410" x2="340" y2="410" stroke="white" strokeWidth="1.5" />
-          <line x1="280" y1="410" x2="280" y2="425" stroke="white" strokeWidth="1" />
-          <line x1="320" y1="410" x2="320" y2="425" stroke="white" strokeWidth="1" />
-          
-          {/* Stumps & Bails at Batter End */}
-          <rect x="296" y="420" width="8" height="3" fill="#D97706" rx="1" />
-          {bailsFly ? (
-            <motion.circle 
-              initial={{ cx: 300, cy: 420 }} 
-              animate={{ cx: 318, cy: 442, opacity: 0 }} 
-              transition={{ duration: 0.65 }}
-              r="2" 
-              fill="#F59E0B" 
-            />
-          ) : (
-            <line x1="295" y1="420" x2="305" y2="420" stroke="#FDE68A" strokeWidth="1.5" />
-          )}
-
-          {/* 3. Ball Trajectory Flight Trail (Color coded by bowler tactic) */}
-          {ballTrail.length > 1 && (
-            <polyline
-              points={ballTrail.map(p => `${p.x},${p.y}`).join(' ')}
-              fill="none"
-              stroke={tacticConfig.color}
-              strokeWidth="2"
-              strokeDasharray="3 3"
-              opacity="0.65"
-            />
-          )}
-
-          {/* 4. Fielders (Draggable & Interactive by Hand) */}
-          {fielders.map((fielder) => {
-            const isDragging = draggedFielderId === fielder.id;
-            const isHovered = hoveredFielderId === fielder.id;
-            const isActive = activeFielder?.id === fielder.id;
-
-            return (
-              <g 
-                key={fielder.id} 
-                transform={`translate(${fielder.x}, ${fielder.y})`}
-                onPointerDown={(e) => {
-                  e.stopPropagation();
-                  (e.currentTarget as any).setPointerCapture?.(e.pointerId);
-                  setDraggedFielderId(fielder.id);
-                }}
-                onPointerEnter={() => setHoveredFielderId(fielder.id)}
-                onPointerLeave={() => setHoveredFielderId(null)}
-                className="cursor-grab active:cursor-grabbing transition-transform"
+              {/* Cyan Arrowhead for Movement Paths */}
+              <marker
+                id="arrowCyan2D"
+                viewBox="0 0 10 10"
+                refX="6"
+                refY="5"
+                markerWidth="6"
+                markerHeight="6"
+                orient="auto-start-reverse"
               >
-                {/* Touch/Drag highlight target */}
-                {(isDragging || isHovered) && (
-                  <circle
-                    r="16"
-                    fill={isDragging ? "rgba(6,182,212,0.3)" : "rgba(255,255,255,0.15)"}
-                    className="animate-pulse"
+                <path d="M 0 1 L 9 5 L 0 9 z" fill="#22D3EE" />
+              </marker>
+
+              {/* Ball Glow Filter */}
+              <filter id="ballGlow2D" x="-50%" y="-50%" width="200%" height="200%">
+                <feGaussianBlur in="SourceGraphic" stdDeviation="2.5" />
+                <feMerge>
+                  <feMergeNode />
+                  <feMergeNode in="SourceGraphic" />
+                </feMerge>
+              </filter>
+            </defs>
+
+            {/* 1. Circular Playing Ground Surface */}
+            <circle cx="300" cy="300" r="280" fill="url(#fieldGrass2D)" stroke="#064e3b" strokeWidth="6" />
+
+            {/* Concentric Lawn Mowing Rings */}
+            {[250, 215, 180, 145, 110, 75].map((r, i) => (
+              <circle
+                key={r}
+                cx="300"
+                cy="300"
+                r={r}
+                fill="none"
+                stroke={i % 2 === 0 ? "rgba(255,255,255,0.025)" : "rgba(0,0,0,0.06)"}
+                strokeWidth="18"
+              />
+            ))}
+
+            {/* 2. Inner 30-Yard Circle (Ellipse: rx=160, ry=190) */}
+            <ellipse
+              cx="300"
+              cy="300"
+              rx="160"
+              ry="190"
+              fill="none"
+              stroke="rgba(255,255,255,0.18)"
+              strokeWidth="1.6"
+              strokeDasharray="5 5"
+            />
+            {[0, 45, 90, 135, 180, 225, 270, 315].map((ang) => {
+              const rad = ang * (Math.PI / 180);
+              const mx = 300 + 160 * Math.sin(rad);
+              const my = 300 - 190 * Math.cos(rad);
+              return <circle key={ang} cx={mx} cy={my} r="2" fill="white" opacity="0.4" />;
+            })}
+
+            {/* 3. Boundary Rope Circle */}
+            <circle
+              cx="300"
+              cy="300"
+              r={BOUNDARY_RADIUS}
+              fill="none"
+              stroke={boundaryEffect?.active ? (boundaryEffect.isSix ? "#C084FC" : "#38BDF8") : "rgba(255,255,255,0.3)"}
+              strokeWidth={boundaryEffect?.active ? "4.5" : "2.2"}
+              className="transition-all duration-300"
+            />
+
+            {/* 4. Central Cricket Pitch Strip */}
+            <rect
+              x="272"
+              y="170"
+              width="56"
+              height="260"
+              rx="4"
+              fill="url(#pitchSoil2D)"
+              stroke="rgba(0,0,0,0.4)"
+              strokeWidth="1"
+            />
+            {/* Bowling Crease (y=190) & Popping Crease (y=410) */}
+            <line x1="272" y1="190" x2="328" y2="190" stroke="white" strokeWidth="1.8" />
+            <line x1="272" y1="410" x2="328" y2="410" stroke="white" strokeWidth="2.2" />
+            <line x1="284" y1="174" x2="284" y2="190" stroke="white" strokeWidth="1.2" />
+            <line x1="316" y1="174" x2="316" y2="190" stroke="white" strokeWidth="1.2" />
+            <line x1="284" y1="410" x2="284" y2="426" stroke="white" strokeWidth="1.2" />
+            <line x1="316" y1="410" x2="316" y2="426" stroke="white" strokeWidth="1.2" />
+
+            {/* Stumps & Bails (Bowler End y=182, Striker End y=418) */}
+            <g transform="translate(300, 182)">
+              <line x1="-3" y1="0" x2="-3" y2="8" stroke="#FEF08A" strokeWidth="2" strokeLinecap="round" />
+              <line x1="0" y1="0" x2="0" y2="8" stroke="#FEF08A" strokeWidth="2" strokeLinecap="round" />
+              <line x1="3" y1="0" x2="3" y2="8" stroke="#FEF08A" strokeWidth="2" strokeLinecap="round" />
+              <line x1="-4" y1="0" x2="4" y2="0" stroke="#FDE047" strokeWidth="1.5" />
+            </g>
+            <g transform="translate(300, 418)">
+              <line x1="-3" y1="-8" x2="-3" y2="0" stroke="#FEF08A" strokeWidth="2" strokeLinecap="round" />
+              <line x1="0" y1="-8" x2="0" y2="0" stroke="#FEF08A" strokeWidth="2" strokeLinecap="round" />
+              <line x1="3" y1="-8" x2="3" y2="0" stroke="#FEF08A" strokeWidth="2" strokeLinecap="round" />
+              {bailsFlying ? (
+                <g className="animate-ping">
+                  <line x1="-8" y1="-14" x2="-2" y2="-12" stroke="#F87171" strokeWidth="2" />
+                  <line x1="2" y1="-12" x2="8" y2="-14" stroke="#F87171" strokeWidth="2" />
+                </g>
+              ) : (
+                <line x1="-4" y1="-8" x2="4" y2="-8" stroke="#FDE047" strokeWidth="1.5" />
+              )}
+            </g>
+
+            {/* Pitch Legend Indicator (Off / Leg side) */}
+            <text x="250" y="300" textAnchor="middle" fill="rgba(255,255,255,0.2)" fontSize="9" fontWeight="900" letterSpacing="1">
+              {isLeftHander ? 'LEG' : 'OFF'}
+            </text>
+            <text x="350" y="300" textAnchor="middle" fill="rgba(255,255,255,0.2)" fontSize="9" fontWeight="900" letterSpacing="1">
+              {isLeftHander ? 'OFF' : 'LEG'}
+            </text>
+
+            {/* 5. Destination Markers & Movement Paths (During Field Changes) */}
+            {isFieldChanging && fielders.map((f) => {
+              if (!f.isMoving) return null;
+              return (
+                <g key={`arrow_${f.id}`}>
+                  <line
+                    x1={f.fromX}
+                    y1={f.fromY}
+                    x2={f.targetX}
+                    y2={f.targetY}
+                    stroke="#22D3EE"
+                    strokeWidth="2.2"
+                    strokeDasharray="4 3"
+                    markerEnd="url(#arrowCyan2D)"
+                    opacity="0.85"
                   />
-                )}
-                
-                <circle
-                  r="7.5"
-                  fill="#1E293B"
-                  stroke={isDragging ? "#38BDF8" : isActive ? themePrimary : "rgba(255,255,255,0.5)"}
-                  strokeWidth={isDragging ? "3" : isActive ? "2.5" : "1.2"}
-                />
-                <circle r="3.2" fill={isDragging ? "#38BDF8" : isActive ? themePrimary : "#94A3B8"} />
-                
-                {/* Fielder Name Badge (Always visible on hover/drag or in debug mode) */}
-                {(isDragging || isHovered || debugMode) && (
-                  <g transform="translate(10, 3)">
-                    <rect x="-2" y="-9" width={fielder.name.length * 5.5 + 8} height="13" rx="3" fill="rgba(0,0,0,0.85)" stroke="rgba(255,255,255,0.3)" strokeWidth="0.8" />
-                    <text x="2" y="0" fill="#38BDF8" fontSize="8" fontWeight="bold">
-                      {fielder.name}
+                  <g transform={`translate(${f.targetX}, ${f.targetY})`}>
+                    <circle r="11" fill="none" stroke="#38BDF8" strokeWidth="1.5" strokeDasharray="3 2" className="animate-spin-slow" />
+                    <circle r="4" fill="#06B6D4" opacity="0.6" className="animate-ping" />
+                    <text y="-12" textAnchor="middle" fill="#38BDF8" fontSize="7.5" fontWeight="900">
+                      {f.role}
                     </text>
                   </g>
-                )}
+                </g>
+              );
+            })}
+
+            {/* 6. Active Fielders in 2D Positions */}
+            {fielders.map((fielder) => {
+              const isCatching = fielder.category === 'CATCHING';
+              const isBoundary = fielder.category === 'BOUNDARY';
+
+              return (
+                <g
+                  key={fielder.id}
+                  transform={`translate(${fielder.currentX}, ${fielder.currentY})`}
+                  onMouseDown={() => setDraggedFielderId(fielder.id)}
+                  className="cursor-grab active:cursor-grabbing"
+                >
+                  <circle
+                    r="9.5"
+                    fill={isCatching ? "#9333EA" : isBoundary ? "#2563EB" : "#059669"}
+                    opacity={fielder.isMoving ? "0.9" : "0.5"}
+                  />
+                  <circle
+                    r="7.5"
+                    fill={fielder.isMoving ? "#22D3EE" : "#FFFFFF"}
+                    stroke={isCatching ? "#C084FC" : isBoundary ? "#60A5FA" : "#34D399"}
+                    strokeWidth="1.8"
+                  />
+                  <circle r="2.8" fill="#0F172A" />
+
+                  {/* Position Label Pill */}
+                  <g transform="translate(0, 14)">
+                    <rect
+                      x="-26"
+                      y="-7"
+                      width="52"
+                      height="13"
+                      rx="3.5"
+                      fill="#0B132B"
+                      stroke={fielder.isMoving ? "#22D3EE" : "rgba(255,255,255,0.25)"}
+                      strokeWidth="0.8"
+                      opacity="0.92"
+                    />
+                    <text
+                      textAnchor="middle"
+                      y="2.5"
+                      fill={fielder.isMoving ? "#22D3EE" : "#F8FAFC"}
+                      fontSize="7"
+                      fontWeight="900"
+                    >
+                      {fielder.role}
+                    </text>
+                  </g>
+                </g>
+              );
+            })}
+
+            {/* 7. Wicketkeeper (Anchor at y=460) */}
+            <g transform="translate(300, 460)">
+              <circle r="9" fill="#F59E0B" opacity="0.6" />
+              <circle r="7.5" fill="#FBBF24" stroke="#FFF" strokeWidth="1.8" />
+              <circle r="2.8" fill="#78350F" />
+              <g transform="translate(0, 14)">
+                <rect x="-24" y="-7" width="48" height="13" rx="3.5" fill="#0B132B" stroke="#F59E0B" strokeWidth="0.8" opacity="0.9" />
+                <text textAnchor="middle" y="2.5" fill="#FDE68A" fontSize="7" fontWeight="900">
+                  Wicketkeeper
+                </text>
               </g>
-            );
-          })}
-
-          {/* 5. Non-Striker */}
-          <g transform={`translate(${nonStrikerPos.x + 16}, ${nonStrikerPos.y})`}>
-            <circle r="7.5" fill="#0284C7" stroke="white" strokeWidth="1.5" />
-            <circle r="3" fill="white" />
-          </g>
-
-          {/* 6. Bowler */}
-          <g transform={`translate(${bowlerPos.x - 16}, ${bowlerPos.y})`}>
-            <circle r="8" fill="#DC2626" stroke="white" strokeWidth="1.5" />
-            <circle r="3" fill="white" />
-          </g>
-
-          {/* 7. Striker & Bat */}
-          <g transform={`translate(${strikerPos.x}, ${strikerPos.y})`}>
-            <circle r="8.5" fill="#2563EB" stroke="white" strokeWidth="1.5" />
-            <circle r="3.5" fill="white" />
-            {/* Bat */}
-            <line
-              x1="0"
-              y1="0"
-              x2="13"
-              y2="-6"
-              stroke="#F59E0B"
-              strokeWidth="2.8"
-              strokeLinecap="round"
-              transform={`rotate(${batRotation})`}
-            />
-          </g>
-
-          {/* 8. Ground Shadow (Underneath aerial balls for 3D depth) */}
-          {ballVisible && ballHeight > 0 && (
-            <ellipse
-              cx={ballPos.x}
-              cy={ballPos.y}
-              rx={4 + (ballHeight * 0.1)}
-              ry={2 + (ballHeight * 0.05)}
-              fill="black"
-              opacity={Math.max(0.15, 0.45 - (ballHeight * 0.005))}
-              filter="url(#shadowFilter)"
-            />
-          )}
-
-          {/* 9. Cricket Ball (Ultra-smooth 60fps transform) */}
-          {ballVisible && (
-            <g
-              transform={`translate(${ballPos.x}, ${ballPos.y - ballHeight}) scale(${ballScale.x}, ${ballScale.y})`}
-            >
-              <circle
-                r={isTest ? 4.8 : 4.2}
-                fill={ballColor}
-                stroke={ballStroke}
-                strokeWidth="1.2"
-                filter="url(#ballGlow360)"
-              />
-              {/* Ball Seam */}
-              <line
-                x1="-3.2"
-                y1="0"
-                x2="3.2"
-                y2="0"
-                stroke={isTest ? "#FFFFFF" : "#CBD5E1"}
-                strokeWidth="0.9"
-                transform={`rotate(${ballRotation})`}
-              />
             </g>
-          )}
 
-          {/* 10. Bat Impact Burst */}
-          {impactBurst && (
-            <circle
-              cx={impactBurst.x}
-              cy={impactBurst.y}
-              r="14"
-              fill="none"
-              stroke="#FDE047"
-              strokeWidth="2.5"
-              className="animate-ping"
-            />
-          )}
+            {/* 8. Non-Striker & Bowler Markers */}
+            <g transform={`translate(${nonStrikerPos.x + 16}, ${nonStrikerPos.y})`}>
+              <circle r="8" fill="#0284C7" stroke="white" strokeWidth="1.6" />
+              <circle r="3" fill="white" />
+              <text y="14" textAnchor="middle" fill="#7DD3FC" fontSize="6.5" fontWeight="900">Non-Str</text>
+            </g>
+            <g transform={`translate(${bowlerPos.x - 16}, ${bowlerPos.y})`}>
+              <circle r="8.5" fill="#DC2626" stroke="white" strokeWidth="1.6" />
+              <circle r="3" fill="white" />
+              <text y="14" textAnchor="middle" fill="#FCA5A5" fontSize="6.5" fontWeight="900">Bowler</text>
+            </g>
 
-          {/* 11. Boundary LED Ripple (Fours & Sixes) */}
-          {boundaryEffect?.active && (
-            <g>
+            {/* 9. Striker & Bat Marker */}
+            <g transform={`translate(${strikerPos.x}, ${strikerPos.y})`}>
+              <circle r="9" fill="#2563EB" stroke="white" strokeWidth="1.8" />
+              <circle r="3.5" fill="white" />
+              <line
+                x1="0"
+                y1="0"
+                x2="13"
+                y2="-6"
+                stroke="#F59E0B"
+                strokeWidth="3"
+                strokeLinecap="round"
+                transform={`rotate(${batRotation})`}
+              />
+              <text y="15" textAnchor="middle" fill="#93C5FD" fontSize="6.5" fontWeight="900">Striker</text>
+            </g>
+
+            {/* 10. Visible Ball Motion Trail */}
+            {ballVisible && ballTrail.map((pt, i) => (
               <circle
-                cx={boundaryEffect.x}
-                cy={boundaryEffect.y}
-                r={boundaryEffect.isSix ? "36" : "24"}
+                key={`trail_${i}`}
+                cx={pt.x}
+                cy={pt.y}
+                r={Math.max(1.8, 4.2 * ((i + 1) / ballTrail.length))}
+                fill={isTest ? "#EF4444" : "#38BDF8"}
+                opacity={((i + 1) / ballTrail.length) * 0.65}
+              />
+            ))}
+
+            {/* 11. Moving Cricket Ball */}
+            {ballVisible && (
+              <g transform={`translate(${ballPos.x}, ${ballPos.y}) scale(${ballScale})`}>
+                <circle
+                  r={isTest ? 4.8 : 4.2}
+                  fill={ballColor}
+                  stroke={ballStroke}
+                  strokeWidth="1.2"
+                  filter="url(#ballGlow2D)"
+                />
+              </g>
+            )}
+
+            {/* 12. Bat Contact Impact Burst */}
+            {impactBurst && (
+              <circle
+                cx={impactBurst.x}
+                cy={impactBurst.y}
+                r="16"
                 fill="none"
-                stroke={boundaryEffect.isSix ? "#C084FC" : themePrimary}
-                strokeWidth="3.5"
+                stroke="#FDE047"
+                strokeWidth="2.8"
                 className="animate-ping"
               />
-              <circle
-                cx={boundaryEffect.x}
-                cy={boundaryEffect.y}
-                r="12"
-                fill={boundaryEffect.isSix ? "rgba(192, 132, 252, 0.4)" : "rgba(6, 182, 212, 0.4)"}
-              />
-            </g>
-          )}
-        </svg>
+            )}
 
-        {/* ── Action Result Notification Banner ── */}
-        <AnimatePresence>
-          {resultBanner && (
-            <motion.div
-              initial={{ scale: 0.5, opacity: 0, y: 15 }}
-              animate={{ scale: 1, opacity: 1, y: 0 }}
-              exit={{ scale: 0.8, opacity: 0 }}
-              className={cn(
-                "absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 px-7 py-3 rounded-2xl backdrop-blur-xl border font-black text-2xl tracking-wider shadow-2xl z-40 text-center pointer-events-none flex items-center gap-2",
-                resultBanner.includes('SIX') && "bg-purple-950/85 border-purple-400 text-purple-200 shadow-purple-500/40 text-3xl animate-pulse",
-                resultBanner.includes('FOUR') && "bg-blue-950/85 border-blue-400 text-blue-200 shadow-blue-500/40 text-3xl",
-                resultBanner.includes('WICKET') && "bg-red-950/90 border-red-500 text-red-100 shadow-red-500/50 text-3xl",
-                resultBanner.includes('RUN') && "bg-zinc-900/85 border-white/20 text-white text-xl",
-                resultBanner.includes('DOT') && "bg-black/85 border-white/10 text-white/70 text-base"
-              )}
-            >
-              {resultBanner.includes('SIX') && <Sparkles className="w-5 h-5 text-amber-300 animate-spin" />}
-              {resultBanner}
-            </motion.div>
-          )}
-        </AnimatePresence>
+            {/* 13. Boundary LED Wave */}
+            {boundaryEffect?.active && (
+              <g>
+                <circle
+                  cx={boundaryEffect.x}
+                  cy={boundaryEffect.y}
+                  r={boundaryEffect.isSix ? "36" : "24"}
+                  fill="none"
+                  stroke={boundaryEffect.isSix ? "#C084FC" : "#38BDF8"}
+                  strokeWidth="3.5"
+                  className="animate-ping"
+                />
+              </g>
+            )}
+          </svg>
 
-        {/* ── Debug Overlay HUD ── */}
-        {debugMode && (
-          <div className="absolute top-12 left-3 bg-black/90 border border-white/10 rounded-xl p-3 text-[9px] font-mono text-cyan-300 space-y-0.5 z-40 pointer-events-none shadow-xl">
-            <div>STATE: <span className="text-white font-bold">{animState}</span></div>
-            <div>PROGRESS: <span className="text-white font-bold">{stateProgress}%</span></div>
-            <div>TACTIC: <span className="text-amber-300 font-bold">{tacticConfig.name}</span></div>
-            <div>SHOT: <span className="text-white font-bold">{activeShot}</span></div>
-            <div>PRESET: <span className="text-white font-bold">{activePreset}</span></div>
-            <div>BALL POS: <span className="text-white font-bold">X:{Math.round(ballPos.x)} Y:{Math.round(ballPos.y)} H:{Math.round(ballHeight)}</span></div>
-            <div>INTERCEPT FIELDER: <span className="text-white font-bold">{activeFielder?.name || 'NONE'}</span></div>
+          {/* Delivery Result Banner Overlay */}
+          <AnimatePresence>
+            {resultBanner && (
+              <motion.div
+                initial={{ scale: 0.5, opacity: 0, y: 15 }}
+                animate={{ scale: 1, opacity: 1, y: 0 }}
+                exit={{ scale: 0.8, opacity: 0 }}
+                className={cn(
+                  "absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 px-7 py-3 rounded-2xl backdrop-blur-xl border font-black text-2xl tracking-wider shadow-2xl z-40 text-center pointer-events-none flex items-center gap-2",
+                  resultBanner.includes('SIX') && "bg-purple-950/90 border-purple-400 text-purple-200 shadow-purple-500/40 text-3xl animate-pulse",
+                  resultBanner.includes('FOUR') && "bg-blue-950/90 border-blue-400 text-blue-200 shadow-blue-500/40 text-3xl",
+                  resultBanner.includes('WICKET') && "bg-red-950/90 border-red-500 text-red-100 shadow-red-500/50 text-3xl",
+                  resultBanner.includes('RUN') && "bg-zinc-900/90 border-white/20 text-white text-xl",
+                  resultBanner.includes('DOT') && "bg-black/90 border-white/10 text-white/70 text-base"
+                )}
+              >
+                {resultBanner.includes('SIX') && <Sparkles className="w-5 h-5 text-amber-300 animate-spin" />}
+                {resultBanner}
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          {/* Field Changing Badge */}
+          {isFieldChanging && (
+            <div className="absolute top-4 left-4 bg-slate-950/85 backdrop-blur-md border border-cyan-500/40 px-3 py-1.5 rounded-xl flex items-center gap-2 text-xs font-bold text-cyan-300 shadow-xl z-20">
+              <RefreshCw className="w-3.5 h-3.5 animate-spin text-cyan-400" />
+              <span>FIELDERS MOVING... ({fieldChangeProgress}%)</span>
+            </div>
+          )}
+
+          {/* Opponent AI Action Banner */}
+          {opponentTacticalNotice && (
+            <div className="absolute top-4 right-4 bg-slate-950/90 backdrop-blur-md border border-purple-500/40 px-3.5 py-1.5 rounded-xl flex items-center gap-2 text-xs font-bold text-purple-200 shadow-2xl z-20 animate-pulse">
+              <Sparkles className="w-3.5 h-3.5 text-purple-400" />
+              <span>{opponentTacticalNotice}</span>
+            </div>
+          )}
+        </div>
+
+        {/* ═══════════════════════════════════════════════════════════════════════
+            RIGHT-SIDE FIELD TACTICS PANEL
+        ═══════════════════════════════════════════════════════════════════════ */}
+        <div className="w-full lg:w-84 xl:w-96 bg-slate-950/80 backdrop-blur-xl border-t lg:border-t-0 lg:border-l border-white/10 p-4 flex flex-col justify-between gap-4 z-20">
+          <div className="space-y-4 overflow-y-auto max-h-[520px] pr-1">
+            {/* Team Tactical Control Mode */}
+            <div className="p-2.5 rounded-xl bg-white/[0.03] border border-white/5 space-y-1.5">
+              <div className="flex items-center justify-between text-[10px] font-bold">
+                <span className="text-slate-400 uppercase tracking-wider">Tactical Control</span>
+                <span className="text-cyan-400 font-black">{userTeamControlMode.replace('_', ' ')}</span>
+              </div>
+              <div className="grid grid-cols-3 gap-1">
+                {(['MANUAL', 'AI_RECOMMENDATIONS', 'FULL_AUTO'] as const).map((m) => (
+                  <button
+                    key={m}
+                    onClick={() => onUserTeamControlModeChange?.(m)}
+                    className={cn(
+                      "py-1 rounded text-[8px] font-black uppercase transition-all truncate border",
+                      userTeamControlMode === m
+                        ? "bg-cyan-500/20 text-cyan-200 border-cyan-400 shadow-sm"
+                        : "bg-black/30 text-slate-400 hover:text-white border-white/5"
+                    )}
+                  >
+                    {m === 'AI_RECOMMENDATIONS' ? 'AI REC' : m.replace('_', ' ')}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* AI Captain Recommendation Card */}
+            {aiCaptainRecommendation && (
+              <div className="p-3 rounded-xl bg-gradient-to-br from-indigo-950/40 to-slate-950/80 border border-indigo-500/30 space-y-2.5 shadow-xl">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-black text-indigo-300 uppercase tracking-wider flex items-center gap-1.5">
+                    <Sparkles className="w-3.5 h-3.5 text-indigo-400" />
+                    AI Captain Rec
+                  </span>
+                  <span className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase bg-indigo-500/20 text-indigo-300 border border-indigo-500/40">
+                    {aiCaptainRecommendation.confidence}% Conf
+                  </span>
+                </div>
+
+                <div className="space-y-1.5 text-[10px]">
+                  <div className="bg-black/40 p-2 rounded-lg border border-white/5">
+                    <span className="text-slate-400 block font-bold text-[8px] uppercase tracking-wider">Observation</span>
+                    <span className="text-slate-200 font-medium">{aiCaptainRecommendation.observation}</span>
+                  </div>
+
+                  <div className="bg-black/40 p-2 rounded-lg border border-white/5">
+                    <span className="text-slate-400 block font-bold text-[8px] uppercase tracking-wider">Recommendation</span>
+                    <span className="text-cyan-300 font-bold">{aiCaptainRecommendation.reasoning}</span>
+                  </div>
+
+                  {aiCaptainRecommendation.tradeOff && (
+                    <div className="bg-black/40 p-2 rounded-lg border border-white/5">
+                      <span className="text-slate-400 block font-bold text-[8px] uppercase tracking-wider">Expected Trade-Off</span>
+                      <span className="text-amber-300/90 font-medium">{aiCaptainRecommendation.tradeOff}</span>
+                    </div>
+                  )}
+                </div>
+
+                <div className="flex items-center gap-2 pt-1">
+                  <button
+                    onClick={() => onApplyAIRecommendation?.(aiCaptainRecommendation)}
+                    className="flex-1 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-[10px] font-black flex items-center justify-center gap-1 shadow-md shadow-indigo-500/20 transition-all"
+                  >
+                    <CheckCircle2 className="w-3 h-3" />
+                    Apply Recommendation
+                  </button>
+                  <button
+                    onClick={() => onIgnoreAIRecommendation?.()}
+                    className="px-3 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-white text-[10px] font-bold border border-white/10 transition-colors"
+                  >
+                    Ignore
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Interactive Batting Intent Selector (When User Team is Batting) */}
+            {isUserTeamBatting && (
+              <div className="p-3 rounded-xl bg-amber-950/20 border border-amber-500/20 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-black text-amber-300 uppercase tracking-wider flex items-center gap-1.5">
+                    <Target className="w-3 h-3 text-amber-400" />
+                    My Batting Intent
+                  </span>
+                  <span className="text-[9px] font-black text-amber-300 bg-amber-500/20 px-2 py-0.5 rounded-full border border-amber-500/30">
+                    {userBattingIntent}
+                  </span>
+                </div>
+                <div className="grid grid-cols-3 gap-1">
+                  {(['SURVIVAL', 'DEFENSIVE', 'SETTLING', 'ROTATE_STRIKE', 'NORMAL', 'CONTROLLED_ATTACK', 'ACCELERATE'] as const).map((intent) => (
+                    <button
+                      key={intent}
+                      onClick={() => onUserBattingIntentChange?.(intent)}
+                      className={cn(
+                        "py-1 px-1 rounded text-[8px] font-black uppercase transition-all border truncate",
+                        userBattingIntent === intent
+                          ? "bg-amber-500/30 text-amber-200 border-amber-400 shadow-sm"
+                          : "bg-black/30 text-slate-400 hover:text-white border-white/5"
+                      )}
+                    >
+                      {intent === 'ROTATE_STRIKE' ? 'ROTATE' : intent === 'CONTROLLED_ATTACK' ? 'ATTACK' : intent}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+            {/* Bowler Profile */}
+            <div className="p-3 rounded-xl bg-white/[0.03] border border-white/5 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="h-10 w-10 rounded-xl bg-gradient-to-tr from-red-500 to-amber-500 flex items-center justify-center font-black text-white text-sm shadow-md">
+                  {bowler?.name ? bowler.name.substring(0, 2).toUpperCase() : 'BW'}
+                </div>
+                <div>
+                  <div className="text-xs font-black text-white">{bowler?.name || 'Current Bowler'}</div>
+                  <div className="text-[10px] font-bold text-slate-400">{bowler?.bowlingStyle || bowler?.role || 'Fast Bowler'}</div>
+                </div>
+              </div>
+              <div className="text-right">
+                <span className="text-[9px] font-black text-cyan-400 uppercase tracking-wider block">Overs</span>
+                <span className="text-xs font-bold text-slate-300">{score?.overs || 0}.{score?.balls || 0}</span>
+              </div>
+            </div>
+
+            {/* Bowling Plan */}
+            <div className="p-3 rounded-xl bg-cyan-950/20 border border-cyan-500/20 space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-black text-cyan-300 uppercase tracking-wider flex items-center gap-1.5">
+                  <Target className="w-3 h-3 text-cyan-400" />
+                  Bowling Plan
+                </span>
+                <span className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">
+                  {bowlingPlan.intent}
+                </span>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2 text-[10px]">
+                <div className="bg-black/40 p-2 rounded-lg border border-white/5">
+                  <span className="text-slate-400 block font-bold text-[8px] uppercase">Target Line</span>
+                  <span className="font-black text-white">{bowlingPlan.line.replace(/_/g, ' ')}</span>
+                </div>
+                <div className="bg-black/40 p-2 rounded-lg border border-white/5">
+                  <span className="text-slate-400 block font-bold text-[8px] uppercase">Target Length</span>
+                  <span className="font-black text-amber-300">{bowlingPlan.length}</span>
+                </div>
+              </div>
+
+              <div className="text-[10px] text-slate-300 leading-relaxed font-medium bg-black/20 p-2 rounded-lg border border-white/5">
+                {bowlingPlan.summary}
+              </div>
+            </div>
+
+            {/* Tactical Intent & Configuration */}
+            <div className="p-3 rounded-xl bg-purple-950/20 border border-purple-500/20 space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-black text-purple-300 uppercase tracking-wider flex items-center gap-1.5">
+                  <Flame className="w-3 h-3 text-purple-400" />
+                  Tactical Intent
+                </span>
+                <span className="text-[9px] font-bold text-purple-300">{fieldConfig.phase}</span>
+              </div>
+
+              <div className="text-xs font-black text-white">
+                {fieldConfig.name}
+              </div>
+
+              <div className="text-[10px] text-slate-300 leading-relaxed font-medium">
+                {fieldConfig.tacticalIntent}
+              </div>
+            </div>
+
+            {/* Moving Fielders List */}
+            <div className="p-3 rounded-xl bg-white/[0.02] border border-white/5 space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider">
+                  Field Adjustments ({changedFieldersList.length})
+                </span>
+                <span className={cn(
+                  "px-2 py-0.5 rounded-full text-[9px] font-black uppercase flex items-center gap-1",
+                  isFieldChanging 
+                    ? "bg-cyan-500/20 text-cyan-300 animate-pulse border border-cyan-500/40" 
+                    : "bg-emerald-500/20 text-emerald-300 border border-emerald-500/40"
+                )}>
+                  {isFieldChanging ? (
+                    <>
+                      <RefreshCw className="w-2.5 h-2.5 animate-spin" />
+                      FIELD CHANGING
+                    </>
+                  ) : (
+                    <>
+                      <CheckCircle2 className="w-2.5 h-2.5" />
+                      FIELD READY
+                    </>
+                  )}
+                </span>
+              </div>
+
+              <div className="w-full bg-slate-900 rounded-full h-1.5 overflow-hidden">
+                <div 
+                  className={cn(
+                    "h-full transition-all duration-300 rounded-full",
+                    isFieldChanging ? "bg-gradient-to-r from-cyan-400 to-blue-500" : "bg-emerald-500"
+                  )}
+                  style={{ width: `${fieldChangeProgress}%` }}
+                />
+              </div>
+
+              <div className="max-h-28 overflow-y-auto space-y-1.5 pr-1">
+                {changedFieldersList.length > 0 ? (
+                  changedFieldersList.map((ch, idx) => (
+                    <div key={idx} className="flex items-center justify-between text-[10px] bg-black/30 px-2 py-1.5 rounded-lg border border-white/5">
+                      <span className="font-bold text-slate-300 truncate max-w-[80px]">{ch.playerName}</span>
+                      <div className="flex items-center gap-1 text-[9px]">
+                        <span className="text-slate-400">{ch.fromRole}</span>
+                        <ChevronRight className="w-2.5 h-2.5 text-cyan-400" />
+                        <span className="font-black text-cyan-300">{ch.toRole}</span>
+                      </div>
+                    </div>
+                  ))
+                ) : (
+                  <div className="text-[10px] text-slate-500 italic py-1 text-center">
+                    Field settled and configured.
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Presets */}
+            <div className="space-y-1.5">
+              <span className="text-[9px] font-black text-slate-500 uppercase tracking-wider block">Tactical Presets</span>
+              <div className="grid grid-cols-2 gap-1.5">
+                {Object.entries(BowlerFieldStrategyEngine.PRESET_OVERLAYS).map(([pKey, pDef]) => (
+                  <button
+                    key={pKey}
+                    onClick={() => {
+                      setActivePresetKey(pKey);
+                      triggerTacticalRecalculation(pKey);
+                    }}
+                    className={cn(
+                      "px-2 py-1.5 rounded-lg text-left text-[9px] font-bold transition-all border truncate",
+                      activePresetKey === pKey
+                        ? "bg-cyan-500/20 text-cyan-200 border-cyan-400"
+                        : "bg-white/[0.03] text-slate-400 hover:text-white border-white/5"
+                    )}
+                  >
+                    {pDef.name.split('(')[0]}
+                  </button>
+                ))}
+              </div>
+            </div>
           </div>
-        )}
+
+          {/* Action Buttons */}
+          <div className="pt-2 border-t border-white/10 flex items-center gap-2">
+            <button
+              onClick={() => {
+                setActivePresetKey(null);
+                triggerTacticalRecalculation();
+              }}
+              className="flex-1 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 border border-white/10 text-white text-[11px] font-bold flex items-center justify-center gap-1.5 transition-colors"
+            >
+              <RefreshCw className="w-3.5 h-3.5 text-cyan-400" />
+              Auto Field
+            </button>
+            <button
+              onClick={() => {
+                setIsFieldChanging(false);
+                setFieldChangeProgress(100);
+                onFieldChangingChangeRef.current?.(false);
+              }}
+              className="flex-1 py-2 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-slate-950 text-[11px] font-black flex items-center justify-center gap-1.5 shadow-lg shadow-cyan-500/20 transition-all"
+            >
+              <CheckCircle2 className="w-3.5 h-3.5" />
+              Confirm Field
+            </button>
+          </div>
+        </div>
       </div>
 
-      {/* ── Broadcast Footer ── */}
-      <div className="w-full px-4 py-2.5 bg-black/80 backdrop-blur-md border-t border-white/5 flex items-center justify-between text-xs text-white/80 z-30 flex-wrap gap-2">
-        <div className="flex items-center gap-2">
-          <span className="font-bold text-white">{striker?.name || 'Striker'}</span>
-          <span className="text-white/40 text-[10px]">facing</span>
-          <span className="font-bold text-cyan-400">{bowler?.name || 'Bowler'}</span>
+      {/* ═══════════════════════════════════════════════════════════════════════
+          BOTTOM PANEL: TABS & DELIVERY STATUS
+      ═══════════════════════════════════════════════════════════════════════ */}
+      <div className="w-full bg-slate-950/95 backdrop-blur-xl border-t border-white/10">
+        <div className="px-4 py-2 border-b border-white/5 flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-1">
+            {(['FIELD MAP', 'BOWLER PLAN', 'SCORING ZONES', 'AI CAPTAIN'] as const).map((tab) => {
+              const tabKey = tab.replace(' ', '_') as BottomPanelTab;
+              return (
+                <button
+                  key={tab}
+                  onClick={() => setActiveBottomTab(tabKey)}
+                  className={cn(
+                    "px-3 py-1.5 rounded-xl text-xs font-black tracking-wider uppercase transition-all",
+                    activeBottomTab === tabKey
+                      ? "bg-white text-slate-950 shadow-md"
+                      : "text-slate-400 hover:text-white"
+                  )}
+                >
+                  {tab}
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="flex items-center gap-2">
+            <span className={cn(
+              "px-3 py-1 rounded-full text-[10px] font-black uppercase flex items-center gap-1.5 tracking-wider",
+              isFieldChanging || lifecycle === 'DELIVERY_SIMULATION' || lifecycle === 'BALL_PATH_PLAYBACK'
+                ? "bg-amber-500/20 text-amber-300 border border-amber-500/40 animate-pulse"
+                : "bg-emerald-500/20 text-emerald-300 border border-emerald-500/40"
+            )}>
+              {isFieldChanging ? (
+                <>
+                  <Lock className="w-3 h-3 text-amber-400" />
+                  DELIVERY LOCKED — FIELD IN MOTION
+                </>
+              ) : lifecycle === 'BALL_PATH_PLAYBACK' ? (
+                <>
+                  <Lock className="w-3 h-3 text-amber-400" />
+                  BALL IN FLIGHT ({animProgress}%)
+                </>
+              ) : (
+                <>
+                  <Unlock className="w-3 h-3 text-emerald-400" />
+                  READY FOR NEXT DELIVERY
+                </>
+              )}
+            </span>
+          </div>
         </div>
 
-        <div className="flex items-center gap-2 text-[10px] font-bold text-white/50 uppercase">
-          <span>Tactic: <strong className="text-amber-300">{tacticConfig.name}</strong></span>
-          <span>•</span>
-          <span>Field: <strong className="text-cyan-300">{activePreset === 'CUSTOM' ? 'Custom ✍️' : FIELD_PRESETS[activePreset]?.name.split(' ')[0]}</strong></span>
-          <span>•</span>
-          <span>Shot: <strong className="text-white">{activeShot.replace(/_/g, ' ')}</strong></span>
+        <div className="p-4">
+          {activeBottomTab === 'FIELD_MAP' && (
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+              <div className="bg-white/[0.03] p-3 rounded-xl border border-white/5">
+                <span className="text-[10px] font-bold text-slate-400 block uppercase">30-Yard Ring Split</span>
+                <span className="text-base font-black text-cyan-400">
+                  {11 - fieldConfig.actualOutsideCircle - 2} Inside / {fieldConfig.actualOutsideCircle} Outside
+                </span>
+                <span className="text-[9px] text-slate-500 block mt-0.5">
+                  Max allowed deep: {fieldConfig.maxOutsideCircle}
+                </span>
+              </div>
+              <div className="bg-white/[0.03] p-3 rounded-xl border border-white/5">
+                <span className="text-[10px] font-bold text-slate-400 block uppercase">Side Balance</span>
+                <span className="text-base font-black text-white">
+                  {fieldConfig.offSideCount} Off / {fieldConfig.legSideCount} Leg
+                </span>
+                <span className="text-[9px] text-slate-500 block mt-0.5">
+                  Max leg side: 5 (Lawful)
+                </span>
+              </div>
+              <div className="bg-white/[0.03] p-3 rounded-xl border border-white/5">
+                <span className="text-[10px] font-bold text-slate-400 block uppercase">Format Restrictions</span>
+                <span className="text-xs font-black text-emerald-400">
+                  {fieldConfig.isCompliant ? 'Fully Compliant' : 'Warning: Ring breach'}
+                </span>
+                <span className="text-[9px] text-slate-500 block mt-0.5">{fieldConfig.phase}</span>
+              </div>
+              <div className="bg-white/[0.03] p-3 rounded-xl border border-white/5">
+                <span className="text-[10px] font-bold text-slate-400 block uppercase">Interactive Tweak</span>
+                <span className="text-xs font-black text-purple-400">Drag & Drop Active</span>
+                <span className="text-[9px] text-slate-500 block mt-0.5">Drag any fielder to adjust</span>
+              </div>
+            </div>
+          )}
+
+          {activeBottomTab === 'BOWLER_PLAN' && (
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+              <div className="bg-white/[0.03] p-3 rounded-xl border border-white/5 space-y-1">
+                <span className="text-[10px] font-bold text-slate-400 uppercase block">Line & Length Strategy</span>
+                <div className="flex items-center gap-2">
+                  <span className="px-2 py-0.5 bg-cyan-500/20 text-cyan-300 rounded font-bold text-[10px]">{bowlingPlan.line}</span>
+                  <span className="px-2 py-0.5 bg-amber-500/20 text-amber-300 rounded font-bold text-[10px]">{bowlingPlan.length}</span>
+                </div>
+                <p className="text-[10px] text-slate-300 pt-1 leading-relaxed">
+                  Target release angle planned to challenge {isLeftHander ? "left-hander's outside edge" : "right-hander's off-stump"}.
+                </p>
+              </div>
+              <div className="bg-white/[0.03] p-3 rounded-xl border border-white/5 space-y-1">
+                <span className="text-[10px] font-bold text-slate-400 uppercase block">Ball Variation</span>
+                <div className="flex items-center gap-2">
+                  <span className="px-2 py-0.5 bg-purple-500/20 text-purple-300 rounded font-bold text-[10px]">{bowlingPlan.variation}</span>
+                  <span className="text-[10px] text-slate-400">{pitch} Pitch</span>
+                </div>
+                <p className="text-[10px] text-slate-300 pt-1 leading-relaxed">
+                  Surface conditions ({pitch}) offer grip and variable bounce for variation execution.
+                </p>
+              </div>
+              <div className="bg-white/[0.03] p-3 rounded-xl border border-white/5 space-y-1">
+                <span className="text-[10px] font-bold text-slate-400 uppercase block">Tactical Intent</span>
+                <span className="text-sm font-black text-cyan-400">{bowlingPlan.intent}</span>
+                <p className="text-[10px] text-slate-300 pt-1 leading-relaxed">{bowlingPlan.summary}</p>
+              </div>
+            </div>
+          )}
+
+          {activeBottomTab === 'SCORING_ZONES' && (
+            <div className="space-y-2">
+              <div className="flex items-center justify-between text-[11px] text-slate-400 font-bold px-1">
+                <span>360° Ground Wagon Wheel Zone</span>
+                <span>Protection & Risk Status</span>
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                {fieldConfig.scoringZones.map((z, idx) => (
+                  <div key={idx} className="bg-white/[0.03] p-2.5 rounded-xl border border-white/5 flex items-center justify-between">
+                    <div>
+                      <div className="text-[11px] font-black text-white">{z.zone}</div>
+                      <div className="text-[9px] text-slate-400">Angle: {z.angleRange[0]}° to {z.angleRange[1]}°</div>
+                    </div>
+                    <div className="text-right">
+                      <span className={cn(
+                        "px-1.5 py-0.5 rounded text-[8px] font-black uppercase block",
+                        z.protection === 'COVERED' 
+                          ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/30" 
+                          : "bg-red-500/20 text-red-300 border border-red-500/30"
+                      )}>
+                        {z.protection}
+                      </span>
+                      <span className="text-[9px] font-bold text-slate-400 tabular-nums">{z.riskLevel} Risk</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {activeBottomTab === 'AI_CAPTAIN' && (
+            <div className="space-y-3">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                {/* Batter Psychological & Innings State Gauge */}
+                <div className="bg-white/[0.03] p-3 rounded-xl border border-white/5 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-bold text-slate-400 uppercase block">Striker Psychology</span>
+                    <span className="text-[9px] font-black text-amber-400 bg-amber-400/10 px-2 py-0.5 rounded border border-amber-400/20">
+                      {batterState ? (
+                        batterState.settledness < 30 ? 'Tentative' :
+                        batterState.settledness < 60 ? 'Building Rhythm' :
+                        batterState.settledness < 80 ? 'Well Settled' : 'Dominant'
+                      ) : 'Normal'}
+                    </span>
+                  </div>
+
+                  {/* Settledness Gauge */}
+                  <div className="space-y-1">
+                    <div className="flex justify-between text-[10px]">
+                      <span className="text-slate-400 font-bold">Settledness</span>
+                      <span className="text-cyan-300 font-black">{batterState ? `${Math.round(batterState.settledness)}%` : '50%'}</span>
+                    </div>
+                    <div className="w-full bg-slate-900 rounded-full h-1.5 overflow-hidden">
+                      <div 
+                        className="h-full bg-gradient-to-r from-cyan-500 to-emerald-400 rounded-full transition-all duration-500"
+                        style={{ width: `${batterState ? Math.min(100, Math.max(5, batterState.settledness)) : 50}%` }}
+                      />
+                    </div>
+                  </div>
+
+                  {/* Concentration & Confidence */}
+                  <div className="grid grid-cols-2 gap-2 pt-1 text-[9px]">
+                    <div className="bg-black/40 p-2 rounded-lg border border-white/5">
+                      <span className="text-slate-500 block font-bold">Concentration</span>
+                      <span className="text-white font-black">{batterState ? `${Math.round(batterState.concentration)}%` : '75%'}</span>
+                    </div>
+                    <div className="bg-black/40 p-2 rounded-lg border border-white/5">
+                      <span className="text-slate-500 block font-bold">Confidence</span>
+                      <span className="text-amber-300 font-black">{batterState ? `${Math.round(batterState.confidence)}%` : '60%'}</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Matchup Breakdown */}
+                <div className="bg-white/[0.03] p-3 rounded-xl border border-white/5 space-y-2">
+                  <span className="text-[10px] font-bold text-slate-400 uppercase block">Striker vs Bowler Matchup</span>
+                  <div className="space-y-1.5 text-[10px]">
+                    <div className="flex items-center justify-between bg-black/40 p-1.5 rounded-lg border border-white/5">
+                      <span className="text-slate-400">{striker?.name || 'Striker'}</span>
+                      <span className="text-cyan-300 font-bold">{isLeftHander ? 'LHB' : 'RHB'} · {striker?.role || 'Batter'}</span>
+                    </div>
+                    <div className="flex items-center justify-between bg-black/40 p-1.5 rounded-lg border border-white/5">
+                      <span className="text-slate-400">{bowler?.name || 'Bowler'}</span>
+                      <span className="text-amber-300 font-bold">{bowler?.bowlingStyle || bowler?.role || 'Fast'}</span>
+                    </div>
+                    <div className="text-[9px] text-slate-300 bg-cyan-950/20 p-1.5 rounded border border-cyan-500/20">
+                      Targeting: {bowlingPlan.line.replace(/_/g, ' ')} ({bowlingPlan.length})
+                    </div>
+                  </div>
+                </div>
+
+                {/* Tactical Trade-Offs & Strategic Reasoning */}
+                <div className="bg-white/[0.03] p-3 rounded-xl border border-white/5 space-y-2">
+                  <span className="text-[10px] font-bold text-slate-400 uppercase block">Tactical Trade-Offs</span>
+                  <div className="space-y-1 text-[9px] text-slate-300">
+                    <p className="bg-black/30 p-2 rounded-lg border border-white/5">
+                      <span className="text-amber-400 font-bold block mb-0.5">Plan Trade-Off:</span>
+                      {bowlingPlan.intent === 'ATTACK' 
+                        ? 'Aggressive lines create wicket chances but leave boundary gaps if bowler errs in length.'
+                        : bowlingPlan.intent === 'DEFEND'
+                        ? 'Deep boundary protection limits 4s/6s, but concedes easy singles and strike rotation.'
+                        : 'Balanced field seeks to build dot-ball pressure without taking excessive boundary risk.'}
+                    </p>
+                    {aiCaptainRecommendation?.tradeOff && (
+                      <p className="bg-indigo-950/30 p-2 rounded-lg border border-indigo-500/20 text-indigo-200">
+                        <span className="text-indigo-400 font-bold block mb-0.5">Captain Analysis:</span>
+                        {aiCaptainRecommendation.tradeOff}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* AI Captain Quick Action Bar */}
+              {aiCaptainRecommendation && (
+                <div className="bg-gradient-to-r from-indigo-950/40 via-purple-950/40 to-slate-900/40 p-3 rounded-xl border border-indigo-500/30 flex flex-wrap items-center justify-between gap-3 text-xs">
+                  <div className="flex items-center gap-2">
+                    <Sparkles className="w-4 h-4 text-indigo-400 shrink-0" />
+                    <div>
+                      <span className="font-bold text-white text-xs">{aiCaptainRecommendation.observation}</span>
+                      <span className="text-[10px] text-slate-400 block">{aiCaptainRecommendation.reasoning}</span>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => onApplyAIRecommendation?.(aiCaptainRecommendation)}
+                      className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-black text-[10px] transition-colors shadow-md"
+                    >
+                      Apply Recommendation
+                    </button>
+                    <button
+                      onClick={() => onIgnoreAIRecommendation?.()}
+                      className="px-2.5 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-400 text-[10px] font-bold border border-white/10"
+                    >
+                      Dismiss
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </div>
+
+      {/* ═══════════════════════════════════════════════════════════════════════
+          DEVELOPMENT-ONLY DEBUG HUD PANEL
+      ═══════════════════════════════════════════════════════════════════════ */}
+      {showDebugHUD && (
+        <div className="p-3 bg-black/95 border-t border-purple-500/30 font-mono text-[10px] text-purple-300 space-y-2">
+          <div className="flex items-center justify-between font-bold text-white border-b border-purple-500/20 pb-1">
+            <span className="flex items-center gap-1.5 text-purple-400">
+              <Terminal className="w-3.5 h-3.5" />
+              CRICKET ENGINE DEBUG HUD & LIFECYCLE MONITOR
+            </span>
+            <span className="text-[9px] bg-purple-950 px-2 py-0.5 rounded border border-purple-500/40">DEV_MODE</span>
+          </div>
+
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[9px]">
+            <div className="bg-purple-950/30 p-2 rounded border border-purple-500/20">
+              <span className="text-purple-400 block font-bold">LIFECYCLE</span>
+              <span className="text-white font-black">{lifecycle}</span>
+            </div>
+            <div className="bg-purple-950/30 p-2 rounded border border-purple-500/20">
+              <span className="text-purple-400 block font-bold">PLAYBACK STAGE</span>
+              <span className="text-cyan-300 font-black">{playbackStage} ({animProgress}%)</span>
+            </div>
+            <div className="bg-purple-950/30 p-2 rounded border border-purple-500/20">
+              <span className="text-purple-400 block font-bold">CURRENT BALL POS</span>
+              <span className="text-white font-bold">X:{Math.round(ballPos.x)} Y:{Math.round(ballPos.y)}</span>
+            </div>
+            <div className="bg-purple-950/30 p-2 rounded border border-purple-500/20">
+              <span className="text-purple-400 block font-bold">TARGET COORDS</span>
+              <span className="text-amber-300 font-bold">
+                X:{activeDelivery ? Math.round(activeDelivery.ballPath.target.x) : 300} Y:{activeDelivery ? Math.round(activeDelivery.ballPath.target.y) : 460}
+              </span>
+            </div>
+          </div>
+
+          {activeDelivery && (
+            <div className="bg-black/60 p-2 rounded border border-white/10 text-[9px] space-y-1 overflow-x-auto">
+              <span className="text-purple-400 font-bold block">IMMUTABLE DELIVERY RESULT:</span>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-x-3 gap-y-0.5 text-slate-300">
+                <div>ID: <span className="text-white">{activeDelivery.id}</span></div>
+                <div>Result: <span className="text-cyan-300 font-black">{activeDelivery.resultType}</span></div>
+                <div>Runs: <span className="text-white">{activeDelivery.totalRuns} (B:{activeDelivery.batterRuns} E:{activeDelivery.extraRuns})</span></div>
+                <div>Legal: <span className="text-white">{activeDelivery.legalBall ? 'YES' : 'NO'}</span></div>
+                <div>Wicket: <span className="text-red-400 font-bold">{activeDelivery.wicket ? `${activeDelivery.wicketType}` : 'NONE'}</span></div>
+                <div>Shot: <span className="text-white">{activeDelivery.shotType}</span></div>
+                <div>Zone: <span className="text-white">{activeDelivery.targetZone}</span></div>
+                <div>Rotated: <span className="text-white">{activeDelivery.strikeRotated ? 'YES' : 'NO'}</span></div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
+

@@ -1,22 +1,77 @@
 import React, { useState, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { useGameStore, GameState } from '../stores/useGameStore';
-import { Shield, ChevronRight, User, ArrowLeft, Target, AlertCircle } from 'lucide-react';
+import { Shield, ChevronRight, User, ArrowLeft, Target, AlertCircle, Sparkles } from 'lucide-react';
 import { cn } from '../lib/utils';
 import JerseyPlayerImage from './JerseyPlayerImage';
-import { calculateEffectiveRating } from '../lib/ratingEngine';
+import { calculateEffectiveRating, getPlayerRating } from '../lib/ratingEngine';
 
 export default function PlayingXIBuilder() {
-  const { players, selectedSquadIds, selectedFormat, selectedFranchiseId, setGameState, setPlayingXIIds, setViewedPlayer } = useGameStore();
+  const { players, selectedSquadIds, selectedFormat, selectedFranchiseId, currentMatchId, setGameState, setPlayingXIIds, setViewedPlayer, getArenaPlayerState, playerSeasonStats } = useGameStore();
   const [playingXI, setPlayingXI] = useState<string[]>([]);
 
   const squadPlayers = players.filter(p => selectedSquadIds.includes(p.id));
 
+  // Check whether player has played in previous matches
+  const getPlayerPlayStatus = (playerId: string) => {
+    const activeFormat = selectedFormat || 'T20';
+    const playerState = getArenaPlayerState(playerId, activeFormat);
+    const seasonStats = playerSeasonStats?.[playerId];
+    
+    const hasPlayed = Boolean(
+      (playerState && playerState.hasRecentMatches && playerState.recentMatchCount > 0 && playerState.recentForm > 0) ||
+      (seasonStats && seasonStats.matches > 0) ||
+      (playerState && playerState.recentMatches && playerState.recentMatches.length > 0)
+    );
+
+    const formValue = playerState?.recentForm || 0;
+    return { hasPlayed, formValue };
+  };
+
+  // Auto Pick XI optimized for active format
+  const autoPickXI = () => {
+    const activeFormat = selectedFormat || 'T20';
+    const ratePlayer = (p: typeof players[0]) => getPlayerRating(p, activeFormat);
+    const pool = [...squadPlayers].sort((a, b) => ratePlayer(b) - ratePlayer(a));
+
+    const keepers = pool.filter(p => p.role === 'Wicketkeeper');
+    const batters = pool.filter(p => p.role === 'Batsman');
+    const allrounders = pool.filter(p => p.role === 'All-rounder');
+    const bowlers = pool.filter(p => p.role === 'Bowler');
+
+    const selected: string[] = [];
+    if (keepers[0]) selected.push(keepers[0].id);
+    selected.push(...batters.filter(p => !selected.includes(p.id)).slice(0, 4).map(p => p.id));
+    selected.push(...allrounders.filter(p => !selected.includes(p.id)).slice(0, 2).map(p => p.id));
+    selected.push(...bowlers.filter(p => !selected.includes(p.id)).slice(0, 4).map(p => p.id));
+
+    if (selected.length < 11) {
+      for (const p of pool) {
+        if (selected.length >= 11) break;
+        if (!selected.includes(p.id)) {
+          selected.push(p.id);
+        }
+      }
+    }
+
+    setPlayingXI(selected.slice(0, 11));
+  };
+
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+
   // Toggle selection
   const togglePlayer = (id: string) => {
     setPlayingXI(prev => {
-      if (prev.includes(id)) return prev.filter(x => x !== id);
-      if (prev.length >= 11) return prev;
+      if (prev.includes(id)) {
+        setToastMessage(null);
+        return prev.filter(x => x !== id);
+      }
+      if (prev.length >= 11) {
+        setToastMessage('Playing XI limit reached (11/11). Deselect a player first to swap.');
+        setTimeout(() => setToastMessage(null), 3000);
+        return prev;
+      }
+      setToastMessage(null);
       return [...prev, id];
     });
   };
@@ -102,73 +157,120 @@ export default function PlayingXIBuilder() {
                       <h1 className="text-lg sm:text-xl font-bold tracking-tight">Build Playing XI</h1>
                   </div>
               </div>
-              <div className="flex flex-col items-end">
-                  <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider mb-0.5">XI Status</span>
-                  <span className={cn(
-                    "text-lg font-black font-mono",
-                    playingXI.length === 11 ? "text-emerald-400" : "text-white"
-                  )}>
-                    {playingXI.length}/11
-                  </span>
+              <div className="flex items-center gap-3">
+                  <div className="flex flex-col items-end mr-1">
+                      <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider mb-0.5">XI Status</span>
+                      <span className={cn(
+                        "text-lg font-black font-mono",
+                        playingXI.length === 11 ? "text-emerald-400" : "text-white"
+                      )}>
+                        {playingXI.length}/11
+                      </span>
+                  </div>
+                  <button
+                    disabled={playingXI.length !== 11}
+                    onClick={() => {
+                      setPlayingXIIds(playingXI);
+                      setGameState(GameState.PRE_MATCH);
+                    }}
+                    className="flex items-center gap-1.5 px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-xl font-bold text-xs transition-all disabled:opacity-30 disabled:pointer-events-none active:scale-95 shadow-md shadow-blue-600/20"
+                  >
+                    Lock Playing XI
+                    <ChevronRight className="w-3.5 h-3.5" />
+                  </button>
               </div>
           </div>
       </header>
 
-      <div className="flex-1 max-w-7xl mx-auto w-full flex flex-col lg:flex-row gap-6 p-4 sm:p-6 overflow-hidden">
+      <div className="flex-1 max-w-7xl mx-auto w-full flex flex-col lg:flex-row gap-6 p-4 sm:p-6 lg:overflow-hidden overflow-y-auto">
         
         {/* Left: Squad List */}
         <div className="flex-1 flex flex-col min-h-0 overflow-y-auto custom-scrollbar pr-2 pb-24 lg:pb-0">
-          <h2 className="text-sm font-bold text-zinc-400 uppercase tracking-wider mb-4 sticky top-0 bg-zinc-950/90 py-2 z-10 backdrop-blur-sm">
-            Your Squad ({squadPlayers.length})
-          </h2>
+          <div className="flex items-center justify-between mb-4 sticky top-0 bg-zinc-950/90 py-2 z-10 backdrop-blur-sm gap-2">
+            <h2 className="text-sm font-bold text-zinc-400 uppercase tracking-wider">
+              Your Squad ({squadPlayers.length})
+            </h2>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={autoPickXI}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold transition-all shadow-md shadow-blue-600/20 active:scale-95 cursor-pointer"
+              >
+                <Sparkles className="w-3.5 h-3.5" />
+                Auto Pick XI
+              </button>
+              {playingXI.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setPlayingXI([])}
+                  className="px-2.5 py-1.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-white text-xs font-semibold transition-all cursor-pointer"
+                >
+                  Clear
+                </button>
+              )}
+            </div>
+          </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             {squadPlayers.sort((a, b) => b.rating - a.rating).map(player => {
               const isSelected = playingXI.includes(player.id);
               const effRating = selectedFormat ? calculateEffectiveRating(player, selectedFormat) : { overall: player.rating };
+              const { hasPlayed, formValue } = getPlayerPlayStatus(player.id);
 
               return (
                 <div 
                   key={player.id}
                   onClick={() => togglePlayer(player.id)}
                   className={cn(
-                    "flex items-center gap-4 p-3 rounded-2xl border-2 transition-all cursor-pointer relative overflow-hidden group",
+                    "flex items-center gap-4 p-3 rounded-2xl border-2 transition-all cursor-pointer relative overflow-hidden group select-none",
                     isSelected 
-                      ? "border-blue-500 bg-blue-500/10" 
+                      ? "border-blue-500 bg-blue-500/10 shadow-[0_0_15px_rgba(59,130,246,0.15)]" 
                       : "border-zinc-800 bg-zinc-900 hover:border-zinc-700"
                   )}
                 >
-                  <div 
-                    className="w-12 h-12 shrink-0 cursor-pointer"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setViewedPlayer(player.id);
-                    }}
-                  >
+                  {isSelected && (
+                    <div className="absolute top-2 right-2 w-5 h-5 rounded-full bg-blue-500 flex items-center justify-center z-10">
+                      <Shield className="w-3 h-3 text-white fill-current" />
+                    </div>
+                  )}
+
+                  <div className="w-12 h-12 shrink-0">
                     <JerseyPlayerImage 
                         player={player} 
                         franchiseId={selectedFranchiseId}
-                        className="w-full h-full bg-zinc-800 rounded-lg"
+                        className="w-full h-full bg-zinc-800 rounded-lg pointer-events-none"
                     />
                   </div>
-                  <div className="flex-1 min-w-0" onClick={(e) => {
-                    e.stopPropagation();
-                    setViewedPlayer(player.id);
-                  }}>
-                    <h3 className="text-sm font-bold truncate leading-tight mb-1 hover:text-cyan-400 transition-colors">{player.name}</h3>
+                  <div className="flex-1 min-w-0">
+                    <h3 className="text-sm font-bold truncate leading-tight mb-1 group-hover:text-blue-400 transition-colors">{player.name}</h3>
                     <div className="flex items-center gap-2 text-[10px] font-medium text-white/50 uppercase tracking-wider">
                         <span>{player.role}</span>
                     </div>
-                    <div className="flex items-center gap-2 text-[10px] font-medium text-white/50 uppercase tracking-wider mt-1" title={`Form: ${Math.round(player.form || 85)}`}>
-                        <span className="text-orange-500 tracking-widest">{getFormMeter(player.form || 85)}</span>
-                        <span className="opacity-50">Form</span>
-                    </div>
+                    {hasPlayed && (
+                      <div className="flex items-center gap-2 text-[10px] font-medium text-white/50 uppercase tracking-wider mt-1" title={`Form: ${Math.round(formValue)}`}>
+                          <span className="text-orange-500 tracking-widest">{getFormMeter(formValue)}</span>
+                          <span className="opacity-50">Form</span>
+                      </div>
+                    )}
                   </div>
-                  <div className="text-right">
-                     <span className="text-[10px] text-zinc-500 uppercase font-bold block mb-0.5">Rating</span>
-                     <span className={cn(
-                       "text-lg font-black",
-                       effRating.overall > player.rating ? "text-emerald-400" : effRating.overall < player.rating ? "text-red-400" : "text-yellow-500"
-                     )}>{effRating.overall}</span>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <div className="text-right">
+                       <span className="text-[10px] text-zinc-500 uppercase font-bold block mb-0.5">Rating</span>
+                       <span className={cn(
+                         "text-lg font-black",
+                         effRating.overall > player.rating ? "text-emerald-400" : effRating.overall < player.rating ? "text-red-400" : "text-yellow-500"
+                       )}>{effRating.overall}</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setViewedPlayer(player.id);
+                      }}
+                      className="p-1.5 rounded-lg text-zinc-500 hover:text-white hover:bg-white/10 transition-colors"
+                      title="View Player Profile"
+                    >
+                      <User className="w-4 h-4" />
+                    </button>
                   </div>
                 </div>
               );
@@ -264,6 +366,56 @@ export default function PlayingXIBuilder() {
           </div>
         </div>
 
+      </div>
+
+      {/* Floating XI Toast Notification */}
+      {toastMessage && (
+        <div className="fixed top-16 left-1/2 -translate-x-1/2 z-50 bg-amber-500/90 backdrop-blur-md text-zinc-950 font-bold px-4 py-2 rounded-full shadow-lg text-xs flex items-center gap-2 animate-bounce">
+          <AlertCircle className="w-4 h-4 shrink-0" />
+          <span>{toastMessage}</span>
+        </div>
+      )}
+
+      {/* Sticky Bottom Bar for all viewports */}
+      <div className="sticky bottom-0 z-40 bg-zinc-950/95 backdrop-blur-md border-t border-zinc-800/80 px-4 py-3 sm:px-6 safe-bottom">
+        <div className="max-w-7xl mx-auto flex items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <span className={cn(
+              "text-lg font-black font-mono",
+              playingXI.length === 11 ? "text-emerald-400" : "text-white"
+            )}>
+              {playingXI.length}/11
+            </span>
+            <span className="text-xs text-zinc-400 font-medium hidden sm:inline">
+              {playingXI.length === 11 ? 'Playing XI complete! Ready to proceed.' : `Pick ${11 - playingXI.length} more players`}
+            </span>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={autoPickXI}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs font-bold transition-all active:scale-95 cursor-pointer"
+            >
+              <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+              Auto Pick XI
+            </button>
+            <button
+              disabled={playingXI.length !== 11}
+              onClick={() => {
+                setPlayingXIIds(playingXI);
+                if (currentMatchId) {
+                  setGameState(GameState.PRE_MATCH);
+                } else {
+                  setGameState(GameState.ARENA_HUB);
+                }
+              }}
+              className="flex items-center gap-2 px-6 py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-xl font-bold text-sm transition-all disabled:opacity-30 disabled:pointer-events-none active:scale-95 shadow-lg shadow-blue-600/20 cursor-pointer"
+            >
+              Lock Playing XI
+              <ChevronRight className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   );

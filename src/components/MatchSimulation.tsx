@@ -14,7 +14,6 @@ import { ArrowLeft, Target, Layout, ListOrdered, Radio, History } from 'lucide-r
 import { cn } from '../lib/utils';
 import CricketActionVisualizer from './CricketActionVisualizer';
 import { ArenaFormat } from '../engine/models/ArenaState';
-import { isEligibleBowler } from '../engine/rules/bowlerEligibility';
 
 function formatOvers(overs: number, balls: number) {
   return `${overs}.${balls}`;
@@ -100,8 +99,7 @@ export default function MatchSimulation() {
           setPendingUserAction('pick-openers');
           // AI picks bowler using proper bowler order
           const bowlerOrder = MatchEngine.getBowlerOrder(bowlSquad.map(p => p.id), players);
-          const firstBowler = bowlerOrder.find(isEligibleBowler) || bowlerOrder[0];
-          setCurrentBowlerId(firstBowler?.id || null); 
+          setCurrentBowlerId(bowlerOrder[0]?.id || bowlSquad[0]?.id); 
           setLastOverBowlerId(null);
       } else if (bowlFirstId === userTeam?.id) {
           setStrikerId(batSquad[0]?.id || null);
@@ -112,8 +110,7 @@ export default function MatchSimulation() {
           setStrikerId(batSquad[0]?.id || null);
           setNonStrikerId(batSquad[1]?.id || null);
           const bowlerOrder = MatchEngine.getBowlerOrder(bowlSquad.map(p => p.id), players);
-          const firstBowler = bowlerOrder.find(isEligibleBowler) || bowlerOrder[0];
-          setCurrentBowlerId(firstBowler?.id || null);
+          setCurrentBowlerId(bowlerOrder[0]?.id || bowlSquad[0]?.id);
           setLastOverBowlerId(null);
       }
       
@@ -414,8 +411,7 @@ export default function MatchSimulation() {
         if (updatedInnings.bowlingTeamId === userTeam?.id) {
             setPendingUserAction('pick-openers');
             const bowlerOrder2 = MatchEngine.getBowlerOrder(bowlSquad2.map(p => p.id), players);
-            const firstBowler2 = bowlerOrder2.find(isEligibleBowler) || bowlerOrder2[0];
-            setCurrentBowlerId(firstBowler2?.id || null);
+            setCurrentBowlerId(bowlerOrder2[0]?.id || bowlSquad2[0]?.id);
         } else if (updatedInnings.battingTeamId === userTeam?.id) {
             setStrikerId(batSquad2[0]?.id || null);
             setNonStrikerId(batSquad2[1]?.id || null);
@@ -424,8 +420,7 @@ export default function MatchSimulation() {
             setStrikerId(batSquad2[0]?.id || null);
             setNonStrikerId(batSquad2[1]?.id || null);
             const bowlerOrder2 = MatchEngine.getBowlerOrder(bowlSquad2.map(p => p.id), players);
-            const firstBowler2 = bowlerOrder2.find(isEligibleBowler) || bowlerOrder2[0];
-            setCurrentBowlerId(firstBowler2?.id || null);
+            setCurrentBowlerId(bowlerOrder2[0]?.id || bowlSquad2[0]?.id);
         }
       }
     } else {

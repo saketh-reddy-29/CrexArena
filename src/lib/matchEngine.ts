@@ -16,7 +16,6 @@ import {
 } from '../types/match';
 import { calculateEffectiveRating } from './ratingEngine';
 import { ArenaFormat } from '../stores/useGameStore';
-import { isEligibleBowler, safeNumber, clampProbability } from '../engine/rules/bowlerEligibility';
 
 // ═══════════════════════════════════════════════════════════════════════
 //  IPL Match Engine — Real IPL Rules
@@ -93,18 +92,24 @@ export class MatchEngine {
 
   // ─── Utility ─────────────────────────────────────────────────────
 
-  private static clamp(value: number, min: number, max: number): number {
+  static clamp(value: number, min: number, max: number): number {
     return Math.min(max, Math.max(min, value));
   }
 
+  static safeNum(value: unknown, fallback: number = 0): number {
+    return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
+  }
+
   private static chooseWeighted<T extends string | number>(weights: Array<[T, number]>): T {
-    const total = weights.reduce((sum, [, weight]) => sum + Math.max(0, weight), 0);
+    const total = weights.reduce((sum, [, weight]) => sum + (Number.isFinite(weight) ? Math.max(0, weight) : 0), 0);
+    if (total <= 0) return weights[0][0]; // Safe fallback: first option (dot/safe), NEVER fall back to last index
     let roll = Math.random() * total;
     for (const [value, weight] of weights) {
-      roll -= Math.max(0, weight);
+      const w = Number.isFinite(weight) ? Math.max(0, weight) : 0;
+      roll -= w;
       if (roll <= 0) return value;
     }
-    return weights[weights.length - 1][0];
+    return weights[0][0];
   }
 
   // ─── Recent Outcome Analysis ─────────────────────────────────────
@@ -118,26 +123,9 @@ export class MatchEngine {
   }
 
   private static getRecentWicketModifier(recentOutcomes?: string[]): number {
-    if (!recentOutcomes?.length) return 1;
-
-    const recent = recentOutcomes
-      .map((outcome) => this.normalizeRecentOutcome(outcome))
-      .filter((outcome): outcome is 'W' | 0 | 1 | 2 | 3 | 4 | 6 => outcome !== null);
-
-    if (!recent.length) return 1;
-
-    const last12 = recent.slice(-12);
-    const wicketsInLast12 = last12.filter((ball) => ball === 'W').length;
-    const lastWicketIndex = recent.lastIndexOf('W');
-    const ballsSinceLastWicket = lastWicketIndex === -1 ? 99 : recent.length - lastWicketIndex;
-
-    let modifier = 1;
-    if (ballsSinceLastWicket <= 2) modifier *= 0.35;
-    else if (ballsSinceLastWicket <= 5) modifier *= 0.6;
-    if (wicketsInLast12 >= 2) modifier *= 0.72;
-    if (wicketsInLast12 >= 3) modifier *= 0.55;
-
-    return this.clamp(modifier, 0.2, 1);
+    // Unbiased natural context: no artificial 0.35x/0.6x post-wicket suppression,
+    // and no artificial wicket spikes. Wickets emerge naturally from deliveries and matchups.
+    return 1.0;
   }
 
   // ─── Player Analysis ─────────────────────────────────────────────
@@ -254,6 +242,9 @@ export class MatchEngine {
     isFreeHit: boolean = false,
     bouncersThisOver: number = 0,
     format?: string,
+    extraIntent?: string,
+    extraPlan?: any,
+    extraContext?: any,
   ): BallOutcome {
     if (!batsman || !bowler) {
       return { runs: 0, isWicket: false, isExtra: false, batsmanId: batsman?.id || 'unknown', bowlerId: bowler?.id || 'unknown', commentary: "Match interruption: Missing player data." };
@@ -323,244 +314,139 @@ export class MatchEngine {
     const dotPressure = this.clamp(consecutiveDots * 0.055 + Math.max(0, bowlerDotRate - 0.42) * 0.25, 0, 0.32);
     const pressure = this.clamp(chasePressure + scoreboardPressure + dotPressure - batterMomentum * 0.01, 0, 0.7);
 
-    // ── Attack intent ──
-    let attack = 0.5;
-    if (arenaFormat === 'TEST') {
-      attack = 0.35; // Test batsmen are naturally more defensive
-      if (isPowerplay) attack = 0.45;
-      if (isDeathOvers) attack = 0.30; // New ball -> more caution
-    } else if (requiredRate > 0) {
-      if (requiredRate > 12) attack = 0.85;
-      else if (requiredRate > 9) attack = 0.7;
-      else if (requiredRate < 6) attack = 0.4;
-    } else if (isDeathOvers) {
-      attack = 0.75;
-    } else if (isPowerplay) {
-      attack = 0.65;
-    }
-
-    let intent = 0.08;
-    if (isPowerplay) intent += 0.13;
-    if (isDeathOvers) intent += 0.27;
-    if (requiredRate > 9.5) intent += 0.12;
-    if (requiredRate > 12) intent += 0.18;
-    if (requiredRate > 15) intent += 0.16;
-    if (wickets >= 6 && !isDeathOvers) intent -= 0.12;
-    if (archetype === 'anchor') intent -= 0.06;
-    if (archetype === 'accumulator') intent -= 0.03;
-    if (archetype === 'finisher') intent += isDeathOvers || requiredRate > 10 ? 0.16 : 0.06;
-    if (batterStrikeRate < 85 && batterBalls > 14) intent += 0.08;
-
-    // FREE HIT: Batsman plays more aggressively
-    if (isFreeHit) {
-      intent += 0.25;
-      attack = Math.min(0.95, attack + 0.2);
-    }
-
-    intent = this.clamp(intent + aggression / 600 - temperament / 1000 + (attack - 0.5) * 0.15, 0, 0.85);
-
-    // ── Bowling control ──
-    const bowlingControl = this.clamp(
-      (bowlerSkill - 70) / 180 + bowlerMomentum * 0.012 + pitchBowlMod - pitchBatMod +
-      (isSpin && isMiddleOvers ? 0.08 : 0) +
-      (isPace && isPowerplay ? 0.05 : 0) +
-      (isPace && isDeathOvers ? (deathBowling - 70) / 240 : 0) +
-      (bowlerEconomy < 7 ? 0.05 : bowlerEconomy > 10 ? -0.05 : 0),
-      -0.22,
-      0.34
+    // ── Attack intent & Batting Intent Resolution ──
+    const effectiveIntent = (extraIntent as string) || (
+      arenaFormat === 'TEST'
+        ? (archetype === 'anchor' || batterBalls < 8 ? 'DEFENSIVE' : 'BALANCED')
+        : (requiredRate > 12 || isDeathOvers)
+          ? 'ACCELERATE'
+          : (requiredRate > 9 || isPowerplay)
+            ? 'CONTROLLED_ATTACK'
+            : (wickets >= 6 && !isDeathOvers)
+              ? 'DEFENSIVE'
+              : 'NORMAL'
     );
 
-    const battingControl = this.clamp(skillEdge + setBatter + anchorCalm + pitchBatMod - pitchBowlMod + batterMomentum * 0.01 + tailPenalty, -0.36, 0.36);
-    const releaseShot = consecutiveDots >= 3 || (requiredRate > 12 && Math.random() < 0.55);
+    // ── Bounded Multipliers (Calibrated Model) ──
+    // Base rate calibrated per format (test: ~1.6%, odi: ~2.2%, t20: ~2.8%)
+    const baseWicketProb = arenaFormat === 'TEST' ? 0.016 : arenaFormat === 'ODI' ? 0.022 : 0.028;
 
-    // ═══ EXTRAS: No Ball + Wide (IPL T20 Rules) ═══
+    // Batter risk multiplier
+    const batSkillMod = this.clamp(1.0 - (batterSkill - 70) / 140, 0.70, 1.30);
+    const tempMod = this.clamp(1.0 - (temperament - 70) / 220, 0.85, 1.15);
+    const formMod = this.clamp(1.0 - (form - 75) / 220, 0.85, 1.15);
+    // Bounded settledness: new batter is slightly vulnerable (1.18x), settled batter has lower risk (0.82x)
+    const settledMod = batterBalls >= 25 ? 0.82 : batterBalls >= 12 ? 0.90 : batterBalls >= 5 ? 1.00 : 1.18;
+    const tailMod = archetype === 'tail' ? 1.35 : 1.0;
+    const mBat = this.clamp(batSkillMod * tempMod * formMod * settledMod * tailMod, 0.55, 1.65);
 
-    const extraRand = Math.random();
+    // Bowler threat multiplier
+    const bowlSkillMod = this.clamp(1.0 + (bowlerSkill - 70) / 140, 0.70, 1.35);
+    const bowlFormMod = this.clamp(1.0 + (bowlerForm - 75) / 220, 0.85, 1.15);
+    const deathThreat = isDeathOvers && isPace ? this.clamp(1.0 + (deathBowling - 70) / 220, 0.90, 1.25) : 1.0;
+    const mBowl = this.clamp(bowlSkillMod * bowlFormMod * deathThreat, 0.65, 1.45);
 
-    // No Ball check (triggers Free Hit for next delivery)
-    const noBallProb = 0.012 + (isDeathOvers ? 0.008 : 0) - bowlingControl * 0.015;
-    // Bouncer above waist (above limit) = automatic no ball
-    const bouncerNoBall = isPace && bouncersThisOver >= this.MAX_BOUNCERS_PER_OVER && Math.random() < 0.03;
+    // Matchup multiplier
+    const mMatchup = this.clamp(1.0 - (matchupSkill - 70) / 200, 0.80, 1.20);
 
-    if (extraRand < noBallProb || bouncerNoBall) {
-      const noBallCommentary = bouncerNoBall
-        ? `NO BALL! That's the third bouncer of the over from ${bowler.name}. Free hit coming up!`
-        : `NO BALL! ${bowler.name} has overstepped! One run and a FREE HIT coming up. The crowd roars!`;
+    // Pitch & conditions multiplier
+    let mPitch = 1.0;
+    if (pitchType === PitchType.SPIN && isSpin) mPitch += 0.15;
+    if (pitchType === PitchType.PACE && isPace) mPitch += 0.12;
+    if (pitchType === PitchType.SLOW) mPitch += 0.08;
+    if (pitchType === PitchType.BATTING) mPitch -= 0.12;
+    if (weather === WeatherCondition.CLOUDY && isPace && overs < 6) mPitch += 0.10;
+    if (weather === WeatherCondition.DEW && !isPowerplay) mPitch -= 0.08;
+    mPitch = this.clamp(mPitch, 0.78, 1.28);
 
-      return {
-        runs: 1,
-        isWicket: false,
-        isExtra: true,
-        extraType: 'No Ball',
-        batsmanId: batsman.id,
-        bowlerId: bowler.id,
-        commentary: noBallCommentary,
-        triggeredFreeHit: true,  // Next ball is a free hit
-        isFreeHit: false,
-      };
+    // Delivery quality & plan multiplier
+    let mPlan = 1.0;
+    if (extraPlan) {
+      if (extraPlan.intent === 'ATTACKING' || extraPlan.intent === 'WICKET_TAKING') mPlan += 0.10;
+      else if (extraPlan.intent === 'DEFENSIVE' || extraPlan.intent === 'CONTAINING') mPlan -= 0.10;
+    }
+    mPlan = this.clamp(mPlan, 0.75, 1.25);
+
+    // Intent multiplier
+    let mIntent = 1.0;
+    switch (effectiveIntent) {
+      case 'SURVIVAL':
+        mIntent = 0.45;
+        break;
+      case 'DEFENSIVE':
+        mIntent = 0.58;
+        break;
+      case 'SETTLING':
+        mIntent = 0.78;
+        break;
+      case 'ROTATE_STRIKE':
+      case 'ROTATE':
+        mIntent = 0.88;
+        break;
+      case 'NORMAL':
+      case 'BALANCED':
+        mIntent = 1.00;
+        break;
+      case 'CONTROLLED_ATTACK':
+      case 'AGGRESSIVE':
+        mIntent = 1.35;
+        break;
+      case 'ACCELERATE':
+      case 'ALL_OUT_ATTACK':
+        mIntent = 1.80;
+        break;
     }
 
-    // Wide ball check (T20 has stricter tramline)
-    const wideProb = 0.022 + (isDeathOvers ? 0.008 : 0) - bowlingControl * 0.02;
-    if (extraRand < noBallProb + wideProb && extraRand >= noBallProb) {
-      return {
-        runs: 1,
-        isWicket: false,
-        isExtra: true,
-        extraType: 'Wide',
-        batsmanId: batsman.id,
-        bowlerId: bowler.id,
-        commentary: `WIDE! ${bowler.name} misses the tramline. That's a gift run under pressure.`,
-        isFreeHit,
-      };
-    }
+    // Context adjustment
+    let mContext = 1.0;
+    if (requiredRate > 12) mContext += 0.15;
+    else if (requiredRate > 9) mContext += 0.08;
+    mContext = this.clamp(mContext, 0.85, 1.30);
 
-    // ═══ OUTCOME WEIGHTS ═══
-
-    let dot = isPowerplay ? 30 : isMiddleOvers ? 36 : 24;
-    let one = isPowerplay ? 34 : isMiddleOvers ? 38 : 28;
-    let two = isPowerplay ? 10 : isMiddleOvers ? 11 : 14;
-    let three = isPowerplay ? 1.2 : isMiddleOvers ? 1.5 : 2.2;
-    let four = isPowerplay ? 13 : isMiddleOvers ? 7 : 14;
-    let six = isPowerplay ? 5 : isMiddleOvers ? 3 : 8;
-    let wicket = isPowerplay ? 2.5 : isMiddleOvers ? 2.2 : 4.0;
-    if (arenaFormat === 'TEST') {
-      wicket *= 0.6; // Test matches have much lower per-ball wicket probability
-    }
-
-    // PowerPlay: fewer fielders outside → more boundaries but also catches in close
-    if (isPowerplay) {
-      four += 3;  // Only 2 outside the ring = more boundaries
-      six += 1.5;
-      wicket += 0.8;  // More catches in close positions
-    }
-
-    // Modifiers
-    dot += bowlingControl * 35 + pressure * 14 - battingControl * 16;
-    one += temperament / 20 + (archetype === 'anchor' || archetype === 'accumulator' ? 5 : 0) - intent * 6;
-    two += battingControl * 6 + (archetype === 'accumulator' ? 3 : 0);
-    four += battingControl * 16 + intent * 12 - bowlingControl * 10;
-    six += battingControl * 9 + intent * 14 - bowlingControl * 10;
-    wicket += pressure * 8 + intent * 4 + bowlingControl * 6 - temperament / 50 - battingControl * 3;
-    wicket *= recentWicketModifier;
-
-    // FREE HIT: Can only be dismissed by Run Out
+    // ═══ SINGLE AUTHORITATIVE WICKET ROLL ═══
+    let rawWicketProb = baseWicketProb * mBat * mBowl * mMatchup * mPitch * mPlan * mIntent * mContext;
     if (isFreeHit) {
-      wicket = 0.3;  // Very small chance of run out only
-      four += 5;
-      six += 4;
-      dot -= 8;
+      rawWicketProb = 0.002; // Free Hit: only rare run out
     }
 
-    if (isSpin && isMiddleOvers) {
-      dot += 8;
-      one += 5;
-      four -= 3;
-      six -= 2;
-      wicket += pressure * 2.5;
-    }
+    const minWicket = isFreeHit ? 0.001 : arenaFormat === 'TEST' ? 0.005 : arenaFormat === 'ODI' ? 0.008 : 0.010;
+    const maxWicket = isFreeHit ? 0.005 : arenaFormat === 'TEST' ? 0.075 : arenaFormat === 'ODI' ? 0.085 : 0.110;
+    const finalWicketProb = this.clamp(rawWicketProb, minWicket, maxWicket);
 
-    if (pitchType === PitchType.SLOW) {
-      dot += 7;
-      one += 4;
-      two += 2;
-      four -= 4;
-      six -= 5;
-      wicket += releaseShot ? 2 : 0.8;
-    }
+    const isWicket = wickets < 10 && Math.random() < finalWicketProb;
 
-    if (isDeathOvers) {
-      dot -= 5;
-      one -= 3;
-      two += 2;
-      four += 2;
-      six += archetype === 'finisher' ? 4 : 1.5;
-      wicket += releaseShot ? 2.5 : 0.8;
-    }
-
-    if (releaseShot) {
-      dot -= 4;
-      four += 2;
-      six += 2;
-      wicket += isFreeHit ? 0 : 2.5;  // No wicket risk on free hit
-    }
-
-    if (wickets >= 6 && !isDeathOvers) {
-      dot += 6;
-      one += 6;
-      four -= 4;
-      six -= 4;
-    }
-
-    dot += Math.max(0, 0.5 - attack) * 8;
-    four += Math.max(0, attack - 0.5) * 10;
-    six += Math.max(0, attack - 0.5) * 8;
-
-    if (ballInInnings > 0 && ballInInnings % 6 >= 4 && bowlerStats?.lastOverRuns !== undefined && bowlerStats.lastOverRuns <= 3) {
-      dot += 3;
-      wicket += isFreeHit ? 0 : 1.5;
-    }
-
-    const outcome = this.chooseWeighted<number>([
-      [0, this.clamp(dot, 16, 50)],
-      [1, this.clamp(one, 20, 50)],
-      [2, this.clamp(two, 5, 18)],
-      [3, this.clamp(three, 0.3, 3.5)],
-      [4, this.clamp(four, 3, isDeathOvers ? 20 : 16)],
-      [6, this.clamp(six, 0.8, isDeathOvers ? 14 : 9)],
-      [-1, this.clamp(wicket, isFreeHit ? 0.1 : 0.8, isDeathOvers ? 5.5 : 4.0)]
-    ]);
-
-    // ═══ WICKET ═══
-    if (outcome === -1) {
+    if (isWicket) {
       let wicketType: BallOutcome['wicketType'] = 'Caught';
-
-      // On FREE HIT: only Run Out is possible
       if (isFreeHit) {
         wicketType = 'Run Out';
       } else {
         const wicketRoll = Math.random();
-        if (isDeathOvers || releaseShot || intent > 0.45) {
-          wicketType = wicketRoll < 0.68 ? 'Caught' : wicketRoll < 0.86 ? 'Bowled' : 'Run Out';
+        if (effectiveIntent === 'ACCELERATE' || effectiveIntent === 'ALL_OUT_ATTACK' || isDeathOvers) {
+          wicketType = wicketRoll < 0.65 ? 'Caught' : wicketRoll < 0.85 ? 'Bowled' : 'Run Out';
         } else if (isSpin) {
-          wicketType = wicketRoll < 0.42 ? 'Caught' : wicketRoll < 0.68 ? 'LBW' : wicketRoll < 0.86 ? 'Stumped' : 'Bowled';
+          wicketType = wicketRoll < 0.40 ? 'Caught' : wicketRoll < 0.65 ? 'LBW' : wicketRoll < 0.85 ? 'Stumped' : 'Bowled';
         } else {
-          wicketType = wicketRoll < 0.38 ? 'Caught' : wicketRoll < 0.52 ? 'Caught Behind' : wicketRoll < 0.80 ? 'Bowled' : 'LBW';
+          wicketType = wicketRoll < 0.38 ? 'Caught' : wicketRoll < 0.58 ? 'Caught Behind' : wicketRoll < 0.82 ? 'Bowled' : 'LBW';
         }
-      }
-
-      // Fielding effect can override (dropped catch, etc.)
-      const fieldingEffect = this.getFieldingEffect(batsman, bowler, 0, wicketType);
-      if (fieldingEffect && !fieldingEffect.isWicket) {
-        return {
-          runs: fieldingEffect.runs,
-          isWicket: false,
-          isExtra: false,
-          batsmanId: batsman.id,
-          bowlerId: bowler.id,
-          fieldingEvent: fieldingEffect.fieldingEvent,
-          commentary: fieldingEffect.commentary,
-          isFreeHit,
-        };
       }
 
       let commentary = '';
       if (isFreeHit) {
         commentary = `RUN OUT on a Free Hit! ${batsman.name} took the risk for an extra run but the throw is accurate. Gone!`;
       } else if (wicketType === 'Caught') {
-        commentary = releaseShot
-          ? `OUT! ${batsman.name} tries to break free, but ${bowler.name} has the field set perfectly. Taken in the deep!`
-          : `OUT! ${bowler.name} finds the edge and ${batsman.name} is caught. Massive wicket!`;
+        commentary = effectiveIntent === 'ACCELERATE' || effectiveIntent === 'ALL_OUT_ATTACK'
+          ? `OUT! ${batsman.name} tries to clear the rope, but ${bowler.name} has the field set perfectly. Taken in the deep!`
+          : `OUT! ${bowler.name} induces the false stroke and ${batsman.name} is caught cleanly!`;
       } else if (wicketType === 'Caught Behind') {
-        commentary = `Feather behind! ${bowler.name} finds just enough movement and ${batsman.name} has to walk.`;
+        commentary = `Feather behind! ${bowler.name} finds just enough movement and ${batsman.name} is caught behind.`;
       } else if (wicketType === 'Bowled') {
-        commentary = `BOWLED HIM! ${bowler.name} nails the length and ${batsman.name}'s stumps are shattered!`;
+        commentary = `BOWLED HIM! ${bowler.name} nails the line and length, shattering ${batsman.name}'s stumps!`;
       } else if (wicketType === 'LBW') {
-        commentary = `Huge appeal — GIVEN! ${bowler.name} has trapped ${batsman.name} in front. Plumb LBW!`;
+        commentary = `Huge appeal — GIVEN! ${bowler.name} traps ${batsman.name} right in front of the stumps. Plumb LBW!`;
       } else if (wicketType === 'Stumped') {
-        commentary = `Beaten in the flight and STUMPED! Brilliant keeping. ${bowler.name} outfoxes ${batsman.name}.`;
+        commentary = `Beaten in the flight and STUMPED! Lightning glovework. ${bowler.name} outfoxes ${batsman.name}.`;
       } else {
-        commentary = `RUN OUT! The pressure forces a risky single and ${batsman.name} is short of the crease!`;
+        commentary = `RUN OUT! Crisp fielding in the inner ring and ${batsman.name} is caught short of the crease!`;
       }
 
       return {
@@ -570,58 +456,108 @@ export class MatchEngine {
         isExtra: false,
         batsmanId: batsman.id,
         bowlerId: bowler.id,
-        fieldingEvent: fieldingEffect?.fieldingEvent,
         commentary,
         isFreeHit,
       };
     }
 
-    // ═══ RUNS ═══
-    const fieldingEffect = this.getFieldingEffect(batsman, bowler, outcome);
-    if (fieldingEffect) {
-      return {
-        runs: fieldingEffect.runs,
-        isWicket: fieldingEffect.isWicket,
-        isExtra: false,
-        batsmanId: batsman.id,
-        bowlerId: bowler.id,
-        fieldingEvent: fieldingEffect.fieldingEvent,
-        commentary: fieldingEffect.commentary,
-        isFreeHit,
-      };
+    // ═══ RUNS DISTRIBUTION (WHEN NOT A WICKET) ═══
+    let dot = 38;
+    let one = 36;
+    let two = 10;
+    let three = 1.5;
+    let four = 10;
+    let six = 4.5;
+
+    // Adjust base weights based on intent
+    if (effectiveIntent === 'SURVIVAL' || effectiveIntent === 'DEFENSIVE') {
+      dot = 72;
+      one = 18;
+      two = 4;
+      three = 0.5;
+      four = 4;
+      six = 0.5;
+    } else if (effectiveIntent === 'SETTLING') {
+      dot = 52;
+      one = 34;
+      two = 7;
+      three = 1;
+      four = 5;
+      six = 1;
+    } else if (effectiveIntent === 'ROTATE_STRIKE' || effectiveIntent === 'ROTATE') {
+      dot = 34;
+      one = 44;
+      two = 11;
+      three = 2;
+      four = 7;
+      six = 2;
+    } else if (effectiveIntent === 'CONTROLLED_ATTACK' || effectiveIntent === 'AGGRESSIVE') {
+      dot = 26;
+      one = 28;
+      two = 10;
+      three = 2;
+      four = 20;
+      six = 10;
+    } else if (effectiveIntent === 'ACCELERATE' || effectiveIntent === 'ALL_OUT_ATTACK') {
+      dot = 22;
+      one = 22;
+      two = 9;
+      three = 1;
+      four = 25;
+      six = 16;
     }
+
+    // PowerPlay effects (fewer fielders deep -> slightly more boundaries)
+    if (isPowerplay) {
+      four += 3;
+      six += 1;
+      dot -= 3;
+    }
+
+    // Advantage edge
+    const battingControl = this.clamp((batterSkill - bowlerSkill) / 100, -0.35, 0.35);
+    dot -= battingControl * 8;
+    four += battingControl * 6;
+    six += battingControl * 4;
+
+    if (isFreeHit) {
+      four += 8;
+      six += 6;
+      dot = Math.max(8, dot - 12);
+    }
+
+    const outcome = this.chooseWeighted<number>([
+      [0, Math.max(10, dot)],
+      [1, Math.max(10, one)],
+      [2, Math.max(2, two)],
+      [3, Math.max(0.2, three)],
+      [4, Math.max(2, four)],
+      [6, Math.max(0.5, six)]
+    ]);
 
     let commentary = '';
     if (outcome === 6) {
       commentary = isFreeHit
-        ? `FREE HIT SIX! ${batsman.name} knows there's no risk and launches it into the stands! The crowd erupts!`
+        ? `FREE HIT SIX! ${batsman.name} takes full toll and deposits it into the stands!`
         : isDeathOvers
-          ? `${batsman.name} clears the front leg and LAUNCHES it for SIX! Death-over carnage!`
-          : `${batsman.name} picks the length early and deposits it over the rope for SIX!`;
+          ? `${batsman.name} clears the front leg and LAUNCHES it for SIX! Towering hit!`
+          : `${batsman.name} picks the length early and sends it sailing over the ropes for SIX!`;
     } else if (outcome === 4) {
       commentary = isFreeHit
-        ? `FREE HIT FOUR! ${batsman.name} cashes in with a crisp drive through the covers!`
-        : releaseShot
-          ? `Pressure released! ${batsman.name} finds the gap and races away for FOUR.`
-          : `${batsman.name} times it beautifully through the field for FOUR.`;
+        ? `FREE HIT FOUR! ${batsman.name} cashes in with a glorious drive through the covers!`
+        : `${batsman.name} times it crisply through the gap, racing away for FOUR!`;
     } else if (outcome === 3) {
-      commentary = `Excellent placement from ${batsman.name}; they run hard and come back for three.`;
+      commentary = `Superb running between the wickets! ${batsman.name} places it into the outfield and pushes hard for three.`;
     } else if (outcome === 2) {
-      commentary = archetype === 'accumulator' || archetype === 'anchor'
-        ? `${batsman.name} works it into space and pushes hard for two. Smart cricket.`
-        : `Good running between the wickets, two added.`;
+      commentary = `${batsman.name} works it into space and scampers back for a comfortable couple.`;
     } else if (outcome === 1) {
-      commentary = consecutiveDots >= 2
-        ? `${batsman.name} gets off strike. Sensible release after the dots.`
-        : `${batsman.name} nudges it into the ring and rotates the strike.`;
+      commentary = `${batsman.name} drops it into the ring and quickly rotates the strike.`;
     } else {
       commentary = isFreeHit
-        ? `Dot ball on a Free Hit! ${batsman.name} couldn't capitalize. Rare miss.`
-        : pressure > 0.28
-          ? `Dot ball from ${bowler.name}. The squeeze is real now.`
-          : isSpin && isMiddleOvers
-            ? `${bowler.name} gives it air, no gap for ${batsman.name}. Dot.`
-            : `${batsman.name} cannot beat the infield. Dot ball.`;
+        ? `Dot ball on a Free Hit! Sharp bowling from ${bowler.name}.`
+        : effectiveIntent === 'DEFENSIVE' || effectiveIntent === 'SURVIVAL'
+          ? `${batsman.name} defends solidly right off the middle of the bat. Well played.`
+          : `Tight line from ${bowler.name}, no run possible. Dot ball.`;
     }
 
     return {
@@ -1005,11 +941,7 @@ export class MatchEngine {
 
   static getBowlerOrder(squadIds: string[], players: Player[]): Player[] {
     const squadPlayers = squadIds.map(id => players.find(p => p.id === id)).filter(Boolean) as Player[];
-    // Strict Hard Role Separation: pure batters must never be returned as bowlers
-    const eligibleBowlers = squadPlayers.filter(isEligibleBowler);
-    const pool = eligibleBowlers.length >= 3 ? eligibleBowlers : squadPlayers.filter(p => p.role !== 'Batsman' && p.role !== 'Wicketkeeper');
-    
-    pool.sort((a, b) => {
+    squadPlayers.sort((a, b) => {
        const getBowlScore = (p: Player) => {
            let s = (p.stats?.bowling || 0);
            if (p.role === 'Bowler') s += 50;
@@ -1018,7 +950,7 @@ export class MatchEngine {
        };
        return getBowlScore(b) - getBowlScore(a);
     });
-    return pool;
+    return squadPlayers;
   }
 
   // ─── Innings Data Factory ────────────────────────────────────────

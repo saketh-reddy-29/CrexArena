@@ -10,7 +10,7 @@ export type DeliveryOutcome =
 export class ProbabilityEngine {
   /**
    * Simulates a delivery based on context, intent, and matchup modifier.
-   * This is where randomness decides the final outcome.
+   * Single authoritative simulation step with bounded probabilities.
    */
   public simulateDelivery(
     context: MatchContext, 
@@ -18,56 +18,70 @@ export class ProbabilityEngine {
     plan: DeliveryPlan, 
     matchupModifier: number
   ): DeliveryOutcome {
-    // Base probabilities based on intent
-    let probabilities = this.getBaseProbabilities(intent);
+    const isTest = context.format === "TEST";
+    const isODI = context.format === "ODI";
 
-    // Adjust probabilities using matchupModifier and player ratings
-    // (A rating of 90 * modifier 1.2 makes positive outcomes much more likely)
-    const formFactor = (context.striker.form / 100);
-    const battingPower = context.striker.battingRating * matchupModifier * formFactor;
-    const bowlingPower = context.bowler.bowlingRating * (1 / matchupModifier) * (context.bowler.form / 100);
+    // Base probabilities based on intent and format
+    let probabilities = this.getBaseProbabilities(intent, isTest, isODI);
 
-    const advantage = battingPower - bowlingPower; // Can be negative
+    // Safe fallbacks for attributes
+    const strikerRating = typeof context.striker?.battingRating === 'number' && Number.isFinite(context.striker.battingRating) ? context.striker.battingRating : 60;
+    const strikerForm = typeof context.striker?.form === 'number' && Number.isFinite(context.striker.form) ? context.striker.form : 75;
+    const bowlerRating = typeof context.bowler?.bowlingRating === 'number' && Number.isFinite(context.bowler.bowlingRating) ? context.bowler.bowlingRating : 60;
+    const bowlerForm = typeof context.bowler?.form === 'number' && Number.isFinite(context.bowler.form) ? context.bowler.form : 75;
+    const safeModifier = typeof matchupModifier === 'number' && Number.isFinite(matchupModifier) && matchupModifier > 0 ? matchupModifier : 1.0;
 
-    // Adjust boundaries and wickets based on advantage
+    const battingPower = strikerRating * safeModifier * (strikerForm / 100);
+    const bowlingPower = bowlerRating * (1 / safeModifier) * (bowlerForm / 100);
+
+    // Bounded advantage scale: -0.35 to +0.35
+    const advantage = Math.min(0.35, Math.max(-0.35, (battingPower - bowlingPower) / 100));
+
+    // Adjust boundaries and wickets smoothly based on bounded advantage
     if (advantage > 0) {
-      probabilities["4"] += (advantage * 0.1);
-      probabilities["6"] += (advantage * 0.05);
-      probabilities["WICKET"] = Math.max(1, probabilities["WICKET"] - (advantage * 0.05));
+      probabilities["4"] += (advantage * 12);
+      probabilities["6"] += (advantage * 8);
+      probabilities["WICKET"] = Math.max(0.6, probabilities["WICKET"] - (advantage * 3));
+      probabilities["0"] = Math.max(10, probabilities["0"] - (advantage * 10));
     } else {
-      probabilities["WICKET"] += (Math.abs(advantage) * 0.1);
-      probabilities["0"] += (Math.abs(advantage) * 0.1);
-      probabilities["4"] = Math.max(1, probabilities["4"] - (Math.abs(advantage) * 0.05));
-      probabilities["6"] = Math.max(0.1, probabilities["6"] - (Math.abs(advantage) * 0.05));
+      const absAdv = Math.abs(advantage);
+      probabilities["WICKET"] = Math.min(10, probabilities["WICKET"] + (absAdv * 4));
+      probabilities["0"] += (absAdv * 15);
+      probabilities["4"] = Math.max(1, probabilities["4"] - (absAdv * 6));
+      probabilities["6"] = Math.max(0.2, probabilities["6"] - (absAdv * 4));
     }
 
-    // Normalize probabilities
-    const total = Object.values(probabilities).reduce((sum, val) => sum + val, 0);
-    
+    // Normalize probabilities safely
+    const total = Object.values(probabilities).reduce((sum, val) => sum + (Number.isFinite(val) ? Math.max(0, val) : 0), 0);
+    if (total <= 0) return "0";
+
     // Roll the dice
     let roll = Math.random() * total;
     for (const [outcome, prob] of Object.entries(probabilities)) {
-      roll -= prob;
+      const p = Math.max(0, prob);
+      roll -= p;
       if (roll <= 0) {
         return outcome as DeliveryOutcome;
       }
     }
     
-    return "0"; // Fallback
+    return "0"; // Safe fallback
   }
 
-  private getBaseProbabilities(intent: BattingIntent): Record<string, number> {
+  private getBaseProbabilities(intent: BattingIntent, isTest: boolean, isODI: boolean): Record<string, number> {
+    const wicketFactor = isTest ? 0.6 : isODI ? 0.85 : 1.0;
+
     switch (intent) {
       case "DEFENSIVE":
-        return { "0": 70, "1": 15, "2": 5, "3": 1, "4": 4, "6": 0, "WICKET": 5, "WIDE": 2, "NO_BALL": 1 };
+        return { "0": 74, "1": 16, "2": 4, "3": 1, "4": 3, "6": 0, "WICKET": 1.4 * wicketFactor, "WIDE": 1.5, "NO_BALL": 0.8 };
       case "ROTATE":
-        return { "0": 40, "1": 45, "2": 10, "3": 2, "4": 5, "6": 1, "WICKET": 4, "WIDE": 2, "NO_BALL": 1 };
+        return { "0": 42, "1": 44, "2": 8, "3": 2, "4": 3, "6": 0.5, "WICKET": 2.0 * wicketFactor, "WIDE": 1.8, "NO_BALL": 0.8 };
       case "BALANCED":
-        return { "0": 30, "1": 40, "2": 10, "3": 2, "4": 12, "6": 3, "WICKET": 5, "WIDE": 2, "NO_BALL": 1 };
+        return { "0": 34, "1": 38, "2": 11, "3": 2, "4": 11, "6": 2.5, "WICKET": 2.8 * wicketFactor, "WIDE": 2.0, "NO_BALL": 1.0 };
       case "AGGRESSIVE":
-        return { "0": 20, "1": 30, "2": 10, "3": 2, "4": 20, "6": 10, "WICKET": 10, "WIDE": 3, "NO_BALL": 1 };
+        return { "0": 24, "1": 26, "2": 9, "3": 2, "4": 22, "6": 12, "WICKET": 4.8 * wicketFactor, "WIDE": 2.5, "NO_BALL": 1.0 };
       case "ALL_OUT_ATTACK":
-        return { "0": 15, "1": 15, "2": 5, "3": 1, "4": 25, "6": 20, "WICKET": 20, "WIDE": 4, "NO_BALL": 1 };
+        return { "0": 18, "1": 18, "2": 7, "3": 1, "4": 28, "6": 19, "WICKET": 7.5 * wicketFactor, "WIDE": 3.0, "NO_BALL": 1.2 };
     }
   }
 }

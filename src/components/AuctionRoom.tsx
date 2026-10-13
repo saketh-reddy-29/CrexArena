@@ -246,6 +246,22 @@ export default function AuctionRoom() {
   const soldRecord = auctionHistory.find(h => h.playerId === currentPlayer?.id);
   const currentJerseyFranchiseId = soldRecord && soldRecord.soldTo !== 'UNSOLD' ? soldRecord.soldTo : biddingTeamId;
 
+  if (isSimulating) {
+    return (
+      <div className="min-h-screen bg-zinc-950 flex items-center justify-center">
+        <div className="text-center">
+          <motion.div 
+            animate={{ rotate: 360 }}
+            transition={{ duration: 1.5, repeat: Infinity, ease: "linear" }}
+            className="w-16 h-16 border-2 border-white/10 border-t-white rounded-full mx-auto mb-6"
+          />
+          <h2 className="text-2xl font-black text-white mb-2">Simulating Auction</h2>
+          <p className="text-zinc-500 text-sm">AI franchises are bidding on all players...</p>
+        </div>
+      </div>
+    );
+  }
+
   const soldPlayers = useMemo(() => {
     return auctionHistory
       .filter(h => h.soldTo !== 'UNSOLD')
@@ -266,22 +282,6 @@ export default function AuctionRoom() {
       })
       .filter(Boolean) as Player[];
   }, [auctionHistory]);
-
-  if (isSimulating) {
-    return (
-      <div className="min-h-screen bg-zinc-950 flex items-center justify-center">
-        <div className="text-center">
-          <motion.div 
-            animate={{ rotate: 360 }}
-            transition={{ duration: 1.5, repeat: Infinity, ease: "linear" }}
-            className="w-16 h-16 border-2 border-white/10 border-t-white rounded-full mx-auto mb-6"
-          />
-          <h2 className="text-2xl font-black text-white mb-2">Simulating Auction</h2>
-          <p className="text-zinc-500 text-sm">AI franchises are bidding on all players...</p>
-        </div>
-      </div>
-    );
-  }
 
   return (
     <div className="min-h-screen bg-[#080808] text-white font-sans flex flex-col relative">

@@ -11,6 +11,31 @@ import { ProgressionEngine, PerformanceInput } from '../engine/players/progressi
 import { ArenaPlayerState, ArenaFormat } from '../engine/models/ArenaState';
 import { db } from '../engine/storage/Database';
 
+// Pre-flight cleanup: if localStorage contains bloated old store payload, strip heavy keys immediately
+try {
+  if (typeof window !== 'undefined' && window.localStorage) {
+    const existing = window.localStorage.getItem('cricket-arena-v3');
+    if (existing && existing.length > 300000) {
+      try {
+        const parsed = JSON.parse(existing);
+        if (parsed?.state) {
+          delete parsed.state.players;
+          delete parsed.state.arenaPlayerStates;
+          delete parsed.state.liveMatchState;
+          delete parsed.state.stateHistory;
+          delete parsed.state.auctionHistory;
+          delete parsed.state.bidLog;
+          window.localStorage.setItem('cricket-arena-v3', JSON.stringify(parsed));
+        }
+      } catch {
+        window.localStorage.removeItem('cricket-arena-v3');
+      }
+    }
+  }
+} catch (e) {
+  console.warn('[useGameStore] Storage pre-flight check error:', e);
+}
+
 export enum GameState {
   LANDING = 'landing',
   FORMAT_SELECTION = 'format_selection',
@@ -319,10 +344,10 @@ export const useGameStore = create<GameStore>()(
           db.savePlayerState(state).catch(console.error);
         });
 
-        set((prev) => ({
+        set({
           activeArenaId: arenaId,
-          arenaPlayerStates: { ...prev.arenaPlayerStates, ...initialMap }
-        }));
+          arenaPlayerStates: initialMap
+        });
       },
 
       resetGame: () => set({
@@ -816,6 +841,66 @@ export const useGameStore = create<GameStore>()(
     }),
     {
       name: 'cricket-arena-v3',
+      partialize: (state) => ({
+        activeArenaId: state.activeArenaId,
+        gameState: state.gameState,
+        selectedFranchiseId: state.selectedFranchiseId,
+        selectedFormat: state.selectedFormat,
+        selectedSquadIds: state.selectedSquadIds,
+        playingXIIds: state.playingXIIds,
+        fixtures: state.fixtures,
+        standings: state.standings,
+        currentMatchId: state.currentMatchId,
+        currentMatchToss: state.currentMatchToss,
+        playerSeasonStats: state.playerSeasonStats,
+        franchises: state.franchises,
+        activeTab: state.activeTab,
+      }),
+      storage: {
+        getItem: (name) => {
+          try {
+            const raw = localStorage.getItem(name);
+            return raw ? JSON.parse(raw) : null;
+          } catch {
+            return null;
+          }
+        },
+        setItem: (name, value) => {
+          try {
+            localStorage.setItem(name, JSON.stringify(value));
+          } catch (err) {
+            console.warn(`[useGameStore] Storage quota warning for ${name}:`, err);
+            try {
+              localStorage.removeItem('cricket-arena-v3');
+              const minimal = {
+                state: {
+                  activeArenaId: value?.state?.activeArenaId,
+                  gameState: value?.state?.gameState,
+                  selectedFormat: value?.state?.selectedFormat,
+                  selectedFranchiseId: value?.state?.selectedFranchiseId,
+                  selectedSquadIds: value?.state?.selectedSquadIds,
+                  playingXIIds: value?.state?.playingXIIds,
+                  currentMatchId: value?.state?.currentMatchId,
+                  activeTab: value?.state?.activeTab,
+                },
+                version: value?.version,
+              };
+              localStorage.setItem(name, JSON.stringify(minimal));
+            } catch (fallbackErr) {
+              console.error('[useGameStore] Emergency storage fallback failed:', fallbackErr);
+            }
+          }
+        },
+        removeItem: (name) => {
+          try {
+            localStorage.removeItem(name);
+          } catch {}
+        },
+      },
     }
   )
 );
+
+if (typeof window !== 'undefined') {
+  (window as any).__useGameStore = useGameStore;
+}

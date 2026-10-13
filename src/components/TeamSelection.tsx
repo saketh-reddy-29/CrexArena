@@ -26,11 +26,19 @@ export default function TeamSelection() {
         selectFranchise(selectedId);
         useGameStore.getState().setActiveTab('AUCTION');
         setGameState(GameState.ARENA_HUB);
-        const teamName = franchises.find(f => f.id === selectedId)?.name || 'My Franchise';
-        createArena(`My IPL Career - ${teamName}`, selectedFormat, selectedId);
+        try {
+          const teamName = franchises.find(f => f.id === selectedId)?.name || 'My Franchise';
+          createArena(`My IPL Career - ${teamName}`, selectedFormat, selectedId);
+        } catch (e) {
+          console.warn('[handleJoin] createArena error:', e);
+        }
       } else {
         const teamName = selectedIntlTeam?.name || 'My Team';
-        createArena(`My ${selectedFormat} Career - ${teamName}`, selectedFormat, selectedId);
+        try {
+          createArena(`My ${selectedFormat} Career - ${teamName}`, selectedFormat, selectedId);
+        } catch (e) {
+          console.warn('[handleJoin] createArena error:', e);
+        }
         selectFranchise(selectedId); 
         setGameState(GameState.BOARD_SELECTION);
       }
@@ -79,11 +87,15 @@ export default function TeamSelection() {
                   >
                       <div className="p-4 flex flex-col items-center">
                           <div className="w-16 h-16 mb-4 flex items-center justify-center bg-zinc-800/50 rounded-full p-2 border border-white/5">
-                              <img 
-                                src={getIntlTeamLogoUrl(team.shortName) || ''} 
-                                alt={team.name} 
-                                className="w-10 h-10 object-contain filter drop-shadow-md" 
-                              />
+                              {getIntlTeamLogoUrl(team.shortName) ? (
+                                <img 
+                                  src={getIntlTeamLogoUrl(team.shortName)!} 
+                                  alt={team.name} 
+                                  className="w-10 h-10 object-contain filter drop-shadow-md" 
+                                />
+                              ) : (
+                                <Globe className="w-8 h-8 text-white/40" />
+                              )}
                           </div>
                           <h3 className="text-sm sm:text-base font-bold mb-1 leading-tight text-center">{team.name}</h3>
                           <div className="flex items-center gap-1.5 text-[10px] text-white/50 font-semibold uppercase tracking-wider">

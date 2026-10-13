@@ -39,10 +39,14 @@ export const useArenaStore = create<ArenaStore>()(
         }));
 
         // Initialize fresh isolated player states in gameStore
-        const gameStore = useGameStore.getState();
-        gameStore.setArenaId(newArena.id);
-        gameStore.setFormat(format as ArenaFormat);
-        gameStore.initializeArenaPlayerStates(newArena.id, format as ArenaFormat);
+        try {
+          const gameStore = useGameStore.getState();
+          gameStore.setArenaId(newArena.id);
+          gameStore.setFormat(format as ArenaFormat);
+          gameStore.initializeArenaPlayerStates(newArena.id, format as ArenaFormat);
+        } catch (err) {
+          console.warn('[useArenaStore] Error initializing player states:', err);
+        }
 
         return newArena;
       },
@@ -71,6 +75,28 @@ export const useArenaStore = create<ArenaStore>()(
     }),
     {
       name: 'crex-arena-saves',
+      storage: {
+        getItem: (name) => {
+          try {
+            const raw = localStorage.getItem(name);
+            return raw ? JSON.parse(raw) : null;
+          } catch {
+            return null;
+          }
+        },
+        setItem: (name, value) => {
+          try {
+            localStorage.setItem(name, JSON.stringify(value));
+          } catch (err) {
+            console.warn('[useArenaStore] Storage quota warning:', err);
+          }
+        },
+        removeItem: (name) => {
+          try {
+            localStorage.removeItem(name);
+          } catch {}
+        },
+      },
     }
   )
 );

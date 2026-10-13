@@ -1,68 +1,86 @@
 import React, { useState, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useGameStore, GameState } from '../stores/useGameStore';
-import { Shield, ChevronRight, User, Users, AlertCircle, ArrowLeft, Star, Target, Sparkles, RotateCcw, Search, Check } from 'lucide-react';
+import { Shield, ChevronRight, User, Users, AlertCircle, ArrowLeft, Star, Target, Sparkles } from 'lucide-react';
 import { cn } from '../lib/utils';
 import JerseyPlayerImage from './JerseyPlayerImage';
 import { getIntlTeamLogoUrl } from '../data/crexIntlTeams';
+import { getPlayerRating } from '../lib/ratingEngine';
 
 export default function BoardSelection() {
-  const { players, selectedFranchiseId, franchises, setGameState, setSelectedSquadIds, goBack, setViewedPlayer } = useGameStore();
+  const { players, selectedFranchiseId, franchises, setGameState, setSelectedSquadIds, goBack, setViewedPlayer, selectedFormat, getArenaPlayerState, playerSeasonStats } = useGameStore();
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
-  const [roleFilter, setRoleFilter] = useState<string>('All');
-  const [searchQuery, setSearchQuery] = useState<string>('');
 
   const team = franchises.find(f => f.id === selectedFranchiseId);
   const availablePlayers = players.filter(p => p.intendedTeamId === selectedFranchiseId).sort((a, b) => b.rating - a.rating);
 
-  const filteredPlayers = availablePlayers.filter(p => {
-    const matchesRole = roleFilter === 'All' || p.role === roleFilter;
-    const matchesSearch = !searchQuery || p.name.toLowerCase().includes(searchQuery.toLowerCase());
-    return matchesRole && matchesSearch;
-  });
+  // Check whether player has played in previous matches
+  const getPlayerPlayStatus = (playerId: string) => {
+    const activeFormat = selectedFormat || 'ODI';
+    const playerState = getArenaPlayerState(playerId, activeFormat);
+    const seasonStats = playerSeasonStats?.[playerId];
+    
+    const hasPlayed = Boolean(
+      (playerState && playerState.hasRecentMatches && playerState.recentMatchCount > 0 && playerState.recentForm > 0) ||
+      (seasonStats && seasonStats.matches > 0) ||
+      (playerState && playerState.recentMatches && playerState.recentMatches.length > 0)
+    );
 
-  // Toggle selection
-  const togglePlayer = (id: string) => {
-    setSelectedIds(prev => {
-      if (prev.includes(id)) return prev.filter(x => x !== id);
-      if (prev.length >= 15) return prev;
-      return [...prev, id];
-    });
+    const formValue = playerState?.recentForm || 0;
+    return { hasPlayed, formValue };
   };
 
-  // Smart Auto-Selection for 15-man Balanced National Squad
-  const handleAutoSelect = () => {
-    const rankPlayer = (p: typeof availablePlayers[0]) => p.rating * 1.5 + (p.form || 80) * 0.5;
+  // Auto Pick 15-Man Squad optimized for format (ODI / T20 / TEST)
+  const autoPickSquad = () => {
+    const activeFormat = selectedFormat || 'ODI';
+    const ratePlayer = (p: typeof players[0]) => getPlayerRating(p, activeFormat);
 
-    const wk = availablePlayers.filter(p => p.role === 'Wicketkeeper').sort((a, b) => rankPlayer(b) - rankPlayer(a));
-    const batters = availablePlayers.filter(p => p.role === 'Batsman').sort((a, b) => rankPlayer(b) - rankPlayer(a));
-    const allrounders = availablePlayers.filter(p => p.role === 'All-rounder').sort((a, b) => rankPlayer(b) - rankPlayer(a));
-    const bowlers = availablePlayers.filter(p => p.role === 'Bowler').sort((a, b) => rankPlayer(b) - rankPlayer(a));
+    const pool = [...availablePlayers].sort((a, b) => ratePlayer(b) - ratePlayer(a));
+
+    const keepers = pool.filter(p => p.role === 'Wicketkeeper');
+    const batters = pool.filter(p => p.role === 'Batsman');
+    const allrounders = pool.filter(p => p.role === 'All-rounder');
+    const bowlers = pool.filter(p => p.role === 'Bowler');
 
     const selected: string[] = [];
 
-    // Target perfect 100% balance: 2 WK, 5 Batters, 3 All-rounders, 5 Bowlers = 15
-    wk.slice(0, 2).forEach(p => selected.push(p.id));
-    batters.slice(0, 5).forEach(p => selected.push(p.id));
-    allrounders.slice(0, 3).forEach(p => selected.push(p.id));
-    bowlers.slice(0, 5).forEach(p => selected.push(p.id));
+    // Target composition for 15-man squad:
+    // 2 Wicketkeepers, 5 Batters, 3 All-rounders, 5 Bowlers = 15
+    selected.push(...keepers.slice(0, 2).map(p => p.id));
+    selected.push(...batters.filter(p => !selected.includes(p.id)).slice(0, 5).map(p => p.id));
+    selected.push(...allrounders.filter(p => !selected.includes(p.id)).slice(0, 3).map(p => p.id));
+    selected.push(...bowlers.filter(p => !selected.includes(p.id)).slice(0, 5).map(p => p.id));
 
-    // Fill any missing slots with highest-ranked unpicked players
+    // Fallback: fill remaining spots up to 15 with top rated players
     if (selected.length < 15) {
-      const remaining = availablePlayers
-        .filter(p => !selected.includes(p.id))
-        .sort((a, b) => rankPlayer(b) - rankPlayer(a));
-      for (const p of remaining) {
+      for (const p of pool) {
         if (selected.length >= 15) break;
-        selected.push(p.id);
+        if (!selected.includes(p.id)) {
+          selected.push(p.id);
+        }
       }
     }
 
     setSelectedIds(selected.slice(0, 15));
   };
 
-  const handleClearSelection = () => {
-    setSelectedIds([]);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  // Toggle selection
+  const togglePlayer = (id: string) => {
+    setSelectedIds(prev => {
+      if (prev.includes(id)) {
+        setToastMessage(null);
+        return prev.filter(x => x !== id);
+      }
+      if (prev.length >= 15) {
+        setToastMessage('Squad limit reached (15/15). Deselect a player first to swap.');
+        setTimeout(() => setToastMessage(null), 3000);
+        return prev;
+      }
+      setToastMessage(null);
+      return [...prev, id];
+    });
   };
 
   const getFormMeter = (form: number) => {
@@ -153,7 +171,7 @@ export default function BoardSelection() {
       </div>
 
       <header className="sticky top-0 z-50 bg-zinc-950/80 backdrop-blur-xl border-b border-zinc-800/60 px-4 py-3 sm:px-6">
-          <div className="max-w-7xl mx-auto flex items-center justify-between gap-2 flex-wrap">
+          <div className="max-w-7xl mx-auto flex items-center justify-between">
               <div className="flex items-center gap-4">
                   <button 
                     onClick={goBack}
@@ -162,36 +180,17 @@ export default function BoardSelection() {
                     <ArrowLeft className="w-4 h-4" />
                   </button>
                   <div className="flex items-center gap-3">
-                    <img src={team ? getIntlTeamLogoUrl(team.shortName) || '' : ''} alt="logo" className="w-8 h-8 object-contain" />
+                    {team && getIntlTeamLogoUrl(team.shortName) ? (
+                      <img src={getIntlTeamLogoUrl(team.shortName)!} alt="logo" className="w-8 h-8 object-contain" />
+                    ) : null}
                     <div>
                         <div className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider mb-0.5">{team?.name} Cricket Board</div>
                         <h1 className="text-lg sm:text-xl font-bold tracking-tight">Select 15-Man Squad</h1>
                     </div>
                   </div>
               </div>
-              <div className="flex items-center gap-2 sm:gap-3">
-                  {/* Auto Select Button */}
-                  <button
-                    onClick={handleAutoSelect}
-                    className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-amber-500 via-purple-500 to-indigo-500 hover:from-amber-400 hover:to-indigo-400 text-white font-black text-xs shadow-lg shadow-purple-500/20 active:scale-95 transition-all"
-                  >
-                    <Sparkles className="w-3.5 h-3.5 text-amber-200 animate-spin" />
-                    <span>Auto Select 15</span>
-                  </button>
-
-                  {/* Reset / Clear Button */}
-                  {selectedIds.length > 0 && (
-                    <button
-                      onClick={handleClearSelection}
-                      className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-white/5 hover:bg-white/10 text-zinc-400 hover:text-white text-xs font-bold transition-all border border-white/5"
-                      title="Clear Selection"
-                    >
-                      <RotateCcw className="w-3.5 h-3.5" />
-                      <span className="hidden sm:inline">Reset</span>
-                    </button>
-                  )}
-
-                  <div className="flex flex-col items-end pl-2 border-l border-white/10">
+              <div className="flex items-center gap-3">
+                  <div className="flex flex-col items-end mr-1">
                       <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider mb-0.5">Squad Status</span>
                       <span className={cn(
                         "text-lg font-black font-mono",
@@ -200,55 +199,50 @@ export default function BoardSelection() {
                         {selectedIds.length}/15
                       </span>
                   </div>
+                  <button
+                    disabled={selectedIds.length !== 15}
+                    onClick={handleProceed}
+                    className="flex items-center gap-1.5 px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-xl font-bold text-xs transition-all disabled:opacity-30 disabled:pointer-events-none active:scale-95 shadow-md shadow-blue-600/20"
+                  >
+                    Confirm Squad
+                    <ChevronRight className="w-3.5 h-3.5" />
+                  </button>
               </div>
           </div>
       </header>
 
-      <div className="flex-1 max-w-7xl mx-auto w-full flex flex-col lg:flex-row gap-6 p-4 sm:p-6 overflow-hidden">
+      <div className="flex-1 max-w-7xl mx-auto w-full flex flex-col lg:flex-row gap-6 p-4 sm:p-6 lg:overflow-hidden overflow-y-auto">
         
         {/* Left: Player Pool Grid */}
         <div className="flex-1 flex flex-col min-h-0 overflow-y-auto custom-scrollbar pr-2 pb-24 lg:pb-0">
-          <div className="sticky top-0 bg-zinc-950/95 py-2 z-10 backdrop-blur-md space-y-2.5 mb-3">
-            <div className="flex items-center justify-between gap-2 flex-wrap">
-              <h2 className="text-sm font-bold text-zinc-300 uppercase tracking-wider">
-                Available Players ({filteredPlayers.length})
-              </h2>
-
-              {/* Search Bar */}
-              <div className="relative min-w-[180px]">
-                <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-400" />
-                <input
-                  type="text"
-                  placeholder="Search player..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="w-full bg-zinc-900 border border-zinc-800 rounded-lg pl-8 pr-3 py-1 text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-blue-500"
-                />
-              </div>
-            </div>
-
-            {/* Role Filter Tabs */}
-            <div className="flex items-center gap-1.5 overflow-x-auto custom-scrollbar pb-1">
-              {['All', 'Batsman', 'Wicketkeeper', 'All-rounder', 'Bowler'].map((role) => (
+          <div className="flex items-center justify-between mb-4 sticky top-0 bg-zinc-950/90 py-2 z-10 backdrop-blur-sm gap-2">
+            <h2 className="text-sm font-bold text-zinc-400 uppercase tracking-wider">
+              Available Players ({availablePlayers.length})
+            </h2>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={autoPickSquad}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold transition-all shadow-md shadow-blue-600/20 active:scale-95 cursor-pointer"
+              >
+                <Sparkles className="w-3.5 h-3.5" />
+                Auto Pick {selectedFormat ? `${selectedFormat} 15` : '15'}
+              </button>
+              {selectedIds.length > 0 && (
                 <button
-                  key={role}
-                  onClick={() => setRoleFilter(role)}
-                  className={cn(
-                    "px-3 py-1 rounded-full text-[11px] font-bold transition-all shrink-0",
-                    roleFilter === role
-                      ? "bg-blue-600 text-white shadow-sm"
-                      : "bg-zinc-900 text-zinc-400 hover:text-white border border-zinc-800"
-                  )}
+                  onClick={() => setSelectedIds([])}
+                  className="px-2.5 py-1.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-white text-xs font-semibold transition-all cursor-pointer"
                 >
-                  {role === 'All' ? 'All Roles' : role}
+                  Clear
                 </button>
-              ))}
+              )}
             </div>
           </div>
-
           <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-3">
-            {filteredPlayers.map(player => {
+            {availablePlayers.map(player => {
               const isSelected = selectedIds.includes(player.id);
+              const { hasPlayed, formValue } = getPlayerPlayStatus(player.id);
+              const displayRating = selectedFormat ? getPlayerRating(player, selectedFormat) : player.rating;
+
               return (
                 <div 
                   key={player.id}
@@ -262,8 +256,8 @@ export default function BoardSelection() {
                   )}
                 >
                   {isSelected && (
-                      <div className="absolute top-2 right-2 w-5 h-5 rounded-full bg-blue-500 flex items-center justify-center z-10 shadow-md">
-                          <Check className="w-3.5 h-3.5 text-white stroke-[3]" />
+                      <div className="absolute top-2 right-2 w-5 h-5 rounded-full bg-blue-500 flex items-center justify-center z-10">
+                          <Shield className="w-3 h-3 text-white fill-current" />
                       </div>
                   )}
                   
@@ -281,17 +275,26 @@ export default function BoardSelection() {
                         <span>{player.role}</span>
                     </div>
                     
-                    <div className="flex items-center justify-between bg-zinc-950/50 rounded-lg p-2 border border-white/5">
-                        <div className="flex flex-col items-center">
-                            <span className="text-[9px] text-zinc-500 uppercase">Rating</span>
-                            <span className="text-xs font-black text-yellow-500">{player.rating}</span>
-                        </div>
-                        <div className="w-[1px] h-4 bg-white/10" />
-                        <div className="flex flex-col items-center">
-                            <span className="text-[9px] text-zinc-500 uppercase" title={`Form: ${Math.round(player.form || 85)}`}>Form</span>
-                            <span className="text-[8px] tracking-widest text-orange-500">{getFormMeter(player.form || 85)}</span>
-                        </div>
-                    </div>
+                    {hasPlayed ? (
+                      <div className="flex items-center justify-between bg-zinc-950/50 rounded-lg p-2 border border-white/5">
+                          <div className="flex flex-col items-center flex-1">
+                              <span className="text-[9px] text-zinc-500 uppercase">Rating</span>
+                              <span className="text-xs font-black text-yellow-500">{displayRating}</span>
+                          </div>
+                          <div className="w-[1px] h-4 bg-white/10" />
+                          <div className="flex flex-col items-center flex-1">
+                              <span className="text-[9px] text-zinc-500 uppercase" title={`Form: ${Math.round(formValue)}`}>Form</span>
+                              <span className="text-[8px] tracking-widest text-orange-500">{getFormMeter(formValue)}</span>
+                          </div>
+                      </div>
+                    ) : (
+                      <div className="flex items-center justify-center bg-zinc-950/50 rounded-lg p-2 border border-white/5">
+                          <div className="flex items-center gap-2">
+                              <span className="text-[9px] text-zinc-500 uppercase font-semibold">Rating</span>
+                              <span className="text-xs font-black text-yellow-500">{displayRating}</span>
+                          </div>
+                      </div>
+                    )}
                   </div>
                 </div>
               );
@@ -301,20 +304,10 @@ export default function BoardSelection() {
 
         {/* Right: AI Squad Advisor */}
         <div className="w-full lg:w-96 shrink-0 flex flex-col gap-4 relative z-20">
-          <div className="bg-zinc-900 border border-zinc-800 rounded-3xl p-6 sticky top-4 shadow-2xl">
-            <div className="flex items-center justify-between mb-6">
-              <div className="flex items-center gap-2">
+          <div className="bg-zinc-900 border border-zinc-800 rounded-3xl p-6 sticky top-4">
+            <div className="flex items-center gap-2 mb-6">
                 <Target className="w-5 h-5 text-blue-400" />
                 <h2 className="text-lg font-black tracking-tight">AI Squad Advisor</h2>
-              </div>
-              <button
-                onClick={handleAutoSelect}
-                className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-amber-400/10 hover:bg-amber-400/20 text-amber-300 border border-amber-400/30 text-[10px] font-black uppercase transition-all"
-                title="Automatically select 15-man balanced squad"
-              >
-                <Sparkles className="w-3 h-3 text-amber-300" />
-                <span>Auto Pick</span>
-              </button>
             </div>
 
             {/* Overall Rating & Balance */}
@@ -374,16 +367,25 @@ export default function BoardSelection() {
                 </h4>
                 <p className="text-xs opacity-80 leading-relaxed font-medium">
                   {selectedIds.length < 15 
-                    ? "Keep an eye on the composition meters or click 'Auto Select' for an instant 100% balanced squad." 
+                    ? "Keep an eye on the composition meters to ensure a balanced squad for the arena." 
                     : stats.recommendation}
                 </p>
               </div>
             </div>
 
             <button
+              type="button"
+              onClick={autoPickSquad}
+              className="w-full mt-6 mb-3 flex items-center justify-center gap-2 px-4 py-3.5 bg-zinc-800 hover:bg-zinc-700/80 border border-zinc-700/80 hover:border-zinc-600 text-white rounded-xl font-bold text-xs uppercase tracking-wider transition-all active:scale-95 cursor-pointer shadow-sm"
+            >
+              <Sparkles className="w-4 h-4 text-amber-400" />
+              Auto Pick Best 15 for {selectedFormat || 'Squad'}
+            </button>
+
+            <button
               disabled={selectedIds.length !== 15}
               onClick={handleProceed}
-              className="w-full mt-6 flex items-center justify-center gap-2 px-6 py-4 bg-blue-600 hover:bg-blue-500 text-white rounded-xl font-bold transition-all disabled:opacity-30 disabled:pointer-events-none active:scale-95 shadow-lg shadow-blue-600/20"
+              className="w-full flex items-center justify-center gap-2 px-6 py-4 bg-blue-600 hover:bg-blue-500 text-white rounded-xl font-bold transition-all disabled:opacity-30 disabled:pointer-events-none active:scale-95 shadow-lg shadow-blue-600/20"
             >
               Confirm Squad
               <ChevronRight className="w-4 h-4" />
@@ -391,6 +393,49 @@ export default function BoardSelection() {
           </div>
         </div>
 
+      </div>
+
+      {/* Floating Squad Toast Notification */}
+      {toastMessage && (
+        <div className="fixed top-16 left-1/2 -translate-x-1/2 z-50 bg-amber-500/90 backdrop-blur-md text-zinc-950 font-bold px-4 py-2 rounded-full shadow-lg text-xs flex items-center gap-2 animate-bounce">
+          <AlertCircle className="w-4 h-4 shrink-0" />
+          <span>{toastMessage}</span>
+        </div>
+      )}
+
+      {/* Sticky Bottom Bar for all viewports */}
+      <div className="sticky bottom-0 z-40 bg-zinc-950/95 backdrop-blur-md border-t border-zinc-800/80 px-4 py-3 sm:px-6 safe-bottom">
+        <div className="max-w-7xl mx-auto flex items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <span className={cn(
+              "text-lg font-black font-mono",
+              selectedIds.length === 15 ? "text-emerald-400" : "text-white"
+            )}>
+              {selectedIds.length}/15
+            </span>
+            <span className="text-xs text-zinc-400 font-medium hidden sm:inline">
+              {selectedIds.length === 15 ? 'Squad complete! Ready to confirm.' : `Select ${15 - selectedIds.length} more players`}
+            </span>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={autoPickSquad}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs font-bold transition-all active:scale-95 cursor-pointer"
+            >
+              <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+              Auto Pick {selectedFormat ? `${selectedFormat} 15` : '15'}
+            </button>
+            <button
+              disabled={selectedIds.length !== 15}
+              onClick={handleProceed}
+              className="flex items-center gap-2 px-6 py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-xl font-bold text-sm transition-all disabled:opacity-30 disabled:pointer-events-none active:scale-95 shadow-lg shadow-blue-600/20 cursor-pointer"
+            >
+              Confirm Squad
+              <ChevronRight className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   );

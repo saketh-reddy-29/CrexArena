@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, useRef } from 'react';
 import { motion } from 'framer-motion';
 import {
   ArrowLeft, Trophy
@@ -9,9 +9,13 @@ import { MatchEngine } from '../lib/matchEngine';
 import { getPlayerImage, handlePlayerImageError } from '../lib/playerImages';
 import { MatchStatus, PitchType, WeatherCondition, type InningsData, type PlayerMatchStats, DRSResult } from '../types/match';
 import { getIntlTeamLogoUrl } from '../data/crexIntlTeams';
-import CricketActionVisualizer, { BowlingTactic, BOWLING_TACTICS_CONFIG } from './CricketActionVisualizer';
+import CricketActionVisualizer from './CricketActionVisualizer';
 import { ArenaFormat } from '../engine/models/ArenaState';
-import { isEligibleBowler } from '../engine/rules/bowlerEligibility';
+import { DeliveryLifecycle, DeliveryResult } from '../types/delivery';
+import { DeliveryResultFactory } from '../engine/core/DeliveryResultFactory';
+import { AICaptainEngine, CaptainDecision } from '../engine/ai/AICaptainEngine';
+import { BatterDecisionEngine, BatterInningsState, BattingIntent } from '../engine/ai/BatterDecisionEngine';
+import { BowlingPlanEngine, DetailedBowlingPlan } from '../engine/ai/BowlingPlanEngine';
 
 const IPL_TEAM_LOGOS: Record<string, string> = {
   MI:   'https://cricketvectors.akamaized.net/Teams/F.png',
@@ -283,12 +287,20 @@ export default function LiveMatchCenter() {
   const [showImpactModal, setShowImpactModal] = useState(false);
   const [impactOutgoingId, setImpactOutgoingId] = useState<string | null>(null);
   const [impactIncomingId, setImpactIncomingId] = useState<string | null>(null);
-  const [lastVisualizedBall, setLastVisualizedBall] = useState<any>(null);
-  const [visualizerBallCount, setVisualizerBallCount] = useState<number>(0);
-  const [selectedBowlingTactic, setSelectedBowlingTactic] = useState<BowlingTactic>('OUTSWING');
-  const [playbackSpeed, setPlaybackSpeed] = useState<1 | 1.5 | 2>(1);
-  const [isDeliveryAnimating, setIsDeliveryAnimating] = useState<boolean>(false);
-  const pendingCommitRef = useRef<(() => void) | null>(null);
+  const [deliveryLifecycle, setDeliveryLifecycle] = useState<DeliveryLifecycle>('READY');
+  const [currentDeliveryResult, setCurrentDeliveryResult] = useState<DeliveryResult | null>(null);
+  const committedDeliveryIdRef = useRef<string | null>(null);
+  const completedDeliveryIdRef = useRef<string | null>(null);
+  const [isBallAnimating, setIsBallAnimating] = useState(false);
+  const [isFieldChanging, setIsFieldChanging] = useState(false);
+
+  // AI Captain & Tactical Controls
+  const [userTeamControlMode, setUserTeamControlMode] = useState<'MANUAL' | 'AI_RECOMMENDATIONS' | 'FULL_AUTO'>('AI_RECOMMENDATIONS');
+  const [userBattingIntent, setUserBattingIntent] = useState<BattingIntent>('NORMAL');
+  const [userBowlingPlan, setUserBowlingPlan] = useState<DetailedBowlingPlan | null>(null);
+  const [aiCaptainRecommendation, setAiCaptainRecommendation] = useState<CaptainDecision | null>(null);
+  const [opponentTacticalNotice, setOpponentTacticalNotice] = useState<string | null>(null);
+  const [batterStates, setBatterStates] = useState<Record<string, BatterInningsState>>({});
 
   const handleImpactSubstitution = () => {
     if (!impactIncomingId || !impactOutgoingId) return;
@@ -336,7 +348,6 @@ export default function LiveMatchCenter() {
   const secondBattingTeamId = firstBattingTeamId === team1.id ? team2.id : team1.id;
   const myTeamId = selectedFranchiseId || '';
   const maxBalls = selectedFormat === 'ODI' ? 300 : selectedFormat === 'TEST' ? 9999 : 120; // balls per innings
-  const maxOvers = selectedFormat === 'ODI' ? 50 : selectedFormat === 'TEST' ? 90 : 20; // overs per innings
 
   // Use locked Playing XI (11 players). Falls back to franchise.squad for AI/IPL teams.
   const selectedXiPlayers = useMemo(
@@ -372,15 +383,21 @@ export default function LiveMatchCenter() {
 
   const getAvailableBowlers = useCallback((score: InningsState | undefined, squad: Player[], previousOverBowlerId?: string | null) => {
     const maxBalls = MatchEngine.getMaxOversPerBowler(selectedFormat || 'T20') * 6;
-    const eligibleSquad = squad.filter(isEligibleBowler);
-    const bowlerOrder = MatchEngine.getBowlerOrder(eligibleSquad.map((player) => player.id), players);
+    const bowlerOrder = MatchEngine.getBowlerOrder(squad.map((player) => player.id), players);
     
-    // Strict rule: Only valid bowlers in the playing XI can bowl.
-    const top6 = bowlerOrder.slice(0, 6);
+    // Strict rule: Exclude pure batters and wicketkeepers from bowling
+    const eligibleBowlers = bowlerOrder.filter(p => p.role !== 'Batsman' && p.role !== 'Wicketkeeper');
+    
+    // Strict rule: Only the top 6 bowlers in the playing XI can bowl.
+    const top6 = (eligibleBowlers.length >= 5 ? eligibleBowlers : bowlerOrder).slice(0, 6);
+    
     const available = top6.filter((player) => (score?.bowlers[player.id]?.balls || 0) < maxBalls && player.id !== previousOverBowlerId);
     
+    // Fallback if somehow all top 6 are exhausted (should not happen normally)
     if (available.length === 0) {
-        return bowlerOrder.filter((player) => (score?.bowlers[player.id]?.balls || 0) < maxBalls && player.id !== previousOverBowlerId);
+      return (eligibleBowlers.length > 0 ? eligibleBowlers : bowlerOrder).filter(
+        (player) => (score?.bowlers[player.id]?.balls || 0) < maxBalls && player.id !== previousOverBowlerId
+      );
     }
     return available;
   }, [players, selectedFormat]);
@@ -388,10 +405,7 @@ export default function LiveMatchCenter() {
   const chooseAiBowler = useCallback((score: InningsState | undefined, squad: Player[], previousOverBowlerId?: string | null) => {
     const over = Math.floor((score?.balls || 0) / 6);
     const candidates = getAvailableBowlers(score, squad, previousOverBowlerId);
-    if (candidates.length === 0) {
-      const eligible = squad.filter(isEligibleBowler);
-      return eligible.find((player) => player.id !== previousOverBowlerId) || eligible[0] || null;
-    }
+    if (candidates.length === 0) return squad.find((player) => player.id !== previousOverBowlerId) || squad[0];
 
     const oversBowled = (p: Player) => Math.floor((score?.bowlers[p.id]?.balls || 0) / 6);
     const isSpinner = (p: Player) => {
@@ -452,7 +466,7 @@ export default function LiveMatchCenter() {
   useEffect(() => {
     if (!inning || !pending) return;
     if (pending === 'openers') {
-      if (isMyTeamBatting) return;
+      if (isMyTeamBatting && !autoPlay) return;
       setStrikerId(battingSquad[0]?.id || null);
       setNonStrikerId(battingSquad[1]?.id || null);
       setBattingCursor(2);
@@ -460,7 +474,7 @@ export default function LiveMatchCenter() {
       return;
     }
     if (pending === 'batter') {
-      if (isMyTeamBatting) return;
+      if (isMyTeamBatting && !autoPlay) return;
       const next = getAvailableBatters(inning, battingSquad, strikerId, nonStrikerId)[0] || battingSquad[battingCursor];
       if (next) {
         if (pendingBatterEnd === 'non-striker') setNonStrikerId(next.id);
@@ -472,46 +486,450 @@ export default function LiveMatchCenter() {
       return;
     }
     if (pending === 'bowler') {
-      if (isMyTeamBowling) return;
-      setBowlerId(chooseAiBowler(inning, bowlingSquad, lastOverBowlerId)?.id || null);
-      setPending(null);
-    }
-  }, [pending, inning, battingSquad, bowlingSquad, battingCursor, isMyTeamBatting, isMyTeamBowling, strikerId, nonStrikerId, getAvailableBatters, chooseAiBowler, queueBowlerAfterBatter, lastOverBowlerId, pendingBatterEnd, autoPlay]);
+      const availBowlers = getAvailableBowlers(inning, bowlingSquad, lastOverBowlerId);
+      const aiDecision = AICaptainEngine.decideCaptainAction({
+        format: (selectedFormat as ArenaFormat) || 'T20',
+        teamId: bowlingTeam.id,
+        inningsState: {
+          score: inning.runs,
+          wickets: inning.wickets,
+          balls: inning.balls,
+          recentBalls: inning.recentBalls,
+        },
+        availableBowlers: availBowlers,
+        previousOverBowlerId: lastOverBowlerId,
+        striker: striker || null,
+        nonStriker: nonStriker || null,
+        pitchState: { pitchType: pitch },
+        decisionTrigger: 'OVER_END',
+      });
 
-  const handleAnimationComplete = useCallback(() => {
-    if (pendingCommitRef.current) {
-      pendingCommitRef.current();
-      pendingCommitRef.current = null;
+      if (isMyTeamBowling) {
+        if (userTeamControlMode === 'FULL_AUTO' || autoPlay) {
+          const chosenId = aiDecision.selectedBowlerId || chooseAiBowler(inning, bowlingSquad, lastOverBowlerId)?.id || null;
+          setBowlerId(chosenId);
+          if (aiDecision.bowlingPlan) {
+            setUserBowlingPlan(aiDecision.bowlingPlan as DetailedBowlingPlan);
+          }
+          setPending(null);
+        } else {
+          // Manual or AI recommendations: provide recommendation for player to review
+          setAiCaptainRecommendation(aiDecision);
+          return;
+        }
+      } else {
+        // Opponent is bowling: autonomous intelligent decision
+        const chosenId = aiDecision.selectedBowlerId || chooseAiBowler(inning, bowlingSquad, lastOverBowlerId)?.id || null;
+        setBowlerId(chosenId);
+        setOpponentTacticalNotice(`${bowlingTeam.name} Captain: ${aiDecision.reasoning}`);
+        setPending(null);
+      }
     }
-    setIsDeliveryAnimating(false);
-  }, []);
+  }, [pending, inning, battingSquad, bowlingSquad, battingCursor, isMyTeamBatting, isMyTeamBowling, strikerId, nonStrikerId, getAvailableBatters, getAvailableBowlers, chooseAiBowler, queueBowlerAfterBatter, lastOverBowlerId, pendingBatterEnd, autoPlay, selectedFormat, bowlingTeam, pitch, userTeamControlMode, striker, nonStriker]);
+
+  const handleContactReached = useCallback(() => {
+    if (!currentDeliveryResult) return;
+    if (committedDeliveryIdRef.current === currentDeliveryResult.id) return;
+    committedDeliveryIdRef.current = currentDeliveryResult.id;
+
+    setDeliveryLifecycle('DELIVERY_OUTCOME');
+    setDeliveryLifecycle('SCORE_UPDATE');
+
+    const ball = currentDeliveryResult;
+    const isLegalDelivery = ball.legalBall;
+    const ballRuns = ball.totalRuns;
+    const batterRuns = ball.batterRuns;
+    const wicket = ball.wicket;
+
+    setInnings((previous) => {
+      const next = [...previous];
+      const current = next[inningNo - 1];
+      if (!current) return next;
+
+      const nextBall = current.balls + (isLegalDelivery ? 1 : 0);
+      const ballLabel = `${Math.floor(current.balls / 6)}.${(current.balls % 6) + 1}`;
+      const overIndex = Math.floor(current.balls / 6);
+      const outcomeText = wicket ? 'W' : ball.extraType ? (ball.extraType === 'No Ball' ? 'Nb' : 'Wd') : String(ballRuns);
+      const nextRuns = current.runs + ballRuns;
+      const wicketNumber = current.wickets + (wicket ? 1 : 0);
+      const wicketStatus = `${ball.wicketType || 'Out'} b ${ball.bowlerName}`;
+      const tone: CommentaryLine['tone'] = wicket ? 'wicket' : ballRuns === 6 ? 'six' : ballRuns === 4 ? 'four' : ballRuns === 0 ? 'dot' : 'info';
+
+      const upd = {
+        ...current,
+        batters: { ...current.batters },
+        bowlers: { ...current.bowlers },
+        deliveries: [...current.deliveries],
+        extras: { ...current.extras },
+        commentary: [...current.commentary],
+        recentBalls: [...current.recentBalls],
+        runRateHistory: [...current.runRateHistory],
+        wicketLog: [...current.wicketLog],
+      };
+
+      const sLine = upd.batters[ball.strikerId] || { balls: 0, dots: 0, fours: 0, out: false, runs: 0, sixes: 0, status: 'not out' };
+      const bLine = upd.bowlers[ball.bowlerId] || { balls: 0, dots: 0, runs: 0, wickets: 0 };
+
+      upd.batters[ball.strikerId] = {
+        ...sLine,
+        balls: sLine.balls + (isLegalDelivery ? 1 : 0),
+        ballsSinceBoundary: ballRuns === 4 || ballRuns === 6 ? 0 : (sLine.ballsSinceBoundary || 0) + (isLegalDelivery ? 1 : 0),
+        consecutiveDots: ballRuns === 0 && !ball.extraType && !wicket ? (sLine.consecutiveDots || 0) + 1 : 0,
+        dots: (sLine.dots || 0) + (ballRuns === 0 && !ball.extraType && !wicket ? 1 : 0),
+        fours: sLine.fours + (ballRuns === 4 && !ball.extraType ? 1 : 0),
+        momentum: Math.max(-18, Math.min(24, (sLine.momentum || 0) + (ballRuns === 6 ? 8 : ballRuns === 4 ? 5 : ballRuns === 0 ? -2 : 1) - (wicket ? 8 : 0))),
+        runs: sLine.runs + batterRuns,
+        sixes: sLine.sixes + (ballRuns === 6 && !ball.extraType ? 1 : 0),
+        out: wicket,
+        status: wicket ? wicketStatus : sLine.status,
+        wicketBurst: Math.max(0, (sLine.wicketBurst || 0) + (wicket ? 1 : -0.2)),
+      };
+
+      // Credit wicket to bowler ONLY if not Run Out or Timed Out
+      const bowlerGetsCredit = wicket && ball.wicketType !== 'Run Out' && ball.wicketType !== 'Timed Out';
+
+      const overEnded = isLegalDelivery && nextBall % 6 === 0;
+
+      upd.bowlers[ball.bowlerId] = {
+        balls: bLine.balls + (isLegalDelivery ? 1 : 0),
+        dots: (bLine.dots || 0) + (ballRuns === 0 && !ball.extraType ? 1 : 0),
+        lastOverRuns: ((bLine.lastOverRuns || 0) + ballRuns) * (nextBall > 0 && nextBall % 6 === 0 ? 0 : 1),
+        momentum: Math.max(-16, Math.min(24, (bLine.momentum || 0) + (wicket ? 10 : ballRuns === 0 ? 2 : ballRuns >= 4 ? -3 : 0))),
+        runs: bLine.runs + ballRuns,
+        wickets: bLine.wickets + (bowlerGetsCredit ? 1 : 0),
+        bouncersThisOver: overEnded ? 0 : (bLine.bouncersThisOver || 0) + (!wicket && isLegalDelivery && ballRuns === 0 && Math.random() < 0.15 ? 1 : 0),
+      };
+
+      upd.isFreeHitPending = ball.triggeredFreeHit ? true : (isLegalDelivery || (ball.extraType && ball.extraType !== 'No Ball' && ball.extraType !== 'Wide') ? false : current.isFreeHitPending);
+
+      upd.runs = nextRuns;
+      upd.balls = nextBall;
+      upd.wickets = wicketNumber;
+      if (ball.extraType === 'Wide') upd.extras.wides += (ball.extraRuns || 1);
+      if (ball.extraType === 'No Ball') upd.extras.noBalls += (ball.extraRuns || 1);
+      if (ball.extraType === 'Bye') upd.extras.byes += (ball.extraRuns || ballRuns);
+      if (ball.extraType === 'Leg Bye') upd.extras.legByes += (ball.extraRuns || ballRuns);
+
+      upd.deliveries = [
+        ...upd.deliveries,
+        {
+          ball: ballLabel,
+          batterId: ball.strikerId,
+          bowlerId: ball.bowlerId,
+          isLegal: isLegalDelivery,
+          isWicket: wicket,
+          outcome: outcomeText,
+          over: overIndex,
+          runs: ballRuns,
+        },
+      ];
+
+      upd.recentBalls = [...upd.recentBalls, outcomeText].slice(-18);
+      upd.runRateHistory = [...upd.runRateHistory, nextBall ? nextRuns / (nextBall / 6) : 0].slice(-12);
+      upd.commentary = [
+        {
+          ball: ballLabel,
+          outcome: outcomeText,
+          text: ball.commentary,
+          badge: `${battingTeam.shortName} ${nextRuns}/${upd.wickets}`,
+          tone,
+        },
+        ...upd.commentary,
+      ].slice(0, 18);
+
+      if (wicket) {
+        upd.wicketLog = [
+          ...upd.wicketLog,
+          {
+            ball: ballLabel,
+            bowlerId: ball.bowlerId,
+            playerId: ball.strikerId,
+            score: nextRuns,
+            status: wicketStatus,
+            wicket: wicketNumber,
+            wicketType: ball.wicketType || 'Out',
+          },
+        ];
+        upd.partnershipBalls = 0;
+        upd.partnershipRuns = 0;
+      } else if (!ball.extraType) {
+        upd.partnershipBalls = (upd.partnershipBalls || 0) + 1;
+        upd.partnershipRuns = (upd.partnershipRuns || 0) + batterRuns;
+      } else {
+        upd.partnershipRuns = (upd.partnershipRuns || 0) + ballRuns;
+      }
+
+      if (overEnded) {
+        const timeout = MatchEngine.shouldTriggerStrategicTimeout(overIndex + 1, inningNo, upd.strategicTimeouts);
+        if (timeout) {
+          upd.strategicTimeouts = [...upd.strategicTimeouts, timeout];
+          upd.commentary = [{
+            ball: 'TIMEOUT',
+            outcome: 'T',
+            text: MatchEngine.getTimeoutCommentary(timeout),
+            badge: `${battingTeam.shortName} ${nextRuns}/${upd.wickets}`,
+            tone: 'info' as const,
+          }, ...upd.commentary].slice(0, 18);
+          Object.keys(upd.batters).forEach(k => upd.batters[k].momentum = 0);
+          Object.keys(upd.bowlers).forEach(k => upd.bowlers[k].momentum = 0);
+        }
+      }
+
+      const targetScore = inningNo === 2 ? (next[0]?.runs || 0) + 1 : 0;
+      const inningsComplete = nextBall >= maxBalls || wicketNumber >= 10 || (inningNo === 2 && targetScore > 0 && nextRuns >= targetScore);
+      if (inningsComplete) {
+        upd.isComplete = true;
+      }
+
+      next[inningNo - 1] = upd;
+      return next;
+    });
+
+    // Update intelligent batter state
+    if (ball.strikerId && striker) {
+      setBatterStates((prev) => {
+        const existing = prev[ball.strikerId] || BatterDecisionEngine.createInitialBatterState(
+          ball.strikerId,
+          `${currentMatchId}_in${inningNo}`,
+          striker
+        );
+        const updated = BatterDecisionEngine.updateBatterStateAfterDelivery(existing, {
+          runs: batterRuns,
+          isWicket: wicket,
+          isBoundary: batterRuns >= 4,
+          extraType: ball.extraType,
+        });
+        return { ...prev, [ball.strikerId]: updated };
+      });
+    }
+
+    // Check tactical events: Wicket fall or boundary cluster
+    if (wicket) {
+      if (!isMyTeamBowling) {
+        setOpponentTacticalNotice(`${bowlingTeam.name} Captain: Wicket! Attacking close-in catchers deployed for new batter.`);
+      } else if (userTeamControlMode === 'AI_RECOMMENDATIONS') {
+        const avail = getAvailableBowlers(inning, bowlingSquad, lastOverBowlerId);
+        const rec = AICaptainEngine.decideCaptainAction({
+          format: (selectedFormat as ArenaFormat) || 'T20',
+          teamId: bowlingTeam.id,
+          inningsState: {
+            score: (inning?.runs || 0) + ballRuns,
+            wickets: (inning?.wickets || 0) + 1,
+            balls: (inning?.balls || 0) + (isLegalDelivery ? 1 : 0),
+            recentBalls: [...(inning?.recentBalls || []), wicket ? 'W' : String(ballRuns)],
+          },
+          availableBowlers: avail,
+          currentBowler,
+          previousOverBowlerId: lastOverBowlerId,
+          pitchState: { pitchType: pitch },
+          decisionTrigger: 'WICKET_FALL',
+        });
+        setAiCaptainRecommendation(rec);
+      }
+    } else {
+      const recent = [...(inning?.recentBalls || []), String(ballRuns)].slice(-6);
+      const bCount = recent.filter((b) => b === '4' || b === '6').length;
+      if (bCount >= 2) {
+        if (!isMyTeamBowling) {
+          setOpponentTacticalNotice(`${bowlingTeam.name} Captain: Boundary surge detected! Deep boundary protection deployed.`);
+        } else if (userTeamControlMode === 'AI_RECOMMENDATIONS' && !aiCaptainRecommendation) {
+          const avail = getAvailableBowlers(inning, bowlingSquad, lastOverBowlerId);
+          const rec = AICaptainEngine.decideCaptainAction({
+            format: (selectedFormat as ArenaFormat) || 'T20',
+            teamId: bowlingTeam.id,
+            inningsState: {
+              score: (inning?.runs || 0) + ballRuns,
+              wickets: (inning?.wickets || 0),
+              balls: (inning?.balls || 0) + (isLegalDelivery ? 1 : 0),
+              recentBalls: recent,
+            },
+            availableBowlers: avail,
+            currentBowler,
+            previousOverBowlerId: lastOverBowlerId,
+            pitchState: { pitchType: pitch },
+            decisionTrigger: 'BOUNDARY_CLUSTER',
+          });
+          setAiCaptainRecommendation(rec);
+        }
+      }
+    }
+  }, [currentDeliveryResult, inningNo, battingTeam.shortName, maxBalls, striker, currentMatchId, isMyTeamBowling, bowlingTeam.name, bowlingTeam.id, userTeamControlMode, inning, bowlingSquad, lastOverBowlerId, currentBowler, pitch, selectedFormat, aiCaptainRecommendation, getAvailableBowlers]);
+
+  const handlePlaybackComplete = useCallback(() => {
+    if (!currentDeliveryResult) return;
+    if (completedDeliveryIdRef.current === currentDeliveryResult.id) {
+      setIsBallAnimating(false);
+      setDeliveryLifecycle('READY');
+      return;
+    }
+    completedDeliveryIdRef.current = currentDeliveryResult.id;
+
+    setDeliveryLifecycle('FIELD_CHANGE_IF_REQUIRED');
+
+    const ball = currentDeliveryResult;
+    const isLegalDelivery = ball.legalBall;
+    const wicket = ball.wicket;
+    const current = inning;
+    if (!current) return;
+
+    const nextBall = current.balls;
+    const nextRuns = current.runs;
+    const wicketNumber = current.wickets;
+    const targetScore = inningNo === 2 ? (innings[0]?.runs || 0) + 1 : 0;
+
+    const overEnded = !wicket && isLegalDelivery && nextBall % 6 === 0;
+    const wicketAtOverEnd = wicket && isLegalDelivery && nextBall % 6 === 0;
+    const inningsComplete = nextBall >= maxBalls || wicketNumber >= 10 || (inningNo === 2 && targetScore > 0 && nextRuns >= targetScore);
+
+    if (inningsComplete) {
+      if (inningNo === 1) {
+        setInningNo(2);
+        setStrikerId(null);
+        setNonStrikerId(null);
+        setBowlerId(null);
+        setLastOverBowlerId(null);
+        setBattingCursor(2);
+        setPendingBatterEnd('striker');
+        setQueueBowlerAfterBatter(false);
+        setPending('openers');
+      } else {
+        setQueueBowlerAfterBatter(false);
+        setPending(null);
+      }
+    } else if (wicket) {
+      setPendingBatterEnd(wicketAtOverEnd ? 'non-striker' : 'striker');
+      if (wicketAtOverEnd) {
+        setQueueBowlerAfterBatter(true);
+        setLastOverBowlerId(currentBowler?.id || null);
+        setBowlerId(null);
+        setStrikerId(nonStriker?.id || null);
+      }
+      setPending('batter');
+    } else if (overEnded) {
+      setLastOverBowlerId(currentBowler?.id || null);
+      setBowlerId(null);
+      if (striker && nonStriker) {
+        setStrikerId(nonStriker.id);
+        setNonStrikerId(striker.id);
+      }
+      setPending('bowler');
+    } else {
+      if (ball.strikeRotated && striker && nonStriker) {
+        setStrikerId(nonStriker.id);
+        setNonStrikerId(striker.id);
+      }
+    }
+
+    if (!autoPlay) {
+      setManualBallRequests((value) => Math.max(0, value - 1));
+    }
+
+    setIsBallAnimating(false);
+    setDeliveryLifecycle('FIELD_READY');
+    setTimeout(() => {
+      setDeliveryLifecycle('NEXT_DELIVERY');
+      setTimeout(() => {
+        setDeliveryLifecycle('READY');
+      }, 40);
+    }, 60);
+  }, [currentDeliveryResult, inning, innings, inningNo, maxBalls, currentBowler, striker, nonStriker, autoPlay]);
 
   useEffect(() => {
     if (!inning || inning.isComplete || pending || !striker || !nonStriker || !currentBowler) return;
-    if (isDeliveryAnimating) return; // Strict Lock: Never interrupt or double-simulate while 3D delivery action is playing!
+    if (isBallAnimating || isFieldChanging) return;
+    if (deliveryLifecycle !== 'READY' && deliveryLifecycle !== 'NEXT_DELIVERY') return;
     if (!autoPlay && manualBallRequests <= 0) return;
 
     const playDelivery = () => {
-      setIsDeliveryAnimating(true);
-      // ---- Compute ball result from closure state (fresh thanks to setTimeout) ----
       const current = inning;
-      if (current.isComplete) return;
+      if (current.isComplete || isBallAnimating || isFieldChanging) return;
 
       const target = inningNo === 2 ? (innings[0]?.runs || 0) + 1 : 0;
       const ballsRemaining = Math.max(1, maxBalls - current.balls);
       const requiredRate = target ? ((target - current.runs) / (ballsRemaining / 6)) : 0;
       const strikerLine = current.batters[striker.id] || { balls: 0, dots: 0, fours: 0, out: false, runs: 0, sixes: 0, status: 'not out' };
       const currentBowlerLine = current.bowlers[currentBowler.id] || { balls: 0, dots: 0, runs: 0, wickets: 0 };
-      const currentOverProgress = current.balls / 6;
-      const ball = MatchEngine.simulateBall(
+
+      setDeliveryLifecycle('DELIVERY_SIMULATION');
+
+      // Resolve Batter State
+      const currentStrikerState = batterStates[striker.id] || BatterDecisionEngine.createInitialBatterState(striker.id, `${currentMatchId}_in${inningNo}`, striker);
+
+      // Resolve Batting Intent
+      let effectiveBattingIntent: BattingIntent = 'NORMAL';
+      if (isMyTeamBatting) {
+        if (userTeamControlMode === 'FULL_AUTO') {
+          effectiveBattingIntent = BatterDecisionEngine.selectBattingIntent(currentStrikerState, {
+            format: (selectedFormat as ArenaFormat) || 'T20',
+            batter: striker,
+            bowler: currentBowler,
+            inningsState: {
+              score: current.runs,
+              wickets: current.wickets,
+              balls: current.balls,
+              target,
+              partnershipRuns: current.partnershipRuns,
+              partnershipBalls: current.partnershipBalls,
+            },
+            pitchType: pitch,
+          });
+        } else {
+          effectiveBattingIntent = userBattingIntent;
+        }
+      } else {
+        // Opponent is batting: autonomous intelligent intent
+        effectiveBattingIntent = BatterDecisionEngine.selectBattingIntent(currentStrikerState, {
+          format: (selectedFormat as ArenaFormat) || 'T20',
+          batter: striker,
+          bowler: currentBowler,
+          inningsState: {
+            score: current.runs,
+            wickets: current.wickets,
+            balls: current.balls,
+            target,
+            partnershipRuns: current.partnershipRuns,
+            partnershipBalls: current.partnershipBalls,
+          },
+          pitchType: pitch,
+        });
+      }
+
+      // Resolve Bowling Plan
+      let effectiveBowlingPlan: DetailedBowlingPlan | undefined = undefined;
+      if (isMyTeamBowling) {
+        if (userBowlingPlan) {
+          effectiveBowlingPlan = userBowlingPlan;
+        }
+      } else {
+        effectiveBowlingPlan = BowlingPlanEngine.selectBowlingPlan(currentBowler, striker, {
+          format: (selectedFormat as ArenaFormat) || 'T20',
+          overs: Math.floor(current.balls / 6),
+          balls: current.balls,
+          wickets: current.wickets,
+          target,
+          pitch,
+          strikerBalls: strikerLine.balls,
+          strikerRuns: strikerLine.runs,
+          bouncersThisOver: currentBowlerLine.bouncersThisOver || 0,
+        });
+      }
+
+      const deliveryRes = DeliveryResultFactory.createDeliveryResult({
         striker,
-        currentBowler,
-        currentOverProgress,
-        current.wickets,
+        nonStriker,
+        bowler: currentBowler,
+        currentBalls: current.balls,
+        currentWickets: current.wickets,
         requiredRate,
-        pitch,
+        pitchType: pitch,
         weather,
-        {
+        format: (selectedFormat as ArenaFormat) || 'T20',
+        isFreeHit: current.isFreeHitPending,
+        bouncersThisOver: currentBowlerLine.bouncersThisOver || 0,
+        battingIntent: effectiveBattingIntent,
+        bowlingPlan: effectiveBowlingPlan,
+        batterInningsState: currentStrikerState,
+        strikerStats: {
           playerId: striker.id,
           runs: strikerLine.runs,
           balls: strikerLine.balls,
@@ -525,8 +943,11 @@ export default function LiveMatchCenter() {
           consecutiveDots: strikerLine.consecutiveDots,
           ballsSinceBoundary: strikerLine.ballsSinceBoundary,
           wicketBurst: strikerLine.wicketBurst,
+          oversBowled: 0,
+          legalBallsThisOver: 0,
+          bouncersThisOver: 0,
         },
-        {
+        bowlerStats: {
           playerId: currentBowler.id,
           runs: 0,
           balls: currentBowlerLine.balls % 6,
@@ -538,233 +959,52 @@ export default function LiveMatchCenter() {
           dots: currentBowlerLine.dots || 0,
           momentum: currentBowlerLine.momentum,
           lastOverRuns: currentBowlerLine.lastOverRuns || 0,
+          oversBowled: Math.floor(currentBowlerLine.balls / 6),
+          legalBallsThisOver: currentBowlerLine.balls % 6,
+          bouncersThisOver: currentBowlerLine.bouncersThisOver || 0,
         },
-        current.recentBalls,
-        current.isFreeHitPending,
-        currentBowlerLine.bouncersThisOver || 0,
-        selectedFormat || 'T20'
-      );
-
-      let wicket = ball.isWicket && current.wickets < 10;
-      let review = null;
-      let drsReviewsRemaining = current.drsReviewsRemaining;
-      const drsReviews = [...current.drsReviews];
-      let ballCommentary = ball.commentary;
-
-      if (wicket && current.drsReviewsRemaining > 0) {
-        review = MatchEngine.simulateDRS(ball, battingTeam.id, current.drsReviewsRemaining);
-      } else if (!wicket && ball.wicketType && current.drsReviewsRemaining > 0) {
-        review = MatchEngine.simulateDRS(ball, bowlingTeam.id, current.drsReviewsRemaining);
-      }
-
-      if (review) {
-        drsReviews.push(review);
-        ballCommentary += '\n\n' + MatchEngine.getDRSCommentary(review, striker.name, currentBowler.name);
-        if (review.overturned) {
-            wicket = review.originalDecision === 'Not Out';
-        } else if (review.result !== DRSResult.UMPIRES_CALL) {
-            drsReviewsRemaining -= 1;
-        }
-      }
-
-      const isLegalDelivery = ball.extraType !== 'Wide' && ball.extraType !== 'No Ball';
-      const ballRuns = ball.runs;
-      const batterRuns = ball.isExtra ? 0 : ball.runs;
-      const nextBall = current.balls + (isLegalDelivery ? 1 : 0);
-      const ballLabel = `${Math.floor(current.balls / 6)}.${(current.balls % 6) + 1}`;
-      const overIndex = Math.floor(current.balls / 6);
-      const outcomeText = wicket ? 'W' : ball.isExtra ? (ball.extraType === 'No Ball' ? 'Nb' : 'Wd') : String(ballRuns);
-      const nextRuns = current.runs + ballRuns;
-      const wicketNumber = current.wickets + (wicket ? 1 : 0);
-      const wicketStatus = `${ball.wicketType || 'Out'} b ${currentBowler.name}`;
-      const tone: CommentaryLine['tone'] = wicket ? 'wicket' : ballRuns === 6 ? 'six' : ballRuns === 4 ? 'four' : ballRuns === 0 ? 'dot' : 'info';
-
-      setLastVisualizedBall({
-        ...ball,
-        runs: ballRuns,
-        isWicket: wicket,
-        wicketType: ball.wicketType,
-        isExtra: ball.isExtra,
-        extraType: ball.extraType
+        recentOutcomes: current.recentBalls,
+        battingTeamId: battingTeam.id,
+        bowlingTeamId: bowlingTeam.id,
+        drsReviewsRemaining: current.drsReviewsRemaining,
       });
-      setVisualizerBallCount((c) => c + 1);
 
-      // ---- Determine state transitions ----
-      const overEnded = !wicket && isLegalDelivery && nextBall % 6 === 0;
-      const wicketAtOverEnd = wicket && isLegalDelivery && nextBall % 6 === 0;
-      const inningsComplete = nextBall >= maxBalls || wicketNumber >= 10 || (inningNo === 2 && target > 0 && nextRuns >= target);
-
-      // ---- Defer main scorecard & stats update until 3D ball animation finishes ----
-      pendingCommitRef.current = () => {
-        setInnings((previous) => {
-          const next = [...previous];
-          const upd = {
-            ...next[inningNo - 1],
-            batters: { ...next[inningNo - 1].batters },
-            bowlers: { ...next[inningNo - 1].bowlers },
-            deliveries: [...next[inningNo - 1].deliveries],
-            extras: { ...next[inningNo - 1].extras },
-            commentary: [...next[inningNo - 1].commentary],
-            recentBalls: [...next[inningNo - 1].recentBalls],
-            runRateHistory: [...next[inningNo - 1].runRateHistory],
-            wicketLog: [...next[inningNo - 1].wicketLog],
-          };
-
-          upd.batters[striker.id] = {
-            ...strikerLine,
-            balls: strikerLine.balls + (isLegalDelivery ? 1 : 0),
-            ballsSinceBoundary: ballRuns === 4 || ballRuns === 6 ? 0 : (strikerLine.ballsSinceBoundary || 0) + (isLegalDelivery ? 1 : 0),
-            consecutiveDots: ballRuns === 0 && !ball.isExtra && !wicket ? (strikerLine.consecutiveDots || 0) + 1 : 0,
-            dots: (strikerLine.dots || 0) + (ballRuns === 0 && !ball.isExtra && !wicket ? 1 : 0),
-            fours: strikerLine.fours + (ballRuns === 4 && !ball.isExtra ? 1 : 0),
-            momentum: Math.max(-18, Math.min(24, (strikerLine.momentum || 0) + (ballRuns === 6 ? 8 : ballRuns === 4 ? 5 : ballRuns === 0 ? -2 : 1) - (wicket ? 8 : 0))),
-            runs: strikerLine.runs + batterRuns,
-            sixes: strikerLine.sixes + (ballRuns === 6 && !ball.isExtra ? 1 : 0),
-            out: wicket,
-            status: wicket ? wicketStatus : strikerLine.status,
-            wicketBurst: Math.max(0, (strikerLine.wicketBurst || 0) + (wicket ? 1 : -0.2)),
-          };
-
-          upd.bowlers[currentBowler.id] = {
-            balls: currentBowlerLine.balls + (isLegalDelivery ? 1 : 0),
-            dots: (currentBowlerLine.dots || 0) + (ballRuns === 0 && !ball.isExtra ? 1 : 0),
-            lastOverRuns: ((currentBowlerLine.lastOverRuns || 0) + ballRuns) * (nextBall > 0 && nextBall % 6 === 0 ? 0 : 1),
-            momentum: Math.max(-16, Math.min(24, (currentBowlerLine.momentum || 0) + (wicket ? 10 : ballRuns === 0 ? 2 : ballRuns >= 4 ? -3 : 0))),
-            runs: currentBowlerLine.runs + ballRuns,
-            wickets: currentBowlerLine.wickets + (wicket ? 1 : 0),
-            bouncersThisOver: overEnded ? 0 : (currentBowlerLine.bouncersThisOver || 0) + (!wicket && isLegalDelivery && ballRuns === 0 && Math.random() < 0.15 ? 1 : 0),
-          };
-
-          upd.isFreeHitPending = ball.triggeredFreeHit ? true : (isLegalDelivery || (ball.extraType && ball.extraType !== 'No Ball' && ball.extraType !== 'Wide') ? false : current.isFreeHitPending);
-          upd.drsReviews = drsReviews;
-          upd.drsReviewsRemaining = drsReviewsRemaining;
-
-          upd.runs = nextRuns;
-          upd.balls = nextBall;
-          upd.wickets = wicketNumber;
-          if (ball.extraType === 'Wide') upd.extras.wides += 1;
-          if (ball.extraType === 'No Ball') upd.extras.noBalls += 1;
-          if (ball.extraType === 'Bye') upd.extras.byes += 1;
-          if (ball.extraType === 'Leg Bye') upd.extras.legByes += 1;
-          upd.deliveries = [
-            ...upd.deliveries,
-            {
-              ball: ballLabel,
-              batterId: striker.id,
-              bowlerId: currentBowler.id,
-              isLegal: isLegalDelivery,
-              isWicket: wicket,
-              outcome: outcomeText,
-              over: overIndex,
-              runs: ballRuns,
-            },
-          ];
-          upd.recentBalls = [...upd.recentBalls, outcomeText].slice(-18);
-          upd.runRateHistory = [...upd.runRateHistory, nextBall ? nextRuns / (nextBall / 6) : 0].slice(-12);
-          upd.commentary = [
-            {
-              ball: ballLabel,
-              outcome: outcomeText,
-              text: ballCommentary,
-              badge: `${battingTeam.shortName} ${nextRuns}/${upd.wickets}`,
-              tone,
-            },
-            ...upd.commentary,
-          ].slice(0, 18);
-
-          if (wicket) {
-            upd.wicketLog = [
-              ...upd.wicketLog,
-              {
-                ball: ballLabel,
-                bowlerId: currentBowler.id,
-                playerId: striker.id,
-                score: nextRuns,
-                status: wicketStatus,
-                wicket: wicketNumber,
-                wicketType: ball.wicketType || 'Out',
-              },
-            ];
-            upd.partnershipBalls = 0;
-            upd.partnershipRuns = 0;
-          } else if (!ball.isExtra) {
-            upd.partnershipBalls = (upd.partnershipBalls || 0) + 1;
-            upd.partnershipRuns = (upd.partnershipRuns || 0) + batterRuns;
-          } else {
-            upd.partnershipRuns = (upd.partnershipRuns || 0) + ballRuns;
-          }
-
-          if (overEnded) {
-            const timeout = MatchEngine.shouldTriggerStrategicTimeout(overIndex + 1, inningNo, upd.strategicTimeouts);
-            if (timeout) {
-               upd.strategicTimeouts = [...upd.strategicTimeouts, timeout];
-               upd.commentary = [{
-                  ball: 'TIMEOUT',
-                  outcome: 'T',
-                  text: MatchEngine.getTimeoutCommentary(timeout),
-                  badge: `${battingTeam.shortName} ${nextRuns}/${upd.wickets}`,
-                  tone: 'info' as const,
-               }, ...upd.commentary].slice(0, 18);
-               Object.keys(upd.batters).forEach(k => upd.batters[k].momentum = 0);
-               Object.keys(upd.bowlers).forEach(k => upd.bowlers[k].momentum = 0);
-            }
-          }
-
-          if (inningsComplete) {
-            upd.isComplete = true;
-          }
-
-          next[inningNo - 1] = upd;
-          return next;
-        });
-
-        // ---- Set all other states directly (no dependency on updater side effects) ----
-        if (inningsComplete) {
-          if (inningNo === 1) {
-            setInningNo(2);
-            setStrikerId(null);
-            setNonStrikerId(null);
-            setBowlerId(null);
-            setLastOverBowlerId(null);
-            setBattingCursor(2);
-            setPendingBatterEnd('striker');
-            setQueueBowlerAfterBatter(false);
-            setPending('openers');
-          } else {
-            setQueueBowlerAfterBatter(false);
-            setPending(null);
-          }
-        } else if (wicket) {
-          setPendingBatterEnd(wicketAtOverEnd ? 'non-striker' : 'striker');
-          if (wicketAtOverEnd) {
-            setQueueBowlerAfterBatter(true);
-            setLastOverBowlerId(currentBowler.id);
-            setBowlerId(null);
-            setStrikerId(nonStriker.id);
-          }
-          setPending('batter');
-        } else if (overEnded) {
-          setLastOverBowlerId(currentBowler.id);
-          setBowlerId(null);
-          setStrikerId(nonStriker.id);
-          setNonStrikerId(striker.id);
-          setPending('bowler');
-        } else {
-          // Mid-over: swap strike on odd runs
-          if (!ball.isExtra && ballRuns % 2 === 1) {
-            setStrikerId(nonStriker.id);
-            setNonStrikerId(striker.id);
-          }
-        }
-
-        if (!autoPlay) setManualBallRequests((value) => Math.max(0, value - 1));
-      };
+      setCurrentDeliveryResult(deliveryRes);
+      setDeliveryLifecycle('RESULT_LOCKED');
+      setIsBallAnimating(true);
+      setDeliveryLifecycle('BALL_PATH_PLAYBACK');
     };
 
-    const breatherDelay = !autoPlay ? 0 : (playbackSpeed === 1 ? 1200 : playbackSpeed === 1.5 ? 700 : 350);
-    const timer = window.setTimeout(playDelivery, breatherDelay);
+    const timer = window.setTimeout(playDelivery, autoPlay ? 600 : 0);
     return () => window.clearTimeout(timer);
-  }, [inning, innings, inningNo, pending, striker, nonStriker, currentBowler, battingCursor, autoPlay, manualBallRequests, pitch, weather, battingTeam, isDeliveryAnimating, playbackSpeed]);
+  }, [
+    inning,
+    innings,
+    inningNo,
+    pending,
+    striker,
+    nonStriker,
+    currentBowler,
+    battingCursor,
+    autoPlay,
+    manualBallRequests,
+    pitch,
+    weather,
+    battingTeam,
+    bowlingTeam,
+    isBallAnimating,
+    isFieldChanging,
+    deliveryLifecycle,
+    selectedFormat,
+    maxBalls,
+    userTeamControlMode,
+    userBattingIntent,
+    userBowlingPlan,
+    batterStates,
+    isMyTeamBatting,
+    isMyTeamBowling,
+    currentMatchId,
+  ]);
 
   useEffect(() => {
     const first = innings[0];
@@ -860,32 +1100,13 @@ export default function LiveMatchCenter() {
             <div className="truncate text-sm font-bold">{team1.shortName} vs {team2.shortName}</div>
             <div className="text-[10px] text-slate-500">{currentMatch?.isPlayoff ? currentMatch.playoffType : `Match ${currentMatch?.matchNumber || 1}`} · {selectedFormat || 'T20'} · {matchStatus}</div>
           </div>
-          
-          {/* Speed Selector */}
-          <div className="flex items-center gap-1 bg-zinc-900 border border-zinc-800 rounded-full p-0.5">
-            {[1, 1.5, 2].map((s) => (
-              <button
-                key={s}
-                onClick={() => setPlaybackSpeed(s as 1 | 1.5 | 2)}
-                className={`px-2 py-0.5 rounded-full text-[9px] font-black transition-all ${
-                  playbackSpeed === s
-                    ? 'bg-amber-400 text-zinc-950 shadow-sm'
-                    : 'text-zinc-400 hover:text-zinc-200'
-                }`}
-                title={s === 1 ? '1x Real Broadcast Pacing (~5.5-7.5s)' : `${s}x Speed`}
-              >
-                {s === 1 ? '1x' : `${s}x`}
-              </button>
-            ))}
-          </div>
-
-          <button onClick={() => setAutoPlay((v) => !v)} className={`shrink-0 rounded-full px-3 py-1 text-[10px] font-black uppercase ${autoPlay ? 'bg-green-500 text-white shadow-sm' : 'bg-white/10 text-slate-300'}`}>
+          <button onClick={() => setAutoPlay((v) => !v)} className={`shrink-0 rounded-full px-3 py-1 text-[10px] font-black uppercase ${autoPlay ? 'bg-green-500 text-white' : 'bg-white/10 text-slate-300'}`}>
             {autoPlay ? 'Auto' : 'Manual'}
           </button>
         </div>
       </div>
 
-      <div className="relative z-10 mx-auto max-w-lg shadow-2xl">
+      <div className="relative z-10 mx-auto max-w-5xl xl:max-w-6xl shadow-2xl">
         {/* ── Score Card ── */}
         <div className="border-b border-zinc-800 bg-zinc-900/80 backdrop-blur-md px-3 py-3">
           {/* Batting team */}
@@ -1016,55 +1237,57 @@ export default function LiveMatchCenter() {
             striker={striker || null}
             nonStriker={nonStriker || null}
             bowler={currentBowler || null}
-            lastBall={lastVisualizedBall}
-            ballCount={visualizerBallCount}
+            deliveryResult={currentDeliveryResult}
+            lifecycle={deliveryLifecycle}
+            onPlaybackComplete={handlePlaybackComplete}
+            onContactReached={handleContactReached}
             format={(selectedFormat as ArenaFormat) || 'T20'}
             battingTeamName={battingTeam.name}
             bowlingTeamName={bowlingTeam.name}
-            battingTeamShortName={battingTeam.shortName}
-            teamLogo={resolveTeamLogo(battingTeam)}
-            teamAccentColor={battingTeam.color}
             isFreeHit={Boolean(inning?.isFreeHitPending)}
-            score={inning?.runs || 0}
-            wickets={inning?.wickets || 0}
-            balls={inning?.balls || 0}
-            totalOvers={maxOvers}
-            target={inningNo === 2 && innings[0] ? innings[0].runs + 1 : null}
-            currentRunRate={inning?.balls ? (inning.runs / (inning.balls / 6)) : 0}
-            requiredRunRate={inningNo === 2 && innings[0] && inning && !inning.isComplete ? ((innings[0].runs + 1 - inning.runs) / Math.max(0.5, (maxBalls - inning.balls) / 6)) : null}
-            strikerStats={{
-              name: striker?.name || 'Striker',
-              runs: strikerLine.runs,
-              balls: strikerLine.balls,
-              fours: strikerLine.fours,
-              sixes: strikerLine.sixes,
-              strikeRate: Number(strikeRate(strikerLine.runs, strikerLine.balls)) || 0,
-              isStriker: true,
+            score={{
+              runs: inning?.runs || 0,
+              wickets: inning?.wickets || 0,
+              overs: inning?.balls ? Math.floor(inning.balls / 6) : 0,
+              balls: inning?.balls ? inning.balls % 6 : 0,
             }}
-            nonStrikerStats={{
-              name: nonStriker?.name || 'Non-Striker',
-              runs: nonStrikerLine.runs,
-              balls: nonStrikerLine.balls,
-              fours: nonStrikerLine.fours,
-              sixes: nonStrikerLine.sixes,
-              strikeRate: Number(strikeRate(nonStrikerLine.runs, nonStrikerLine.balls)) || 0,
-              isStriker: false,
+            target={inningNo === 2 ? (innings[0]?.runs || 0) + 1 : undefined}
+            pitch={pitch}
+            weather={weather}
+            fieldingSquad={bowlingSquad}
+            partnershipRuns={inning?.partnershipRuns}
+            partnershipBalls={inning?.partnershipBalls}
+            onFieldChangingChange={setIsFieldChanging}
+            userTeamControlMode={userTeamControlMode}
+            onUserTeamControlModeChange={setUserTeamControlMode}
+            aiCaptainRecommendation={aiCaptainRecommendation}
+            onApplyAIRecommendation={(rec) => {
+              if (rec.selectedBowlerId) {
+                setBowlerId(rec.selectedBowlerId);
+                setPending(null);
+              }
+              if (rec.bowlingPlan) {
+                setUserBowlingPlan(rec.bowlingPlan as DetailedBowlingPlan);
+              }
+              if (rec.battingIntent) {
+                setUserBattingIntent(rec.battingIntent);
+              }
+              setAiCaptainRecommendation(null);
             }}
-            bowlerStats={{
-              name: currentBowler?.name || 'Bowler',
-              overs: Number(formatOvers(bowlerLine.balls)) || 0,
-              maidens: bowlerMaidens(inning, currentBowler?.id || ''),
-              runs: bowlerLine.runs,
-              wickets: bowlerLine.wickets,
-              economy: Number(economy(bowlerLine.runs, bowlerLine.balls)) || 0,
+            onIgnoreAIRecommendation={() => setAiCaptainRecommendation(null)}
+            userBattingIntent={userBattingIntent}
+            onUserBattingIntentChange={setUserBattingIntent}
+            userBowlingPlan={userBowlingPlan}
+            onUserBowlingPlanChange={setUserBowlingPlan}
+            isUserTeamBatting={isMyTeamBatting}
+            isUserTeamBowling={isMyTeamBowling}
+            opponentTacticalNotice={opponentTacticalNotice}
+            eligibleBowlers={selectableBowlers}
+            onSelectBowlerManual={(id) => {
+              setBowlerId(id);
+              setPending(null);
             }}
-            recentBalls={currentOverBalls}
-            partnership={{ runs: inning?.partnershipRuns || 0, balls: inning?.partnershipBalls || 0 }}
-            activeBowlingTactic={selectedBowlingTactic}
-            onTacticChange={setSelectedBowlingTactic}
-            onAnimationComplete={handleAnimationComplete}
-            speed={playbackSpeed}
-            onSpeedChange={(s) => setPlaybackSpeed(s as 1 | 1.5 | 2)}
+            batterState={striker ? (batterStates[striker.id] || null) : null}
           />
         </div>
 
@@ -1132,7 +1355,11 @@ export default function LiveMatchCenter() {
                         <span className="flex-1 text-xs font-bold truncate">{player.name}</span>
                         {bLine && <span className="text-[10px] text-zinc-500 tabular-nums">{formatOvers(bLine.balls)}ov</span>}
                         <span className="text-xs font-black text-white w-6 text-right">{player.stats.bowling}</span>
-                        {i === 0 && <span className="text-[8px] font-black text-zinc-300 bg-zinc-700/50 rounded px-1">REC</span>}
+                        {((aiCaptainRecommendation?.selectedBowlerId === player.id) || (!aiCaptainRecommendation && i === 0)) && (
+                          <span className="text-[8px] font-black text-cyan-300 bg-cyan-950/80 border border-cyan-500/40 rounded px-1">
+                            AI REC
+                          </span>
+                        )}
                       </button>
                     );
                   })}
@@ -1140,27 +1367,17 @@ export default function LiveMatchCenter() {
               </div>
             )}
             {!pending && canPlayManualBall && (
-              <div className="space-y-2">
-                {isMyTeamBowling && (
-                  <div className="flex items-center justify-between text-[10px] bg-zinc-800/60 p-2 rounded-lg border border-white/5">
-                    <span className="font-bold text-white/60">Bowler Tactic:</span>
-                    <span className="font-bold text-amber-300">
-                      {BOWLING_TACTICS_CONFIG[selectedBowlingTactic]?.icon} {BOWLING_TACTICS_CONFIG[selectedBowlingTactic]?.name}
-                    </span>
-                  </div>
-                )}
-                <button
-                  disabled={isDeliveryAnimating}
-                  onClick={() => setManualBallRequests((v) => v + 1)}
-                  className={`w-full rounded-lg py-2.5 text-center text-xs font-black uppercase transition-all shadow-lg ${
-                    isDeliveryAnimating
-                      ? 'bg-zinc-800 text-zinc-400 cursor-not-allowed border border-zinc-700 opacity-80'
-                      : 'bg-white text-zinc-950 hover:bg-zinc-200 active:scale-[0.98]'
-                  }`}
-                >
-                  {isDeliveryAnimating ? 'Bowling in action... 🎬' : 'Next Ball ▶'}
-                </button>
-              </div>
+              <button 
+                disabled={isBallAnimating || isFieldChanging}
+                onClick={() => setManualBallRequests((v) => v + 1)} 
+                className={`w-full rounded-lg py-2.5 text-center text-xs font-black uppercase transition-colors ${
+                  isBallAnimating || isFieldChanging
+                    ? 'bg-zinc-800 text-zinc-500 cursor-not-allowed animate-pulse'
+                    : 'bg-white text-zinc-950 hover:bg-zinc-200'
+                }`}
+              >
+                {isFieldChanging ? 'LOCKED - FIELD IN MOTION' : isBallAnimating ? 'Ball in play...' : 'Next Ball ▶'}
+              </button>
             )}
           </div>
         )}
