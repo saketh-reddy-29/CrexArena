@@ -81,6 +81,7 @@ export interface VisualizerProps {
 
   // Visualizer Header & Display Mode Customization
   hideTopHeader?: boolean;
+  hideSideAndBottomPanels?: boolean;
   displayMode?: 'STANDARD' | 'LABELS';
   onDisplayModeChange?: (mode: 'STANDARD' | 'LABELS') => void;
   playbackSpeed?: AnimationSpeed;
@@ -89,6 +90,7 @@ export interface VisualizerProps {
   onTogglePause?: () => void;
   replayTrigger?: number;
   skipTrigger?: number;
+  replayDeliveryResult?: DeliveryResult | null;
 }
 
 interface FielderLiveState {
@@ -155,6 +157,7 @@ export default function CricketActionVisualizer({
   ballCount = 0,
   className,
   hideTopHeader = false,
+  hideSideAndBottomPanels = false,
   displayMode: propDisplayMode,
   onDisplayModeChange,
   playbackSpeed: propSpeed,
@@ -163,6 +166,7 @@ export default function CricketActionVisualizer({
   onTogglePause,
   replayTrigger,
   skipTrigger,
+  replayDeliveryResult,
 }: VisualizerProps) {
   // Format state
   const [selectedFormat, setSelectedFormat] = useState<ArenaFormat>(initialFormat);
@@ -659,6 +663,17 @@ export default function CricketActionVisualizer({
     }
   }, [skipTrigger]);
 
+  const prevReplayDeliveryIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (replayDeliveryResult && replayDeliveryResult.id !== prevReplayDeliveryIdRef.current) {
+      prevReplayDeliveryIdRef.current = replayDeliveryResult.id;
+      if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
+      setIsPaused(false);
+      pausedProgressRef.current = 0;
+      runContinuousBallAnimation(replayDeliveryResult, 0);
+    }
+  }, [replayDeliveryResult, runContinuousBallAnimation]);
+
   // Drag & drop interactive fielder adjustment on SVG
   const handleSvgMouseMove = (e: React.MouseEvent<SVGSVGElement>) => {
     if (!draggedFielderId || !svgRef.current) return;
@@ -892,6 +907,57 @@ export default function CricketActionVisualizer({
                 Labels
               </button>
             </div>
+          </div>
+
+          {/* Field Strategy Preset & Field Status Badge */}
+          <div className="absolute top-3.5 right-3.5 z-30 flex items-center gap-1.5 sm:gap-2">
+            {/* Tactical Presets Dropdown */}
+            <select
+              value={activePresetKey || ''}
+              onChange={(e) => {
+                const val = e.target.value;
+                setActivePresetKey(val || null);
+                triggerTacticalRecalculation(val || undefined);
+              }}
+              className="bg-slate-950/90 backdrop-blur-md text-slate-200 text-[10px] sm:text-xs font-bold px-2.5 py-1.5 rounded-xl border border-white/15 focus:outline-none focus:border-cyan-400 shadow-lg cursor-pointer"
+              title="Select Field Preset"
+            >
+              <option value="">Default Preset</option>
+              {Object.entries(BowlerFieldStrategyEngine.PRESET_OVERLAYS).map(([pKey, pDef]) => (
+                <option key={pKey} value={pKey}>
+                  {pDef.name.split('(')[0].trim()}
+                </option>
+              ))}
+            </select>
+
+            {/* Field Status Pill */}
+            <span
+              className={cn(
+                "px-2.5 py-1 rounded-xl text-[10px] font-black uppercase flex items-center gap-1.5 tracking-wider backdrop-blur-md shadow-lg border",
+                isFieldChanging
+                  ? "bg-amber-500/20 text-amber-300 border-amber-500/40 animate-pulse"
+                  : playbackStage === 'BALL_TRAVEL' || playbackStage === 'PITCH_BOUNCE' || playbackStage === 'BOWLER_RUNUP'
+                  ? "bg-blue-500/20 text-blue-300 border-blue-500/40"
+                  : "bg-emerald-500/20 text-emerald-300 border-emerald-500/40"
+              )}
+            >
+              <span
+                className={cn(
+                  "w-1.5 h-1.5 rounded-full",
+                  isFieldChanging
+                    ? "bg-amber-400"
+                    : playbackStage === 'BALL_TRAVEL' || playbackStage === 'PITCH_BOUNCE' || playbackStage === 'BOWLER_RUNUP'
+                    ? "bg-blue-400"
+                    : "bg-emerald-400"
+                )}
+              />
+              <span className="hidden sm:inline">
+                {isFieldChanging ? 'Fielders Moving' : playbackStage === 'BALL_TRAVEL' || playbackStage === 'PITCH_BOUNCE' ? 'Ball in Flight' : 'Field Settled'}
+              </span>
+              <span className="sm:hidden">
+                {isFieldChanging ? 'Moving' : playbackStage === 'BALL_TRAVEL' || playbackStage === 'PITCH_BOUNCE' ? 'In Flight' : 'Settled'}
+              </span>
+            </span>
           </div>
 
           <svg
@@ -1248,7 +1314,7 @@ export default function CricketActionVisualizer({
 
           {/* Opponent AI Action Banner */}
           {opponentTacticalNotice && (
-            <div className="absolute top-4 right-4 bg-slate-950/90 backdrop-blur-md border border-purple-500/40 px-3.5 py-1.5 rounded-xl flex items-center gap-2 text-xs font-bold text-purple-200 shadow-2xl z-20 animate-pulse">
+            <div className="absolute top-14 right-3.5 bg-slate-950/90 backdrop-blur-md border border-purple-500/40 px-3.5 py-1.5 rounded-xl flex items-center gap-2 text-xs font-bold text-purple-200 shadow-2xl z-20 animate-pulse">
               <Sparkles className="w-3.5 h-3.5 text-purple-400" />
               <span>{opponentTacticalNotice}</span>
             </div>
@@ -1258,10 +1324,11 @@ export default function CricketActionVisualizer({
         {/* ═══════════════════════════════════════════════════════════════════════
             RIGHT-SIDE FIELD TACTICS PANEL
         ═══════════════════════════════════════════════════════════════════════ */}
-        <div className="w-full lg:w-84 xl:w-96 bg-slate-950/80 backdrop-blur-xl border-t lg:border-t-0 lg:border-l border-white/10 p-4 flex flex-col justify-between gap-4 z-20">
-          <div className="space-y-4 overflow-y-auto max-h-[520px] pr-1">
-            {/* Team Tactical Control Mode */}
-            <div className="p-2.5 rounded-xl bg-white/[0.03] border border-white/5 space-y-1.5">
+        {!hideSideAndBottomPanels && (
+          <div className="w-full lg:w-84 xl:w-96 bg-slate-950/80 backdrop-blur-xl border-t lg:border-t-0 lg:border-l border-white/10 p-4 flex flex-col justify-between gap-4 z-20">
+            <div className="space-y-4 overflow-y-auto max-h-[520px] pr-1">
+              {/* Team Tactical Control Mode */}
+              <div className="p-2.5 rounded-xl bg-white/[0.03] border border-white/5 space-y-1.5">
               <div className="flex items-center justify-between text-[10px] font-bold">
                 <span className="text-slate-400 uppercase tracking-wider">Tactical Control</span>
                 <span className="text-cyan-400 font-black">{userTeamControlMode.replace('_', ' ')}</span>
@@ -1534,13 +1601,15 @@ export default function CricketActionVisualizer({
             </button>
           </div>
         </div>
+        )}
       </div>
 
       {/* ═══════════════════════════════════════════════════════════════════════
           BOTTOM PANEL: TABS & DELIVERY STATUS
       ═══════════════════════════════════════════════════════════════════════ */}
-      <div className="w-full bg-slate-950/95 backdrop-blur-xl border-t border-white/10">
-        <div className="px-4 py-2 border-b border-white/5 flex flex-wrap items-center justify-between gap-2">
+      {!hideSideAndBottomPanels && (
+        <div className="w-full bg-slate-950/95 backdrop-blur-xl border-t border-white/10">
+          <div className="px-4 py-2 border-b border-white/5 flex flex-wrap items-center justify-between gap-2">
           <div className="flex items-center gap-1">
             {(['FIELD MAP', 'BOWLER PLAN', 'SCORING ZONES', 'AI CAPTAIN'] as const).map((tab) => {
               const tabKey = tab.replace(' ', '_') as BottomPanelTab;
@@ -1797,6 +1866,7 @@ export default function CricketActionVisualizer({
           )}
         </div>
       </div>
+      )}
 
       {/* ═══════════════════════════════════════════════════════════════════════
           DEVELOPMENT-ONLY DEBUG HUD PANEL
