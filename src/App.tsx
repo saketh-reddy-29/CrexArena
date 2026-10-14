@@ -27,7 +27,7 @@ export default function App() {
   const viewedPlayerFranchise = viewedPlayer ? franchises.find(f => f.squad.includes(viewedPlayer.id))?.id : undefined;
 
   return (
-    <main className="min-h-screen bg-zinc-950">
+    <main className="min-h-screen bg-[#f4f6f9] text-slate-900 font-sans">
       {viewedPlayer && (
         <PlayerProfileModal 
           player={viewedPlayer} 

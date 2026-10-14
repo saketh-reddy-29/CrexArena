@@ -26,8 +26,19 @@ export enum MatchFormat {
 export enum MatchStatus {
   UPCOMING = 'Upcoming',
   LIVE = 'Live',
-  COMPLETED = 'Completed'
+  COMPLETED = 'Completed',
+  ABANDONED = 'Abandoned',
+  POSTPONED = 'Postponed'
 }
+
+export type FixtureStatus =
+  | 'SCHEDULED'
+  | 'SQUAD_ANNOUNCED'
+  | 'TOSS_PENDING'
+  | 'LIVE'
+  | 'COMPLETED'
+  | 'ABANDONED'
+  | 'POSTPONED';
 
 export enum TossDecision {
   BAT = 'Bat',
@@ -176,11 +187,20 @@ export interface Fixture {
   team1Id: string;
   team2Id: string;
   status: MatchStatus;
+  fixtureStatus?: FixtureStatus;
   format?: MatchFormat;
   scorecard?: MatchScorecard;
   conditions?: MatchConditions;
   isPlayoff?: boolean;
   playoffType?: 'Qualifier 1' | 'Eliminator' | 'Qualifier 2' | 'Final';
+  venue?: string;
+  startTime?: number;
+  endTime?: number;
+  tournamentId?: string;
+  team1PlayingXI?: string[];
+  team2PlayingXI?: string[];
+  team1Squad?: string[];
+  team2Squad?: string[];
 }
 
 export interface Standing {
@@ -188,11 +208,14 @@ export interface Standing {
   played: number;
   won: number;
   lost: number;
+  drawn?: number;
+  tied?: number;
   points: number;
+  pct?: number; // Test Championship points percentage
   nrr: number;
   runsScored: number;
   oversFaced: number;
   runsConceded: number;
   oversBowled: number;
-  form: Array<'W' | 'L'>;
+  form: Array<'W' | 'L' | 'D' | 'T'>;
 }

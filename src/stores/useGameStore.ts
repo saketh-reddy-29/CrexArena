@@ -10,6 +10,8 @@ import { generateIPLSchedule, generateDoubleRoundRobinSchedule } from '../lib/sc
 import { ProgressionEngine, PerformanceInput } from '../engine/players/progressionEngine';
 import { ArenaPlayerState, ArenaFormat } from '../engine/models/ArenaState';
 import { db } from '../engine/storage/Database';
+import { FixtureScheduler } from '../engine/scheduling/FixtureScheduler';
+import { WorkloadRotationEngine } from '../engine/ai/WorkloadRotationEngine';
 
 // Pre-flight cleanup: if localStorage contains bloated old store payload, strip heavy keys immediately
 try {
@@ -157,12 +159,17 @@ interface GameStore {
   playerSeasonStats: Record<string, PlayerSeasonStats>;
   selectedSquadIds: string[];
   playingXIIds: string[];
+  playerFatigue: Record<string, number>;
+  fixturePlayingXIs: Record<string, { team1XI: string[]; team2XI: string[] }>;
   liveMatchState: Record<string, any> | null;
   selectedFormat: ArenaFormat | null;
   activeTab: ArenaTab;
   viewedPlayerId: string | null;
 
   setArenaId: (arenaId: string) => void;
+  setFixturePlayingXI: (fixtureId: string, team1XI: string[], team2XI: string[]) => void;
+  getFixturePlayingXI: (fixtureId: string, teamId: string) => string[];
+  updatePlayerFatigue: (fatigueMap: Record<string, number>) => void;
   setGameState: (state: GameState) => void;
   setActiveTab: (tab: ArenaTab) => void;
   setFormat: (format: ArenaFormat) => void;
@@ -225,6 +232,8 @@ export const useGameStore = create<GameStore>()(
       playerSeasonStats: {},
       selectedSquadIds: [],
       playingXIIds: [],
+      playerFatigue: {},
+      fixturePlayingXIs: {},
       liveMatchState: null,
       activeTab: 'OVERVIEW',
       viewedPlayerId: null,
@@ -232,6 +241,34 @@ export const useGameStore = create<GameStore>()(
       setArenaId: (arenaId) => set({ activeArenaId: arenaId }),
       setFormat: (format) => set({ selectedFormat: format }),
       setActiveTab: (tab) => set({ activeTab: tab }),
+      setFixturePlayingXI: (fixtureId, team1XI, team2XI) => set((state) => ({
+        fixturePlayingXIs: {
+          ...state.fixturePlayingXIs,
+          [fixtureId]: { team1XI, team2XI }
+        },
+        fixtures: state.fixtures.map(f => f.id === fixtureId ? { ...f, team1PlayingXI: team1XI, team2PlayingXI: team2XI } : f)
+      })),
+      getFixturePlayingXI: (fixtureId, teamId) => {
+        const state = get();
+        const fixture = state.fixtures.find(f => f.id === fixtureId);
+        if (fixture) {
+          if (fixture.team1Id === teamId && fixture.team1PlayingXI && fixture.team1PlayingXI.length === 11) {
+            return fixture.team1PlayingXI;
+          }
+          if (fixture.team2Id === teamId && fixture.team2PlayingXI && fixture.team2PlayingXI.length === 11) {
+            return fixture.team2PlayingXI;
+          }
+        }
+        const entry = state.fixturePlayingXIs[fixtureId];
+        if (entry) {
+          if (fixture?.team1Id === teamId) return entry.team1XI;
+          if (fixture?.team2Id === teamId) return entry.team2XI;
+        }
+        return [];
+      },
+      updatePlayerFatigue: (fatigueMap) => set((state) => ({
+        playerFatigue: { ...state.playerFatigue, ...fatigueMap }
+      })),
       setGameState: (state) => set((prev) => {
         if (prev.gameState === state) return {};
         return { 
@@ -367,6 +404,8 @@ export const useGameStore = create<GameStore>()(
         playerSeasonStats: {},
         selectedSquadIds: [],
         playingXIIds: [],
+        playerFatigue: {},
+        fixturePlayingXIs: {},
         liveMatchState: null,
         activeTab: 'OVERVIEW',
         viewedPlayerId: null,
@@ -424,14 +463,21 @@ export const useGameStore = create<GameStore>()(
       }),
 
       generateSeasonFixtures: () => set((state) => {
-        const fixtureList = generateDoubleRoundRobinSchedule(state.franchises, state.selectedFormat || 'T20');
+        const fixtureList = FixtureScheduler.generateTournamentSchedule(
+          state.franchises,
+          state.selectedFormat || 'T20',
+          { isDoubleRoundRobin: state.selectedFormat === 'IPL' || state.franchises.length <= 6 }
+        );
 
         const initialStandings: Standing[] = state.franchises.map(t => ({
           teamId: t.id,
           played: 0,
           won: 0,
           lost: 0,
+          drawn: 0,
+          tied: 0,
           points: 0,
+          pct: 0,
           nrr: 0,
           runsScored: 0,
           oversFaced: 0,
@@ -444,50 +490,92 @@ export const useGameStore = create<GameStore>()(
       }),
 
       updateMatchResult: (matchId, scorecard) => set((state) => {
+        const existingFixture = state.fixtures.find(f => f.id === matchId);
+        if (existingFixture && existingFixture.status === MatchStatus.COMPLETED && existingFixture.scorecard) {
+          return state;
+        }
+
         const updatedFixtures = state.fixtures.map(f => 
-          f.id === matchId ? { ...f, status: MatchStatus.COMPLETED, scorecard } : f
+          f.id === matchId ? { ...f, status: MatchStatus.COMPLETED, fixtureStatus: 'COMPLETED' as const, scorecard } : f
         );
 
         const { team1Id, team2Id, winnerId } = scorecard;
         const team1Innings = scorecard.innings[0];
         const team2Innings = scorecard.innings[1];
+        const isTest = (state.selectedFormat || '').toUpperCase() === 'TEST';
 
         // Standings calculation
         const updatedStandings = state.standings.map(s => {
-          if (s.teamId === team1Id) {
-            const isWinner = winnerId === team1Id;
-            const overs = team1Innings.overs + (team1Innings.balls / 6);
-            const oppOvers = team2Innings.overs + (team2Innings.balls / 6);
-            
+          if (s.teamId === team1Id || s.teamId === team2Id) {
+            const isTeam1 = s.teamId === team1Id;
+            const myInnings = isTeam1 ? team1Innings : team2Innings;
+            const oppInnings = isTeam1 ? team2Innings : team1Innings;
+            const isWinner = winnerId === s.teamId;
+            const isTie = winnerId === 'TIE';
+            const isDraw = !winnerId || winnerId === 'DRAW';
+
+            const myOvers = myInnings.overs + (myInnings.balls / 6);
+            const oppOvers = oppInnings.overs + (oppInnings.balls / 6);
+
+            let pointsGained = 0;
+            let resultForm: 'W' | 'L' | 'D' | 'T' = 'L';
+            let wonAdd = 0;
+            let lostAdd = 0;
+            let drawnAdd = 0;
+            let tiedAdd = 0;
+
+            if (isTest) {
+              if (isWinner) {
+                pointsGained = 12;
+                resultForm = 'W';
+                wonAdd = 1;
+              } else if (isTie) {
+                pointsGained = 6;
+                resultForm = 'T';
+                tiedAdd = 1;
+              } else if (isDraw) {
+                pointsGained = 4;
+                resultForm = 'D';
+                drawnAdd = 1;
+              } else {
+                pointsGained = 0;
+                resultForm = 'L';
+                lostAdd = 1;
+              }
+            } else {
+              if (isWinner) {
+                pointsGained = 2;
+                resultForm = 'W';
+                wonAdd = 1;
+              } else if (isTie || isDraw) {
+                pointsGained = 1;
+                resultForm = 'T';
+                tiedAdd = 1;
+              } else {
+                pointsGained = 0;
+                resultForm = 'L';
+                lostAdd = 1;
+              }
+            }
+
+            const newPlayed = s.played + 1;
+            const newPoints = s.points + pointsGained;
+            const newPct = isTest && newPlayed > 0 ? Math.round((newPoints / (newPlayed * 12)) * 1000) / 10 : undefined;
+
             return {
               ...s,
-              played: s.played + 1,
-              won: isWinner ? s.won + 1 : s.won,
-              lost: isWinner ? s.lost : s.lost + 1,
-              points: isWinner ? s.points + 2 : s.points,
-              runsScored: s.runsScored + team1Innings.runs,
-              oversFaced: s.oversFaced + overs,
-              runsConceded: s.runsConceded + team2Innings.runs,
+              played: newPlayed,
+              won: s.won + wonAdd,
+              lost: s.lost + lostAdd,
+              drawn: (s.drawn || 0) + drawnAdd,
+              tied: (s.tied || 0) + tiedAdd,
+              points: newPoints,
+              pct: newPct,
+              runsScored: s.runsScored + myInnings.runs,
+              oversFaced: s.oversFaced + myOvers,
+              runsConceded: s.runsConceded + oppInnings.runs,
               oversBowled: s.oversBowled + oppOvers,
-              form: [...s.form, isWinner ? 'W' : 'L' as 'W' | 'L'].slice(-5)
-            };
-          }
-          if (s.teamId === team2Id) {
-            const isWinner = winnerId === team2Id;
-            const overs = team2Innings.overs + (team2Innings.balls / 6);
-            const oppOvers = team1Innings.overs + (team1Innings.balls / 6);
-            
-            return {
-              ...s,
-              played: s.played + 1,
-              won: isWinner ? s.won + 1 : s.won,
-              lost: isWinner ? s.lost : s.lost + 1,
-              points: isWinner ? s.points + 2 : s.points,
-              runsScored: s.runsScored + team2Innings.runs,
-              oversFaced: s.oversFaced + overs,
-              runsConceded: s.runsConceded + team1Innings.runs,
-              oversBowled: s.oversBowled + oppOvers,
-              form: [...s.form, isWinner ? 'W' : 'L' as 'W' | 'L'].slice(-5)
+              form: [...s.form, resultForm].slice(-5)
             };
           }
           return s;
@@ -495,9 +583,31 @@ export const useGameStore = create<GameStore>()(
 
         updatedStandings.forEach(s => {
           if (s.oversFaced > 0 && s.oversBowled > 0) {
-            s.nrr = (s.runsScored / s.oversFaced) - (s.runsConceded / s.oversBowled);
+            s.nrr = Math.round(((s.runsScored / s.oversFaced) - (s.runsConceded / s.oversBowled)) * 1000) / 1000;
           }
         });
+
+        // Player Fatigue Update
+        const updatedFatigue = { ...state.playerFatigue };
+        const applyFatigue = (innings: InningsData) => {
+          Object.entries(innings.batsmen).forEach(([playerId, stats]) => {
+            const player = state.players.find(p => p.id === playerId);
+            if (player) {
+              const inc = WorkloadRotationEngine.calculateMatchFatigue(player, stats.balls, 0, false);
+              updatedFatigue[playerId] = Math.min(100, (updatedFatigue[playerId] || 0) + inc);
+            }
+          });
+          Object.entries(innings.bowlers).forEach(([playerId, stats]) => {
+            const player = state.players.find(p => p.id === playerId);
+            if (player) {
+              const overs = stats.overs + (stats.balls / 6);
+              const inc = WorkloadRotationEngine.calculateMatchFatigue(player, 0, overs, false);
+              updatedFatigue[playerId] = Math.min(100, (updatedFatigue[playerId] || 0) + inc);
+            }
+          });
+        };
+        applyFatigue(team1Innings);
+        applyFatigue(team2Innings);
 
         // Season Stats aggregation
         const newPlayerStats = { ...state.playerSeasonStats };
@@ -621,6 +731,7 @@ export const useGameStore = create<GameStore>()(
           standings: updatedStandings, 
           playerSeasonStats: newPlayerStats,
           arenaPlayerStates: updatedRecentPlayerStates,
+          playerFatigue: updatedFatigue,
         };
       }),
 
@@ -853,12 +964,15 @@ export const useGameStore = create<GameStore>()(
         currentMatchId: state.currentMatchId,
         currentMatchToss: state.currentMatchToss,
         playerSeasonStats: state.playerSeasonStats,
+        playerFatigue: state.playerFatigue,
+        fixturePlayingXIs: state.fixturePlayingXIs,
         franchises: state.franchises,
         activeTab: state.activeTab,
       }),
       storage: {
         getItem: (name) => {
           try {
+            if (typeof window === 'undefined' || typeof localStorage === 'undefined') return null;
             const raw = localStorage.getItem(name);
             return raw ? JSON.parse(raw) : null;
           } catch {
@@ -867,33 +981,38 @@ export const useGameStore = create<GameStore>()(
         },
         setItem: (name, value) => {
           try {
+            if (typeof window === 'undefined' || typeof localStorage === 'undefined') return;
             localStorage.setItem(name, JSON.stringify(value));
           } catch (err) {
-            console.warn(`[useGameStore] Storage quota warning for ${name}:`, err);
-            try {
-              localStorage.removeItem('cricket-arena-v3');
-              const minimal = {
-                state: {
-                  activeArenaId: value?.state?.activeArenaId,
-                  gameState: value?.state?.gameState,
-                  selectedFormat: value?.state?.selectedFormat,
-                  selectedFranchiseId: value?.state?.selectedFranchiseId,
-                  selectedSquadIds: value?.state?.selectedSquadIds,
-                  playingXIIds: value?.state?.playingXIIds,
-                  currentMatchId: value?.state?.currentMatchId,
-                  activeTab: value?.state?.activeTab,
-                },
-                version: value?.version,
-              };
-              localStorage.setItem(name, JSON.stringify(minimal));
-            } catch (fallbackErr) {
-              console.error('[useGameStore] Emergency storage fallback failed:', fallbackErr);
+            if (typeof localStorage !== 'undefined') {
+              console.warn(`[useGameStore] Storage quota warning for ${name}:`, err);
+              try {
+                localStorage.removeItem('cricket-arena-v3');
+                const minimal = {
+                  state: {
+                    activeArenaId: value?.state?.activeArenaId,
+                    gameState: value?.state?.gameState,
+                    selectedFormat: value?.state?.selectedFormat,
+                    selectedFranchiseId: value?.state?.selectedFranchiseId,
+                    selectedSquadIds: value?.state?.selectedSquadIds,
+                    playingXIIds: value?.state?.playingXIIds,
+                    currentMatchId: value?.state?.currentMatchId,
+                    activeTab: value?.state?.activeTab,
+                  },
+                  version: value?.version,
+                };
+                localStorage.setItem(name, JSON.stringify(minimal));
+              } catch (fallbackErr) {
+                console.error('[useGameStore] Emergency storage fallback failed:', fallbackErr);
+              }
             }
           }
         },
         removeItem: (name) => {
           try {
-            localStorage.removeItem(name);
+            if (typeof window !== 'undefined' && typeof localStorage !== 'undefined') {
+              localStorage.removeItem(name);
+            }
           } catch {}
         },
       },

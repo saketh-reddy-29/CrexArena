@@ -11,23 +11,30 @@ A broadcast-quality cricket match simulation engine and interactive 2D stadium v
 ```
 CrexArena/
 ├── src/
-│   ├── components/                 # UI Layer
+│   ├── components/                 # UI Layer (Unified CREX Design System)
+│   │   ├── TopMatchesCarousel.tsx  # Horizontal match carousel with format/status filter pills
 │   │   ├── CricketActionVisualizer.tsx # 2D stadium, Canvas trajectory, fielders, AI Captain HUD
 │   │   ├── PlayerSelectionDrawer.tsx # Modal drawer for manual openers, batter & bowler selection
 │   │   ├── LiveMatchCenter.tsx     # Central match coordinator, broadcast scoreboard, timeline
+│   │   ├── PreMatch.tsx            # Match-Day Team Selection & Coin Toss with fatigue & pitch adaptation
+│   │   ├── ArenaHub.tsx            # Unified tournament hub with CREX pill navigation
 │   │   ├── TeamSelection.tsx       # Tournament franchise / international team picker
-│   │   ├── SquadSelection.tsx      # Squad roster management & budget
-│   │   ├── PlayingXISelection.tsx  # Locked 11-player lineup selector
-│   │   ├── TournamentHub.tsx       # Competition fixtures & points table
+│   │   ├── BoardSelection.tsx      # 15-man tournament squad builder with AI squad advisor
+│   │   ├── league/
+│   │   │   ├── ScheduleTab.tsx     # Fixture calendar with match status, scores & auto-sim
+│   │   │   └── LeaderboardTab.tsx  # CREX points table with NRR, Test PCT% & recent form pills
 │   │   └── ...
 │   │
 │   ├── engine/                     # Cricket Simulation Core
-│   │   ├── config/
-│   │   │   └── MatchFormatConfig.ts    # Centralized rules, overs, caps, run distributions & DRS
+│   │   ├── scheduling/
+│   │   │   └── FixtureScheduler.ts     # Realistic durations, overlap conflict detection, rest days & Test reservations
 │   │   ├── ai/
+│   │   │   ├── WorkloadRotationEngine.ts # Fatigue tracking, rest recovery, pitch adaptation & smart Playing XI rotation
 │   │   │   ├── AICaptainEngine.ts      # Bowler rotation, workload limits, tactical adjustments
 │   │   │   ├── BatterDecisionEngine.ts # Settledness (0-100%), psychology, 7 batting intents
 │   │   │   └── BowlingPlanEngine.ts    # Line, length, variation, risk profile, target zones
+│   │   ├── config/
+│   │   │   └── MatchFormatConfig.ts    # Centralized rules, overs, caps, run distributions & DRS
 │   │   ├── core/
 │   │   │   └── DeliveryResultFactory.ts# Single authoritative immutable DeliveryResult factory
 │   │   ├── simulation/
@@ -43,14 +50,17 @@ CrexArena/
 │   │   └── playerImages.ts         # Player headshot resolution and fallbacks
 │   │
 │   ├── stores/
-│   │   └── useGameStore.ts         # Zustand global state (franchises, players, live match state)
+│   │   └── useGameStore.ts         # Zustand global state (fixtures, standings, fatigue, isolated Playing XIs)
 │   │
 │   ├── types/
 │   │   ├── delivery.ts             # DeliveryResult, DeliveryLifecycle, BallTrajectoryPath
-│   │   ├── match.ts                # PitchType, WeatherCondition, InningsData, DRSReview
+│   │   ├── match.ts                # PitchType, WeatherCondition, Fixture, Standing, DRSReview
 │   │   └── common.ts               # Player, Franchise, SkillStats interfaces
 │   │
-│   └── tests/                      # Automated Vitest Suite (77 tests across 12 suites)
+│   └── tests/                      # Automated Vitest Suite (93 tests across 15 suites)
+│       ├── fixtureScheduler.test.ts      # Durations, overlap conflicts, Test reservations, rest validation
+│       ├── workloadRotationEngine.test.ts# Fatigue, recovery, balance checks, pitch adaptation, rotation
+│       ├── matchIsolationAndStandings.test.ts # Fixture Playing XI isolation, idempotency, Test PCT & NRR
 │       ├── formatConfig.test.ts          # Format overs, bowler caps, wicket probabilities & runs
 │       ├── fieldMapCoordinates.test.ts   # Boundary clamping, pitch strip safety, left-hand mirroring
 │       ├── singleSourceOfTruth.test.ts   # DeliveryResult immutability & replay safety

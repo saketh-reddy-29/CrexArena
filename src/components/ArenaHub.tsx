@@ -8,6 +8,7 @@ import SquadPlanner from './SquadPlanner';
 import AuctionRoom from './AuctionRoom';
 import PlayerStatsView from './stats/PlayerStatsView';
 import TeamStatsView from './stats/TeamStatsView';
+import TopMatchesCarousel from './TopMatchesCarousel';
 import { cn } from '../lib/utils';
 
 export default function ArenaHub() {
@@ -18,9 +19,6 @@ export default function ArenaHub() {
     setGameState,
     franchises,
     selectedFranchiseId,
-    viewedPlayerId,
-    setViewedPlayer,
-    players
   } = useGameStore();
 
   const team = franchises.find(f => f.id === selectedFranchiseId);
@@ -74,6 +72,7 @@ export default function ArenaHub() {
         return <AuctionRoom />;
       case 'MATCHES':
       case 'SERIES':
+      case 'PLAYOFFS':
         return (
           <div className="p-4 sm:p-6 max-w-6xl mx-auto">
             <ScheduleTab franchises={franchises} />
@@ -83,12 +82,6 @@ export default function ArenaHub() {
         return (
           <div className="p-4 sm:p-6 max-w-6xl mx-auto">
             <LeaderboardTab franchises={franchises} />
-          </div>
-        );
-      case 'PLAYOFFS':
-        return (
-          <div className="p-4 sm:p-6 max-w-6xl mx-auto">
-            <ScheduleTab franchises={franchises} />
           </div>
         );
       case 'PLAYER_STATS':
@@ -102,39 +95,36 @@ export default function ArenaHub() {
 
   if (!team) return null;
 
-  const viewedPlayer = players.find(p => p.id === viewedPlayerId) || null;
-  const viewedPlayerFranchise = viewedPlayer ? franchises.find(f => f.squad.includes(viewedPlayer.id))?.id : undefined;
-
   return (
-    <div className="min-h-screen flex flex-col bg-zinc-950 text-white font-sans overflow-hidden">
+    <div className="min-h-screen flex flex-col bg-[#f4f6f9] text-slate-900 font-sans overflow-hidden">
       
       {/* Top Header */}
-      <header className="bg-zinc-950 border-b border-zinc-800 shrink-0">
+      <header className="bg-white border-b border-slate-200/90 shrink-0 shadow-xs z-30">
         <div className="max-w-7xl mx-auto px-4 sm:px-6">
-          <div className="py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             
             {/* Context & Back */}
-            <div className="flex items-center gap-4">
+            <div className="flex items-center gap-3">
               <button 
                 onClick={() => setGameState(GameState.LANDING)}
-                className="w-8 h-8 rounded-full bg-zinc-900 border border-zinc-800 flex items-center justify-center hover:bg-zinc-800 transition-colors shrink-0"
+                className="w-8 h-8 rounded-full bg-slate-100 border border-slate-200 flex items-center justify-center hover:bg-slate-200 transition-colors shrink-0 text-slate-600"
               >
-                <ArrowLeft className="w-4 h-4 text-zinc-400" />
+                <ArrowLeft className="w-4 h-4" />
               </button>
               <div>
                 <div className="flex items-center gap-2">
-                  <span className="text-[10px] font-black uppercase tracking-widest text-zinc-500">
+                  <span className="text-[10px] font-black uppercase tracking-wider text-blue-700 bg-blue-50 px-2 py-0.5 rounded">
                     {selectedFormat} 2026
                   </span>
                   <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                  <span className="text-[10px] font-black uppercase tracking-widest text-emerald-500">LIVE</span>
+                  <span className="text-[10px] font-black uppercase tracking-wider text-emerald-600">LIVE ARENA</span>
                 </div>
-                <h1 className="text-lg font-black tracking-tight">{team.name}</h1>
+                <h1 className="text-base font-black tracking-tight text-slate-900">{team.name}</h1>
               </div>
             </div>
 
             {/* Navigation Tabs */}
-            <div className="flex items-center gap-1 overflow-x-auto custom-scrollbar pb-2 sm:pb-0 hide-scrollbar-sm">
+            <div className="flex items-center gap-1.5 overflow-x-auto custom-scrollbar pb-1 sm:pb-0 hide-scrollbar-sm">
               {tabs.map((tab) => {
                 const isActive = activeTab === tab.id;
                 return (
@@ -142,10 +132,10 @@ export default function ArenaHub() {
                     key={tab.id}
                     onClick={() => setActiveTab(tab.id)}
                     className={cn(
-                      "px-4 py-2 text-xs font-bold uppercase tracking-wider rounded-full whitespace-nowrap transition-all duration-200 shrink-0",
+                      "px-3.5 py-1.5 text-xs font-bold uppercase tracking-wide rounded-full whitespace-nowrap transition-all duration-200 shrink-0",
                       isActive 
-                        ? "bg-white text-zinc-950" 
-                        : "text-zinc-400 hover:text-white hover:bg-zinc-900"
+                        ? "bg-blue-600 text-white shadow-xs" 
+                        : "text-slate-600 hover:text-slate-900 bg-slate-100 hover:bg-slate-200"
                     )}
                   >
                     {tab.label}
@@ -157,6 +147,9 @@ export default function ArenaHub() {
           </div>
         </div>
       </header>
+
+      {/* Top Matches Carousel */}
+      <TopMatchesCarousel />
 
       {/* Main Content Area */}
       <div className="flex-1 overflow-y-auto custom-scrollbar relative">

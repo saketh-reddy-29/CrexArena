@@ -1,14 +1,14 @@
-import React, { useState, useMemo } from 'react';
-import { motion, AnimatePresence } from 'motion/react';
+import React, { useState, useMemo, useEffect } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { useGameStore, GameState } from '../stores/useGameStore';
 import { MatchEngine } from '../lib/matchEngine';
-import { TossDecision } from '../types/match';
-import { ArrowLeft, Users, Trophy, CheckCircle2, ChevronRight, Sparkles, Shield } from 'lucide-react';
+import { TossDecision, PitchType, WeatherCondition } from '../types/match';
+import { ArrowLeft, Users, Trophy, CheckCircle2, ChevronRight, Sparkles, Shield, AlertTriangle, Star, Activity, CloudSun, Wind } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { getPlayerImage, handlePlayerImageError } from '../lib/playerImages';
-import JerseyPlayerImage from './JerseyPlayerImage';
 import { getIntlTeamLogoUrl } from '../data/crexIntlTeams';
 import { getPlayerRating } from '../lib/ratingEngine';
+import { WorkloadRotationEngine } from '../engine/ai/WorkloadRotationEngine';
 
 const IPL_TEAM_LOGOS: Record<string, string> = {
   MI:   'https://cricketvectors.akamaized.net/Teams/F.png',
@@ -23,22 +23,39 @@ const IPL_TEAM_LOGOS: Record<string, string> = {
   PBKS: 'https://cricketvectors.akamaized.net/Teams/I.png',
 };
 
-function resolveTeamLogo(team?: { shortName: string; logo?: string } | null): string {
-  if (!team) return '';
-  return getIntlTeamLogoUrl(team.shortName) || IPL_TEAM_LOGOS[team.shortName] || team.logo || '';
+function resolveTeamLogo(shortName?: string): string {
+  if (!shortName) return '';
+  return getIntlTeamLogoUrl(shortName) || IPL_TEAM_LOGOS[shortName] || '';
 }
 
 export default function PreMatch() {
-  const { currentMatchId, fixtures, franchises, players, selectedFranchiseId, selectedSquadIds, playingXIIds, setSelectedSquadIds, setPlayingXIIds, setCurrentMatchToss, setCaptain, setGameState } = useGameStore();
-  const isIPL = useGameStore(s => s.selectedFormat === 'IPL');
-  const currentMatch = fixtures.find(f => f.id === currentMatchId);
-  const userTeam = franchises.find(f => f.id === selectedFranchiseId);
-  
-  const team1 = franchises.find(f => f.id === currentMatch?.team1Id);
-  const team2 = franchises.find(f => f.id === currentMatch?.team2Id);
+  const {
+    currentMatchId,
+    fixtures,
+    franchises,
+    players,
+    selectedFranchiseId,
+    selectedSquadIds,
+    playingXIIds,
+    playerFatigue,
+    setPlayingXIIds,
+    setFixturePlayingXI,
+    setCurrentMatchToss,
+    setCaptain,
+    setGameState,
+  } = useGameStore();
+
+  const isIPL = useGameStore((s) => s.selectedFormat === 'IPL');
+  const format = (useGameStore((s) => s.selectedFormat) || 'T20') as any;
+
+  const currentMatch = fixtures.find((f) => f.id === currentMatchId);
+  const userTeam = franchises.find((f) => f.id === selectedFranchiseId);
+
+  const team1 = franchises.find((f) => f.id === currentMatch?.team1Id);
+  const team2 = franchises.find((f) => f.id === currentMatch?.team2Id);
   const opponentTeam = team1?.id === userTeam?.id ? team2 : team1;
 
-  React.useEffect(() => {
+  useEffect(() => {
     if (!userTeam || !opponentTeam) {
       setGameState(GameState.LANDING);
     }
@@ -46,92 +63,108 @@ export default function PreMatch() {
 
   if (!userTeam || !opponentTeam) return null;
 
-  // Enforce squad selection BEFORE the toss only
+  // Step state: squad selection vs toss
   const [step, setStep] = useState<'squad' | 'toss'>('squad');
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
-  const [captainId, setCaptainId] = useState<string | null>(null);
+  const [captainId, setCaptainId] = useState<string | null>(userTeam.captainId || null);
   const [tossResult, setTossResult] = useState<{ winnerId: string; decision: TossDecision | null } | null>(null);
   const [isFlipping, setIsFlipping] = useState(false);
 
-  // For international: use selectedSquadIds (15-man) or fallback. For IPL: use franchise.squad.
-  const teamPlayers = useMemo(() => {
+  // Match Conditions
+  const pitchType = useMemo<PitchType>(() => {
+    if (currentMatch?.conditions?.pitchType) return currentMatch.conditions.pitchType;
+    return MatchEngine.generatePitch();
+  }, [currentMatch]);
+
+  const weather = useMemo<WeatherCondition>(() => {
+    if (currentMatch?.conditions?.weather) return currentMatch.conditions.weather;
+    return MatchEngine.generateWeather();
+  }, [currentMatch]);
+
+  // User Squad
+  const userSquad = useMemo(() => {
     if (isIPL) {
-      return players.filter(p => userTeam?.squad?.includes(p.id));
+      return players.filter((p) => userTeam.squad.includes(p.id));
     }
     if (selectedSquadIds && selectedSquadIds.length > 0) {
-      const selected = players.filter(p => selectedSquadIds.includes(p.id));
+      const selected = players.filter((p) => selectedSquadIds.includes(p.id));
       if (selected.length > 0) return selected;
     }
-    const intended = players.filter(p => p.intendedTeamId === userTeam?.id);
+    const intended = players.filter((p) => p.intendedTeamId === userTeam.id);
     if (intended.length > 0) return intended;
-    return players.filter(p => userTeam?.squad?.includes(p.id));
+    return players.filter((p) => userTeam.squad.includes(p.id));
   }, [isIPL, players, userTeam, selectedSquadIds]);
 
-  const autoSelectSquad = () => {
-    const activeFormat = (useGameStore.getState().selectedFormat) || 'T20';
-    const ratePlayer = (p: typeof players[0]) => getPlayerRating(p, activeFormat);
-    const sorted = [...teamPlayers].sort((a, b) => ratePlayer(b) - ratePlayer(a));
-
-    const keepers = sorted.filter(p => p.role === 'Wicketkeeper');
-    const batsmen = sorted.filter(p => p.role === 'Batsman');
-    const allrounders = sorted.filter(p => p.role === 'All-rounder');
-    const bowlers = sorted.filter(p => p.role === 'Bowler');
-
-    const selected: string[] = [];
-    
-    // Pick 1 Wicketkeeper
-    if (keepers[0]) selected.push(keepers[0].id);
-
-    // Pick top 4 batsmen
-    selected.push(...batsmen.filter(p => !selected.includes(p.id)).slice(0, 4).map(p => p.id));
-
-    // Pick top 2 all-rounders
-    selected.push(...allrounders.filter(p => !selected.includes(p.id)).slice(0, 2).map(p => p.id));
-
-    // Pick top 4 bowlers
-    selected.push(...bowlers.filter(p => !selected.includes(p.id)).slice(0, 4).map(p => p.id));
-
-    // Fill remaining up to 11
-    if (selected.length < 11) {
-      for (const p of sorted) {
-        if (selected.length >= 11) break;
-        if (!selected.includes(p.id)) {
-          selected.push(p.id);
-        }
-      }
+  // Opponent Squad
+  const opponentSquad = useMemo(() => {
+    if (isIPL) {
+      return players.filter((p) => opponentTeam.squad.includes(p.id));
     }
+    const intended = players.filter((p) => p.intendedTeamId === opponentTeam.id);
+    if (intended.length > 0) return intended;
+    return players.filter((p) => opponentTeam.squad.includes(p.id));
+  }, [isIPL, players, opponentTeam]);
 
-    setSelectedIds(selected.slice(0, 11));
+  // Opponent Tactical AI Playing XI
+  const opponentOptimalSelection = useMemo(() => {
+    return WorkloadRotationEngine.selectOptimalPlayingXI({
+      squad: opponentSquad,
+      pitchType,
+      format,
+      fatigueMap: playerFatigue,
+      previousXI: currentMatch?.team2PlayingXI || [],
+    });
+  }, [opponentSquad, pitchType, format, playerFatigue, currentMatch]);
 
-    if (userTeam?.captainId && selected.includes(userTeam.captainId)) {
-      setCaptainId(userTeam.captainId);
-    } else {
-      const best = teamPlayers.filter(p => selected.includes(p.id)).sort((a, b) => ratePlayer(b) - ratePlayer(a))[0];
-      if (best) setCaptainId(best.id);
-    }
-  };
-
-  React.useEffect(() => {
-    if (teamPlayers.length === 0) return;
+  // Initial Squad Auto-Selection for User
+  useEffect(() => {
+    if (userSquad.length === 0) return;
     if (selectedIds.length === 0) {
-      const existing = playingXIIds.filter(id => teamPlayers.some(p => p.id === id));
-      if (existing.length === 11) {
-        setSelectedIds(existing);
-        if (userTeam?.captainId && existing.includes(userTeam.captainId)) {
-          setCaptainId(userTeam.captainId);
-        } else {
-          const best = teamPlayers.filter(p => existing.includes(p.id)).sort((a, b) => b.rating - a.rating)[0];
-          if (best) setCaptainId(best.id);
-        }
+      const existingFixtureXI = currentMatch
+        ? currentMatch.team1Id === userTeam.id
+          ? currentMatch.team1PlayingXI
+          : currentMatch.team2PlayingXI
+        : undefined;
+
+      if (existingFixtureXI && existingFixtureXI.length === 11) {
+        setSelectedIds(existingFixtureXI);
       } else {
-        autoSelectSquad();
+        const auto = WorkloadRotationEngine.selectOptimalPlayingXI({
+          squad: userSquad,
+          pitchType,
+          format,
+          fatigueMap: playerFatigue,
+          mustIncludeIds: userTeam.captainId ? [userTeam.captainId] : [],
+        });
+        setSelectedIds(auto.playingXI);
       }
     }
-  }, [teamPlayers]);
+  }, [userSquad, currentMatch, userTeam, pitchType, format, playerFatigue]);
+
+  // Validate composition
+  const selectedPlayers = useMemo(
+    () => userSquad.filter((p) => selectedIds.includes(p.id)),
+    [userSquad, selectedIds]
+  );
+
+  const keepersCount = selectedPlayers.filter((p) => p.role === 'Wicketkeeper').length;
+  const bowlersCount = selectedPlayers.filter((p) => p.role === 'Bowler' || p.role === 'All-rounder').length;
+  const isValidXI = selectedIds.length === 11 && keepersCount >= 1 && bowlersCount >= 5;
+
+  const handleAutoBalance = () => {
+    const auto = WorkloadRotationEngine.selectOptimalPlayingXI({
+      squad: userSquad,
+      pitchType,
+      format,
+      fatigueMap: playerFatigue,
+      mustIncludeIds: captainId ? [captainId] : [],
+    });
+    setSelectedIds(auto.playingXI);
+  };
 
   const togglePlayer = (id: string) => {
     if (selectedIds.includes(id)) {
-      setSelectedIds(selectedIds.filter(i => i !== id));
+      setSelectedIds(selectedIds.filter((pId) => pId !== id));
       if (captainId === id) setCaptainId(null);
     } else {
       if (selectedIds.length < 11) {
@@ -144,330 +177,448 @@ export default function PreMatch() {
   const handleToss = () => {
     setIsFlipping(true);
     setTimeout(() => {
-        setIsFlipping(false);
-        const winnerId = Math.random() > 0.5 ? userTeam?.id! : opponentTeam?.id!;
-        const opponentDecision = winnerId !== userTeam?.id ? (Math.random() > 0.5 ? TossDecision.BAT : TossDecision.BOWL) : null;
-        setTossResult({ winnerId, decision: opponentDecision });
-    }, 2000);
-  };
-
-  const handleDecision = (decision: TossDecision) => {
-    setTossResult(prev => prev ? { ...prev, decision } : null);
+      setIsFlipping(false);
+      const isUserWinner = Math.random() > 0.5;
+      const winnerId = isUserWinner ? userTeam.id : opponentTeam.id;
+      // If opponent wins toss, AI decides: on batting pitch bat, on green pitch bowl
+      let decision: TossDecision | null = null;
+      if (!isUserWinner) {
+        decision = pitchType === PitchType.PACE || weather === WeatherCondition.CLOUDY ? TossDecision.BOWL : TossDecision.BAT;
+      }
+      setTossResult({ winnerId, decision });
+    }, 1500);
   };
 
   const proceedToToss = () => {
-    if (selectedIds.length !== 11) return;
-    const activeFormat = (useGameStore.getState().selectedFormat) || 'T20';
-    let effectiveCaptain = captainId;
-    if (!effectiveCaptain || !selectedIds.includes(effectiveCaptain)) {
-      const best = teamPlayers.filter(p => selectedIds.includes(p.id)).sort((a, b) => getPlayerRating(b, activeFormat) - getPlayerRating(a, activeFormat))[0];
-      effectiveCaptain = best ? best.id : selectedIds[0];
-      setCaptainId(effectiveCaptain);
+    if (!isValidXI) return;
+    let effCaptain = captainId;
+    if (!effCaptain || !selectedIds.includes(effCaptain)) {
+      const best = selectedPlayers.sort((a, b) => b.rating - a.rating)[0];
+      effCaptain = best ? best.id : selectedIds[0];
+      setCaptainId(effCaptain);
     }
-    if (userTeam && effectiveCaptain) {
-      setCaptain(userTeam.id, effectiveCaptain);
+    if (effCaptain) {
+      setCaptain(userTeam.id, effCaptain);
     }
-    setPlayingXIIds(selectedIds);
     setStep('toss');
   };
 
   const startMatch = () => {
-    if (userTeam && captainId) {
-        setCaptain(userTeam.id, captainId);
+    if (captainId) {
+      setCaptain(userTeam.id, captainId);
     }
     if (tossResult && tossResult.decision) {
-        setCurrentMatchToss({ winnerId: tossResult.winnerId, decision: tossResult.decision });
+      setCurrentMatchToss({ winnerId: tossResult.winnerId, decision: tossResult.decision });
+    }
+
+    const team1XI = currentMatch?.team1Id === userTeam.id ? selectedIds : opponentOptimalSelection.playingXI;
+    const team2XI = currentMatch?.team1Id === userTeam.id ? opponentOptimalSelection.playingXI : selectedIds;
+
+    if (currentMatch) {
+      setFixturePlayingXI(currentMatch.id, team1XI, team2XI);
     }
     setPlayingXIIds(selectedIds);
     setGameState(GameState.MATCH_SIMULATION);
   };
 
-  if (!userTeam || !opponentTeam) return null;
+  const getPitchAdvice = (type: PitchType) => {
+    switch (type) {
+      case PitchType.PACE:
+        return 'Green grass top: sharp bounce and early seam movement. Fast bowlers highly effective.';
+      case PitchType.SPIN:
+        return 'Dry and dusty surface: sharp turn and grip. Spinners will dictate the game.';
+      case PitchType.BATTING:
+        return 'Flat batting paradise: true bounce and high-scoring ground. Deep batting lineup recommended.';
+      case PitchType.SLOW:
+        return 'Two-paced, low surface: pace-off cutters and tight defensive lines are critical.';
+      default:
+        return 'Evenly balanced sporting pitch offering equal competition between bat and ball.';
+    }
+  };
 
   return (
-    <div className="min-h-screen bg-zinc-950 text-white font-sans flex flex-col relative overflow-hidden">
-      {/* Ambient effects & Background */}
-      <div className="absolute inset-0 bg-[url('https://images.unsplash.com/photo-1540747913346-19e32dc3e97e?q=80&w=2000&auto=format&fit=crop')] bg-cover bg-center bg-no-repeat opacity-40 pointer-events-none mix-blend-luminosity" />
-      <div className="absolute inset-0 bg-gradient-to-t from-zinc-950 via-zinc-950/60 to-zinc-950/20 pointer-events-none" />
-      <div className="absolute inset-0 pointer-events-none">
-        <div className="absolute top-[-20%] left-[5%] w-[45%] h-[45%] rounded-full bg-zinc-800/20 blur-[100px]" />
-        <div className="absolute bottom-[-15%] right-[-10%] w-[35%] h-[35%] rounded-full bg-zinc-800/15 blur-[80px]" />
-      </div>
-      {/* Header */}
-      <header className="sticky top-0 z-50 bg-zinc-950/80 backdrop-blur-xl border-b border-zinc-800/60 px-4 py-3 sm:px-6">
-        <div className="max-w-4xl mx-auto flex items-center gap-3">
-          <button 
-            onClick={() => setGameState(GameState.ARENA_HUB)}
-            className="w-9 h-9 rounded-lg bg-white/5 border border-white/[.06] flex items-center justify-center hover:bg-white/10 transition-colors shrink-0"
-          >
-            <ArrowLeft className="w-4 h-4" />
-          </button>
-          <div className="flex-1 flex items-center justify-center gap-3 min-w-0">
-            <div className="flex items-center gap-2">
-                <img src={resolveTeamLogo(userTeam)} alt={userTeam.shortName} className="w-6 h-6 object-contain" />
-                <span className="text-sm font-bold hidden sm:inline truncate">{userTeam.name}</span>
-            </div>
-            <span className="text-[10px] font-bold text-white/20">VS</span>
-            <div className="flex items-center gap-2">
-                <span className="text-sm font-bold hidden sm:inline truncate">{opponentTeam.name}</span>
-                <img src={resolveTeamLogo(opponentTeam)} alt={opponentTeam.shortName} className="w-6 h-6 object-contain" />
+    <div className="min-h-screen bg-[#f4f6f9] text-slate-900 font-sans flex flex-col">
+      {/* CREX Top Bar */}
+      <header className="bg-white border-b border-slate-200/90 sticky top-0 z-40">
+        <div className="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => setGameState(GameState.ARENA_HUB)}
+              className="w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 flex items-center justify-center transition-colors"
+            >
+              <ArrowLeft className="w-4 h-4 text-slate-600" />
+            </button>
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] font-black uppercase tracking-wider text-blue-700 bg-blue-50 px-2 py-0.5 rounded">
+                  Match Day Squad & Toss
+                </span>
+                <span className="text-[10px] font-bold text-slate-400">
+                  {currentMatch?.isPlayoff ? currentMatch.playoffType : `Match ${currentMatch?.matchNumber || 1}`}
+                </span>
+              </div>
+              <h1 className="text-base font-black text-slate-900">
+                {userTeam.name} <span className="text-slate-400 font-normal">vs</span> {opponentTeam.name}
+              </h1>
             </div>
           </div>
-          <div className="w-9" />
+
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-bold text-slate-500 hidden sm:inline">
+              Venue: <strong className="text-slate-800">{currentMatch?.venue || 'Cricket Stadium'}</strong>
+            </span>
+          </div>
         </div>
       </header>
 
-      <main className="flex-1 px-4 py-6 sm:px-6 overflow-y-auto">
-        <div className="max-w-2xl mx-auto">
-        <AnimatePresence mode="wait">
-          {step === 'squad' ? (
-            <motion.div 
-              key="squad"
-              initial={{ opacity: 0, y: 15 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -15 }}
-            >
-              <div className="flex items-center justify-between mb-4">
-                <div>
-                  <div className="text-[10px] font-bold text-blue-400 uppercase tracking-widest mb-0.5">Pre-Toss Squad Finalization</div>
-                  <h1 className="text-lg font-bold">Select Playing XI</h1>
-                  <p className="text-xs text-white/40">Select 11 players and designate a captain before the toss</p>
+      {/* Main Content Area */}
+      <main className="flex-1 max-w-6xl w-full mx-auto p-4 sm:p-6 space-y-4">
+        
+        {/* Conditions Card */}
+        <div className="bg-white rounded-2xl border border-slate-200/90 p-4 shadow-xs grid grid-cols-1 md:grid-cols-3 gap-4 items-center">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center font-black shrink-0">
+              <CloudSun className="w-5 h-5" />
+            </div>
+            <div>
+              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Pitch Deck</span>
+              <span className="text-sm font-black text-slate-900">{pitchType} Wicket</span>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center font-black shrink-0">
+              <Wind className="w-5 h-5" />
+            </div>
+            <div>
+              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Atmosphere</span>
+              <span className="text-sm font-black text-slate-900">{weather} Skies</span>
+            </div>
+          </div>
+
+          <div className="text-xs font-medium text-slate-600 bg-slate-50 p-2.5 rounded-xl border border-slate-200/60">
+            {getPitchAdvice(pitchType)}
+          </div>
+        </div>
+
+        {step === 'squad' ? (
+          /* SQUAD SELECTION STEP */
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+            
+            {/* LEFT 2 COLUMNS: User Team Squad Picker */}
+            <div className="lg:col-span-2 space-y-3">
+              {/* Squad Header and Controls */}
+              <div className="bg-white rounded-2xl border border-slate-200/90 p-4 shadow-xs space-y-3">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <div>
+                    <h2 className="text-sm font-black text-slate-900 uppercase tracking-wide">
+                      Select Playing XI ({selectedIds.length}/11)
+                    </h2>
+                    <p className="text-xs text-slate-500">
+                      Tap players to toggle them into your match squad. Star marks the Captain.
+                    </p>
+                  </div>
+
+                  <button
+                    onClick={handleAutoBalance}
+                    className="px-3 py-1.5 rounded-xl bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-bold transition-colors flex items-center gap-1.5 shrink-0 self-start sm:self-auto"
+                  >
+                    <Sparkles className="w-3.5 h-3.5" /> AI Auto-Pick & Balance
+                  </button>
                 </div>
-                <button 
-                  onClick={autoSelectSquad}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600/20 border border-blue-500/40 text-blue-400 hover:bg-blue-600/30 text-xs font-bold transition-all active:scale-95"
-                >
-                  <Sparkles className="w-3.5 h-3.5" />
-                  Auto Pick XI
-                </button>
+
+                {/* Team Validation Bar */}
+                <div className="grid grid-cols-3 gap-2 pt-2 border-t border-slate-100 text-xs">
+                  <div className={cn(
+                    "p-2 rounded-xl border flex items-center gap-2 font-bold",
+                    selectedIds.length === 11 ? "bg-emerald-50 border-emerald-200 text-emerald-800" : "bg-slate-50 border-slate-200 text-slate-600"
+                  )}>
+                    <CheckCircle2 className="w-4 h-4 shrink-0" />
+                    <span>{selectedIds.length}/11 Players</span>
+                  </div>
+
+                  <div className={cn(
+                    "p-2 rounded-xl border flex items-center gap-2 font-bold",
+                    keepersCount >= 1 ? "bg-emerald-50 border-emerald-200 text-emerald-800" : "bg-rose-50 border-rose-200 text-rose-800"
+                  )}>
+                    {keepersCount >= 1 ? <CheckCircle2 className="w-4 h-4 shrink-0" /> : <AlertTriangle className="w-4 h-4 shrink-0" />}
+                    <span>{keepersCount} WKs (Min 1)</span>
+                  </div>
+
+                  <div className={cn(
+                    "p-2 rounded-xl border flex items-center gap-2 font-bold",
+                    bowlersCount >= 5 ? "bg-emerald-50 border-emerald-200 text-emerald-800" : "bg-rose-50 border-rose-200 text-rose-800"
+                  )}>
+                    {bowlersCount >= 5 ? <CheckCircle2 className="w-4 h-4 shrink-0" /> : <AlertTriangle className="w-4 h-4 shrink-0" />}
+                    <span>{bowlersCount} Bowlers (Min 5)</span>
+                  </div>
+                </div>
               </div>
 
-              <div className="space-y-2 mb-4 max-h-[55vh] overflow-y-auto scrollbar-hide">
-                {teamPlayers.map(p => (
-                  <div
-                    key={p.id}
-                    className={cn(
-                      "w-full flex items-center gap-3 p-3 rounded-xl border-2 transition-all",
-                      selectedIds.includes(p.id) 
-                        ? "bg-white/5 border-white/30" 
-                        : "bg-zinc-900 border-zinc-800 hover:border-zinc-600"
-                    )}
-                  >
-                    <button
-                      onClick={() => togglePlayer(p.id)}
-                      className="flex-1 flex items-center gap-3 text-left"
+              {/* Player Cards Grid */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 max-h-[580px] overflow-y-auto pr-1 custom-scrollbar">
+                {userSquad.map((player) => {
+                  const isSelected = selectedIds.includes(player.id);
+                  const isCap = captainId === player.id;
+                  const fatigue = playerFatigue[player.id] || 0;
+                  const isFatigued = fatigue >= 65;
+                  const isCritical = fatigue >= 85;
+
+                  return (
+                    <div
+                      key={player.id}
+                      onClick={() => togglePlayer(player.id)}
+                      className={cn(
+                        "p-3 rounded-2xl border transition-all cursor-pointer bg-white relative flex items-center justify-between gap-3 group select-none",
+                        isSelected
+                          ? "border-blue-600 shadow-sm bg-blue-50/20"
+                          : "border-slate-200/90 hover:border-slate-300 hover:bg-slate-50/60"
+                      )}
                     >
-                      <div className="w-9 h-9 rounded-lg bg-zinc-950 border border-zinc-800 flex items-center justify-center overflow-hidden shrink-0">
-                          {selectedIds.includes(p.id) ? (
-                              <CheckCircle2 className="w-4 h-4 text-white" />
-                          ) : (
-                              <JerseyPlayerImage 
-                                player={p}
-                                franchiseId={selectedFranchiseId}
-                                className="h-full w-full bg-zinc-800"
-                                imageClassName="h-full w-full"
-                              />
+                      {/* Left: Player Avatar & Name */}
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <div className="relative shrink-0">
+                          <img
+                            src={getPlayerImage(player.name)}
+                            alt={player.name}
+                            onError={handlePlayerImageError}
+                            className="w-10 h-10 rounded-full object-cover border border-slate-200 bg-slate-100"
+                          />
+                          {isCap && (
+                            <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-amber-500 text-white text-[9px] font-black flex items-center justify-center shadow-xs">
+                              C
+                            </span>
                           )}
+                        </div>
+
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-xs font-bold text-slate-900 truncate">{player.name}</span>
+                            <span className="text-[10px] font-bold text-slate-400 tabular-nums">
+                              {player.rating}
+                            </span>
+                          </div>
+
+                          <div className="flex items-center gap-1.5 mt-0.5">
+                            <span className="text-[9px] font-bold uppercase tracking-wider text-slate-500 bg-slate-100 px-1.5 py-0.2 rounded">
+                              {player.role}
+                            </span>
+
+                            {/* Fatigue Indicator */}
+                            <span
+                              className={cn(
+                                "text-[9px] font-bold px-1.5 py-0.2 rounded",
+                                isCritical
+                                  ? "bg-red-100 text-red-700"
+                                  : isFatigued
+                                  ? "bg-amber-100 text-amber-700"
+                                  : "bg-emerald-100 text-emerald-700"
+                              )}
+                              title={`Workload fatigue: ${fatigue}%`}
+                            >
+                              {fatigue > 0 ? `${fatigue}% workload` : 'Fresh'}
+                            </span>
+                          </div>
+                        </div>
                       </div>
-                      <div className="flex-1 min-w-0 flex items-center gap-2">
-                        <div className="text-sm font-semibold truncate">{p.name}</div>
-                        {captainId === p.id && (
-                            <span className="shrink-0 px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-500 text-[10px] font-black leading-none">C</span>
+
+                      {/* Right: Actions */}
+                      <div className="flex items-center gap-1.5 shrink-0" onClick={(e) => e.stopPropagation()}>
+                        {isSelected && (
+                          <button
+                            onClick={() => setCaptainId(player.id)}
+                            className={cn(
+                              "p-1.5 rounded-lg transition-colors",
+                              isCap ? "text-amber-500 hover:text-amber-600 bg-amber-50" : "text-slate-300 hover:text-amber-500 hover:bg-slate-100"
+                            )}
+                            title="Set as Captain"
+                          >
+                            <Star className="w-3.5 h-3.5 fill-current" />
+                          </button>
                         )}
-                        <div className="text-[10px] text-white/30 font-medium">{p.role}</div>
-                      </div>
-                      <div className="text-xs font-bold text-white/30 px-2">{p.rating}</div>
-                    </button>
-                    {selectedIds.includes(p.id) && captainId !== p.id && (
-                        <button
-                            onClick={() => setCaptainId(p.id)}
-                            className="px-2 py-1.5 rounded-lg border border-zinc-700 bg-zinc-800 hover:bg-zinc-700 text-[9px] font-bold uppercase tracking-wider shrink-0 transition-colors"
+
+                        <div
+                          onClick={() => togglePlayer(player.id)}
+                          className={cn(
+                            "w-5 h-5 rounded-md border flex items-center justify-center transition-all cursor-pointer",
+                            isSelected
+                              ? "bg-blue-600 border-blue-600 text-white"
+                              : "border-slate-300 hover:border-slate-400"
+                          )}
                         >
-                            Make Captain
-                        </button>
-                    )}
-                  </div>
-                ))}
+                          {isSelected && <CheckCircle2 className="w-3.5 h-3.5" />}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
+            </div>
 
-              {/* Bottom sticky CTA */}
-              <div className="sticky bottom-0 bg-zinc-950/95 backdrop-blur-md border-t border-zinc-800/60 -mx-4 px-4 py-3 sm:-mx-6 sm:px-6 safe-bottom">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <span className="text-lg font-bold text-white">{selectedIds.length}</span>
-                    <span className="text-xs text-zinc-500 font-bold">/ 11 selected</span>
-                    {captainId && (
-                      <span className="text-xs text-amber-400 font-bold ml-2">
-                        (C: {teamPlayers.find(p => p.id === captainId)?.name?.split(' ').pop()})
-                      </span>
-                    )}
-                  </div>
-                  <button
-                    disabled={selectedIds.length !== 11}
-                    onClick={proceedToToss}
-                    className="flex items-center gap-2 px-6 py-2.5 bg-white hover:bg-zinc-200 text-zinc-950 rounded-xl font-bold text-sm disabled:opacity-30 disabled:pointer-events-none active:scale-95 transition-all shadow-md cursor-pointer"
-                  >
-                    Proceed to Toss <ChevronRight className="w-4 h-4" />
-                  </button>
-                </div>
-              </div>
-            </motion.div>
-          ) : (
-            <motion.div
-              key="toss"
-              initial={{ opacity: 0, y: 15 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -15 }}
-              className="text-center"
-            >
-              {/* Squad Locked Status Badge */}
-              <div className="flex items-center justify-center gap-2 mb-6">
-                <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-white/5 border border-white/10 text-xs text-white/70">
-                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
-                  <span>Playing XI Locked ({selectedIds.length} players · C: {teamPlayers.find(p => p.id === captainId)?.name})</span>
-                  {!tossResult && !isFlipping && (
-                    <button
-                      onClick={() => setStep('squad')}
-                      className="ml-2 text-blue-400 hover:text-blue-300 font-bold underline text-[11px]"
-                    >
-                      Edit XI
-                    </button>
+            {/* RIGHT COLUMN: Opponent Announced XI & Confirmation */}
+            <div className="space-y-3">
+              {/* Opponent Card */}
+              <div className="bg-white rounded-2xl border border-slate-200/90 p-4 shadow-xs space-y-3">
+                <div className="flex items-center gap-2.5 pb-2 border-b border-slate-100">
+                  {resolveTeamLogo(opponentTeam.shortName) ? (
+                    <img
+                      src={resolveTeamLogo(opponentTeam.shortName)}
+                      alt={opponentTeam.shortName}
+                      className="w-7 h-7 object-contain"
+                    />
+                  ) : (
+                    <div className="w-7 h-7 rounded-full bg-slate-100 flex items-center justify-center font-bold text-xs text-slate-600">
+                      {opponentTeam.shortName?.[0]}
+                    </div>
                   )}
+                  <div>
+                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wide block">Opponent Lineup</span>
+                    <h3 className="text-xs font-black text-slate-900">{opponentTeam.name}</h3>
+                  </div>
+                </div>
+
+                <div className="text-[11px] text-slate-500 font-medium">
+                  {opponentOptimalSelection.tacticalSummary}
+                </div>
+
+                <div className="space-y-1.5 max-h-[300px] overflow-y-auto pr-1 custom-scrollbar">
+                  {opponentOptimalSelection.playingXI.map((pId, idx) => {
+                    const p = opponentSquad.find((player) => player.id === pId);
+                    if (!p) return null;
+                    return (
+                      <div key={pId} className="flex items-center justify-between text-xs py-1 px-2 rounded-lg bg-slate-50">
+                        <div className="flex items-center gap-2">
+                          <span className="text-[10px] font-bold text-slate-400 tabular-nums w-3.5">{idx + 1}</span>
+                          <span className="font-bold text-slate-800">{p.name}</span>
+                        </div>
+                        <span className="text-[10px] text-slate-400 font-semibold">{p.role}</span>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
 
-              {/* VS Screen inside Toss */}
-              <div className="flex items-center justify-center gap-6 mb-12">
-                <div className="flex flex-col items-center gap-3 w-32">
-                  <div className="w-24 h-24 rounded-full bg-white/5 border border-white/10 flex items-center justify-center shadow-[0_0_30px_rgba(255,255,255,0.05)] backdrop-blur-md relative overflow-hidden">
-                    <div className="absolute inset-0 bg-gradient-to-br from-white/10 to-transparent" />
-                    <img src={resolveTeamLogo(userTeam)} alt={userTeam.name} className="w-16 h-16 object-contain relative z-10 drop-shadow-md" />
-                  </div>
-                  <span className="text-sm font-black tracking-tight text-center leading-tight drop-shadow-md">{userTeam.name}</span>
-                </div>
-                
-                <div className="flex flex-col items-center justify-center -mt-8">
-                  <div className="text-3xl font-black text-white/30 italic tracking-widest drop-shadow-sm">VS</div>
-                </div>
-                
-                <div className="flex flex-col items-center gap-3 w-32">
-                  <div className="w-24 h-24 rounded-full bg-white/5 border border-white/10 flex items-center justify-center shadow-[0_0_30px_rgba(255,255,255,0.05)] backdrop-blur-md relative overflow-hidden">
-                    <div className="absolute inset-0 bg-gradient-to-br from-white/10 to-transparent" />
-                    <img src={resolveTeamLogo(opponentTeam)} alt={opponentTeam.name} className="w-16 h-16 object-contain relative z-10 drop-shadow-md" />
-                  </div>
-                  <span className="text-sm font-black tracking-tight text-center leading-tight drop-shadow-md">{opponentTeam.name}</span>
-                </div>
+              {/* Proceed to Toss Button */}
+              <div className="bg-white rounded-2xl border border-slate-200/90 p-4 shadow-xs space-y-2">
+                <button
+                  disabled={!isValidXI}
+                  onClick={proceedToToss}
+                  className={cn(
+                    "w-full py-3 rounded-xl font-black text-sm transition-all flex items-center justify-center gap-2 shadow-xs",
+                    isValidXI
+                      ? "bg-blue-600 hover:bg-blue-700 text-white cursor-pointer active:scale-[0.99]"
+                      : "bg-slate-200 text-slate-400 cursor-not-allowed"
+                  )}
+                >
+                  Confirm Squad & Proceed to Toss <ChevronRight className="w-4 h-4" />
+                </button>
+                {!isValidXI && (
+                  <p className="text-[10px] text-rose-600 text-center font-medium">
+                    Select exactly 11 players including at least 1 Wicketkeeper and 5 Bowlers.
+                  </p>
+                )}
+              </div>
+            </div>
+          </div>
+        ) : (
+          /* TOSS STEP */
+          <div className="max-w-xl mx-auto space-y-4">
+            <div className="bg-white rounded-2xl border border-slate-200/90 p-6 shadow-sm text-center space-y-5">
+              <div>
+                <span className="text-[10px] font-black uppercase tracking-wider text-blue-700 bg-blue-50 px-2 py-0.5 rounded">
+                  Match Day Protocol
+                </span>
+                <h2 className="text-xl font-black text-slate-900 mt-2">The Coin Toss</h2>
+                <p className="text-xs text-slate-500">
+                  {userTeam.name} vs {opponentTeam.name} at {currentMatch?.venue || 'Stadium'}
+                </p>
               </div>
 
-              {!tossResult ? (
-                <div className="flex flex-col items-center">
-                  <h1 className="text-2xl font-bold mb-8 text-white drop-shadow-lg tracking-tight">The Toss</h1>
-                  <div style={{ perspective: "1200px" }} className="w-40 h-40 mx-auto mb-6 relative cursor-pointer" onClick={!isFlipping ? handleToss : undefined}>
-                    <motion.div
-                      animate={isFlipping ? { rotateY: 1800 + (Math.random() > 0.5 ? 0 : 180), y: [-30, -120, 0] } : { rotateY: 0 }}
-                      transition={{ duration: 2.5, ease: "easeInOut" }}
-                      style={{ transformStyle: "preserve-3d" }}
-                      className="w-full h-full relative"
-                    >
-                      {/* HEADS (Front) */}
-                      <div 
-                        className="absolute inset-0 rounded-full flex flex-col items-center justify-center shadow-[0_20px_40px_rgba(0,0,0,0.8),inset_0_0_20px_rgba(0,0,0,0.8)] border-[6px] border-yellow-600/60"
-                        style={{ 
-                          backfaceVisibility: "hidden", 
-                          background: 'radial-gradient(ellipse at top left, #FDE047 0%, #EAB308 30%, #A16207 100%)'
-                        }}
-                      >
-                        <div className="w-[85%] h-[85%] rounded-full border border-yellow-600/30 flex items-center justify-center relative overflow-hidden">
-                          <div className="absolute inset-0 bg-gradient-to-tr from-transparent via-white/40 to-transparent -rotate-45" />
-                          <span className="text-6xl font-black text-yellow-900 tracking-tighter drop-shadow-sm">H</span>
-                        </div>
-                      </div>
-                      
-                      {/* TAILS (Back) */}
-                      <div 
-                        className="absolute inset-0 rounded-full flex flex-col items-center justify-center shadow-[0_20px_40px_rgba(0,0,0,0.8),inset_0_0_20px_rgba(0,0,0,0.8)] border-[6px] border-yellow-600/60"
-                        style={{ 
-                          backfaceVisibility: "hidden", 
-                          transform: "rotateY(180deg)",
-                          background: 'radial-gradient(ellipse at top left, #FDE047 0%, #EAB308 30%, #A16207 100%)'
-                        }}
-                      >
-                        <div className="w-[85%] h-[85%] rounded-full border border-yellow-600/30 flex items-center justify-center relative overflow-hidden">
-                          <div className="absolute inset-0 bg-gradient-to-tr from-transparent via-white/40 to-transparent -rotate-45" />
-                          <span className="text-6xl font-black text-yellow-900 tracking-tighter drop-shadow-sm">T</span>
-                        </div>
-                      </div>
-                    </motion.div>
-                  </div>
-                  <button
-                    onClick={!isFlipping ? handleToss : undefined}
-                    disabled={isFlipping}
-                    className="mt-4 px-6 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-zinc-950 font-black text-xs uppercase tracking-wider transition-all active:scale-95 shadow-md shadow-amber-500/20 disabled:opacity-50 cursor-pointer"
-                  >
-                    {isFlipping ? 'Flipping...' : 'Flip Coin'}
-                  </button>
-                  <p className="text-[11px] text-white/40 uppercase tracking-widest font-semibold mt-2">or tap coin directly</p>
-                </div>
-              ) : (
-                <div className="space-y-4">
-                  <motion.div 
-                    initial={{ scale: 0.95, opacity: 0 }}
-                    animate={{ scale: 1, opacity: 1 }}
-                    className="premium-card p-6"
-                  >
-                    <div className="text-[10px] font-bold text-white/30 uppercase tracking-wider mb-2">Toss Winner</div>
-                    <div className="text-xl font-bold mb-3">
-                        {tossResult.winnerId === userTeam.id ? "You won the toss!" : `${opponentTeam.name} won`}
-                    </div>
-                    {tossResult.winnerId !== userTeam.id && (
-                        <p className="text-sm text-white/50">
-                            {opponentTeam.name} elected to <span className="text-white font-bold uppercase">{tossResult.decision}</span> first.
-                        </p>
-                    )}
-                  </motion.div>
+              {/* Coin Flip Visual */}
+              <div className="py-6 flex justify-center">
+                <motion.div
+                  animate={isFlipping ? { rotateY: 1800, scale: [1, 1.2, 1] } : {}}
+                  transition={{ duration: 1.5, ease: 'easeInOut' }}
+                  className="w-24 h-24 rounded-full bg-gradient-to-tr from-amber-400 to-yellow-200 border-4 border-amber-500 shadow-md flex items-center justify-center text-amber-900 font-black text-2xl select-none"
+                >
+                  {isFlipping ? '...' : tossResult ? (tossResult.winnerId === userTeam.id ? userTeam.shortName : opponentTeam.shortName) : 'CRX'}
+                </motion.div>
+              </div>
 
-                  {tossResult.winnerId === userTeam.id && !tossResult.decision && (
-                    <div className="grid grid-cols-2 gap-3">
-                      <button
-                        onClick={() => handleDecision(TossDecision.BAT)}
-                        className="premium-card p-5 text-center hover:border-zinc-600 transition-all active:scale-95"
-                      >
-                        <div className="text-lg font-bold mb-0.5">BAT</div>
-                        <div className="text-[10px] text-zinc-500 font-bold uppercase">First</div>
-                      </button>
-                      <button
-                        onClick={() => handleDecision(TossDecision.BOWL)}
-                        className="premium-card p-5 text-center hover:border-zinc-600 transition-all active:scale-95"
-                      >
-                        <div className="text-lg font-bold mb-0.5">BOWL</div>
-                        <div className="text-[10px] text-white/30 font-bold uppercase">First</div>
-                      </button>
+              {!tossResult && (
+                <button
+                  disabled={isFlipping}
+                  onClick={handleToss}
+                  className="px-8 py-3 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-sm font-black transition-all shadow-xs active:scale-95 cursor-pointer"
+                >
+                  {isFlipping ? 'Flipping Coin...' : 'Spin the Coin'}
+                </button>
+              )}
+
+              {tossResult && (
+                <div className="space-y-4 pt-2">
+                  <div className="p-3 bg-blue-50/70 border border-blue-200 rounded-xl">
+                    <span className="text-xs font-black text-blue-900 block">
+                      {tossResult.winnerId === userTeam.id ? userTeam.name : opponentTeam.name} won the toss!
+                    </span>
+                  </div>
+
+                  {tossResult.winnerId === userTeam.id ? (
+                    <div className="space-y-2">
+                      <p className="text-xs font-bold text-slate-700">Choose your match strategy:</p>
+                      <div className="grid grid-cols-2 gap-3 max-w-xs mx-auto">
+                        <button
+                          onClick={() => setTossResult({ ...tossResult, decision: TossDecision.BAT })}
+                          className={cn(
+                            "py-2.5 px-4 rounded-xl font-black text-xs border transition-all cursor-pointer",
+                            tossResult.decision === TossDecision.BAT
+                              ? "bg-blue-600 text-white border-blue-600 shadow-xs"
+                              : "bg-white text-slate-700 border-slate-200 hover:border-blue-400"
+                          )}
+                        >
+                          Bat First
+                        </button>
+                        <button
+                          onClick={() => setTossResult({ ...tossResult, decision: TossDecision.BOWL })}
+                          className={cn(
+                            "py-2.5 px-4 rounded-xl font-black text-xs border transition-all cursor-pointer",
+                            tossResult.decision === TossDecision.BOWL
+                              ? "bg-blue-600 text-white border-blue-600 shadow-xs"
+                              : "bg-white text-slate-700 border-slate-200 hover:border-blue-400"
+                          )}
+                        >
+                          Bowl First
+                        </button>
+                      </div>
                     </div>
+                  ) : (
+                    <p className="text-xs font-medium text-slate-600">
+                      {opponentTeam.name} decided to <strong className="text-slate-900">{tossResult.decision} first</strong> on this {pitchType} wicket.
+                    </p>
                   )}
 
                   {tossResult.decision && (
-                    <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}>
-                        {tossResult.winnerId === userTeam.id && (
-                            <div className="premium-card p-4 mb-3 text-center">
-                                <span className="text-xs text-white/50">You elected to </span>
-                                <span className="text-xs text-white font-bold uppercase">{tossResult.decision}</span>
-                                <span className="text-xs text-white/50"> first</span>
-                            </div>
-                        )}
-                        <button
-                            onClick={startMatch}
-                            className="w-full py-3.5 bg-white hover:bg-zinc-200 text-zinc-950 rounded-xl font-bold text-sm active:scale-95 transition-all flex items-center justify-center gap-2 shadow-lg"
-                        >
-                            Start Match <ChevronRight className="w-4 h-4" />
-                        </button>
-                    </motion.div>
+                    <button
+                      onClick={startMatch}
+                      className="w-full py-3.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-black transition-all shadow-xs cursor-pointer active:scale-95"
+                    >
+                      Walk Out to the Middle & Start Match
+                    </button>
                   )}
                 </div>
               )}
-            </motion.div>
-          )}
-        </AnimatePresence>
-        </div>
+            </div>
+
+            <div className="text-center">
+              <button
+                onClick={() => setStep('squad')}
+                className="text-xs font-bold text-slate-500 hover:text-slate-800 transition-colors"
+              >
+                ← Back to Squad Selection
+              </button>
+            </div>
+          </div>
+        )}
       </main>
     </div>
   );

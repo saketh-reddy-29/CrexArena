@@ -436,6 +436,15 @@ export default function LiveMatchCenter() {
   );
 
   const getTeamSquad = (teamId: string) => {
+    if (currentMatch) {
+      const fixtureXI = useGameStore.getState().getFixturePlayingXI(currentMatch.id, teamId);
+      if (fixtureXI && fixtureXI.length === 11) {
+        const roster = fixtureXI.map((id) => players.find((p) => p.id === id)).filter(Boolean) as Player[];
+        if (roster.length === 11) {
+          return MatchEngine.orderSquad(fixtureXI, players).slice(0, 11);
+        }
+      }
+    }
     const franchise = franchises.find((team) => team.id === teamId);
     if (!franchise) return [] as Player[];
     const base = teamId === myTeamId && selectedXiPlayers.length > 0 ? selectedXiPlayers : franchise.squad.map((id) => players.find((player) => player.id === id)).filter(Boolean);
