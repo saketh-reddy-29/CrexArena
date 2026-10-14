@@ -13,7 +13,8 @@ CrexArena/
 ├── src/
 │   ├── components/                 # UI Layer
 │   │   ├── CricketActionVisualizer.tsx # 2D stadium, Canvas trajectory, fielders, AI Captain HUD
-│   │   ├── LiveMatchCenter.tsx     # Central match coordinator, scoreboard, commentary, controls
+│   │   ├── PlayerSelectionDrawer.tsx # Modal drawer for manual openers, batter & bowler selection
+│   │   ├── LiveMatchCenter.tsx     # Central match coordinator, broadcast scoreboard, timeline
 │   │   ├── TeamSelection.tsx       # Tournament franchise / international team picker
 │   │   ├── SquadSelection.tsx      # Squad roster management & budget
 │   │   ├── PlayingXISelection.tsx  # Locked 11-player lineup selector
@@ -178,7 +179,21 @@ All factors are strictly bounded within $[0.45, 1.80]$.
 ## 🏟️ 2D Broadcast Field Visualization
 
 - **Circular Ground (600x600 coordinate plane)**: Pitch, bowling crease, batting crease, 30-yard inner circle ($R=130$), boundary rope ($R=268$).
-- **Fielder Roles**: Wicketkeeper, Bowler, Slips, Gully, Point, Cover, Mid-off, Mid-on, Mid-wicket, Square Leg, Fine Leg, Deep Sweepers.
+- **Fielder Roles & Display Modes**:
+  - `Standard`: Clean, broadcast-style circular markers without cluttering text pills on grass.
+  - `Labels`: Displays high-contrast pills with fielding position names (`Slip 1`, `Cover`, `Mid-wicket`, `Long-on`, etc.).
+  - Toggleable on the field canvas anytime via the top-left pill switch.
+- **Unified Broadcast Header**:
+  - Single authoritative scoreboard: `{runs}-{wickets} ({overs}.{balls} ov)`.
+  - Format selector (`T20`, `ODI`, `TEST`), CRR, chase target & RRR, and match status.
+  - Integrated playback controls: Play/Pause, Speed (`1x`, `1.5x`, `2x`), Replay last ball, Bowl/Skip.
+  - Eliminates redundant cards and ensures the field map is the central focus.
+- **Interactive Player Selection Drawer ([`src/components/PlayerSelectionDrawer.tsx`](file:///c:/Users/saket/Downloads/CrexArena-800797668a7b096a62f156dda84f4f23778a9515/CrexArena-800797668a7b096a62f156dda84f4f23778a9515/src/components/PlayerSelectionDrawer.tsx))**:
+  - Modal drawer overlay for user-controlled team actions.
+  - Openers pair selection with striker / non-striker assignment.
+  - Incoming batter selection (automatically filters out dismissed batters).
+  - Bowler selection enforcing T20 4-over cap, ODI 10-over cap, prevents consecutive overs, and blocks pure batsmen / ordinary keepers from bowling.
+  - One-tap `AI REC` accept with detailed tactical reasoning.
 - **Animated Field Repositioning**: During tactical shifts, old and new positions connect via animated movement vectors while the next delivery is safely locked.
 - **Bottom Panel Tabs**:
   - `FIELD MAP`: 30-yard ring compliance, off/leg balance, lawful fielder counts.

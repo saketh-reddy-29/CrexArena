@@ -78,6 +78,17 @@ export interface VisualizerProps {
   lastBall?: any;
   ballCount?: number;
   className?: string;
+
+  // Visualizer Header & Display Mode Customization
+  hideTopHeader?: boolean;
+  displayMode?: 'STANDARD' | 'LABELS';
+  onDisplayModeChange?: (mode: 'STANDARD' | 'LABELS') => void;
+  playbackSpeed?: AnimationSpeed;
+  onPlaybackSpeedChange?: (speed: AnimationSpeed) => void;
+  isPlaybackPaused?: boolean;
+  onTogglePause?: () => void;
+  replayTrigger?: number;
+  skipTrigger?: number;
 }
 
 interface FielderLiveState {
@@ -143,6 +154,15 @@ export default function CricketActionVisualizer({
   lastBall,
   ballCount = 0,
   className,
+  hideTopHeader = false,
+  displayMode: propDisplayMode,
+  onDisplayModeChange,
+  playbackSpeed: propSpeed,
+  onPlaybackSpeedChange,
+  isPlaybackPaused: propIsPaused,
+  onTogglePause,
+  replayTrigger,
+  skipTrigger,
 }: VisualizerProps) {
   // Format state
   const [selectedFormat, setSelectedFormat] = useState<ArenaFormat>(initialFormat);
@@ -150,12 +170,35 @@ export default function CricketActionVisualizer({
     setSelectedFormat(initialFormat);
   }, [initialFormat]);
 
+  // Display Mode state (Standard vs Labels)
+  const [internalDisplayMode, setInternalDisplayMode] = useState<'STANDARD' | 'LABELS'>(propDisplayMode || 'LABELS');
+  useEffect(() => {
+    if (propDisplayMode) setInternalDisplayMode(propDisplayMode);
+  }, [propDisplayMode]);
+  const effectiveDisplayMode = propDisplayMode || internalDisplayMode;
+  const handleDisplayModeToggle = (mode: 'STANDARD' | 'LABELS') => {
+    setInternalDisplayMode(mode);
+    onDisplayModeChange?.(mode);
+  };
+
   // Controls State
-  const [speed, setSpeed] = useState<AnimationSpeed>(1);
-  const [isPaused, setIsPaused] = useState<boolean>(false);
+  const [speed, setSpeed] = useState<AnimationSpeed>(propSpeed !== undefined ? propSpeed : 1);
+  const [isPaused, setIsPaused] = useState<boolean>(propIsPaused !== undefined ? propIsPaused : false);
   const [activeBottomTab, setActiveBottomTab] = useState<BottomPanelTab>('FIELD_MAP');
   const [activePresetKey, setActivePresetKey] = useState<string | null>(null);
   const [showDebugHUD, setShowDebugHUD] = useState<boolean>(false);
+
+  useEffect(() => {
+    if (propSpeed !== undefined) {
+      setSpeed(propSpeed);
+    }
+  }, [propSpeed]);
+
+  useEffect(() => {
+    if (propIsPaused !== undefined) {
+      setIsPaused(propIsPaused);
+    }
+  }, [propIsPaused]);
 
   // Field Strategy Configuration
   const [fieldConfig, setFieldConfig] = useState<FieldConfiguration>(() => {
@@ -600,6 +643,22 @@ export default function CricketActionVisualizer({
     onPlaybackCompleteRef.current?.();
   };
 
+  const prevReplayRef = useRef(replayTrigger);
+  useEffect(() => {
+    if (replayTrigger !== undefined && replayTrigger !== prevReplayRef.current) {
+      prevReplayRef.current = replayTrigger;
+      handleReplay();
+    }
+  }, [replayTrigger]);
+
+  const prevSkipRef = useRef(skipTrigger);
+  useEffect(() => {
+    if (skipTrigger !== undefined && skipTrigger !== prevSkipRef.current) {
+      prevSkipRef.current = skipTrigger;
+      handleSkip();
+    }
+  }, [skipTrigger]);
+
   // Drag & drop interactive fielder adjustment on SVG
   const handleSvgMouseMove = (e: React.MouseEvent<SVGSVGElement>) => {
     if (!draggedFielderId || !svgRef.current) return;
@@ -631,7 +690,8 @@ export default function CricketActionVisualizer({
       {/* ═══════════════════════════════════════════════════════════════════════
           TOP MATCH BAR: BRANDING, FORMAT, SCORE, SPEED & PLAYBACK CONTROLS
       ═══════════════════════════════════════════════════════════════════════ */}
-      <div className="w-full px-4 py-3 bg-slate-950/90 backdrop-blur-xl border-b border-white/10 flex flex-wrap items-center justify-between gap-3 z-30">
+      {!hideTopHeader && (
+        <div className="w-full px-4 py-3 bg-slate-950/90 backdrop-blur-xl border-b border-white/10 flex flex-wrap items-center justify-between gap-3 z-30">
         {/* Branding & Format Selector */}
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-2">
@@ -789,6 +849,7 @@ export default function CricketActionVisualizer({
           </button>
         </div>
       </div>
+      )}
 
       {/* ═══════════════════════════════════════════════════════════════════════
           MAIN RESPONSIVE SECTION: CIRCULAR 2D FIELD + RIGHT TACTICS PANEL
@@ -801,6 +862,36 @@ export default function CricketActionVisualizer({
             <div className="absolute -top-20 -left-20 w-72 h-72 rounded-full bg-cyan-500/10 blur-[90px]" />
             <div className="absolute -top-20 -right-20 w-72 h-72 rounded-full bg-blue-500/10 blur-[90px]" />
             <div className="absolute -bottom-20 -left-20 w-72 h-72 rounded-full bg-emerald-500/10 blur-[90px]" />
+          </div>
+
+          {/* Fielder Display Mode Pill (Standard vs Labels) */}
+          <div className="absolute top-3.5 left-3.5 z-30 flex items-center gap-2">
+            <div className="flex items-center bg-slate-950/85 backdrop-blur-md p-1 rounded-xl border border-white/10 shadow-lg text-[10px] font-bold">
+              <button
+                type="button"
+                onClick={() => handleDisplayModeToggle('STANDARD')}
+                className={cn(
+                  "px-2.5 py-1 rounded-lg transition-all",
+                  effectiveDisplayMode === 'STANDARD'
+                    ? "bg-cyan-500 text-slate-950 font-black shadow-sm"
+                    : "text-slate-400 hover:text-white"
+                )}
+              >
+                Standard
+              </button>
+              <button
+                type="button"
+                onClick={() => handleDisplayModeToggle('LABELS')}
+                className={cn(
+                  "px-2.5 py-1 rounded-lg transition-all",
+                  effectiveDisplayMode === 'LABELS'
+                    ? "bg-cyan-500 text-slate-950 font-black shadow-sm"
+                    : "text-slate-400 hover:text-white"
+                )}
+              >
+                Labels
+              </button>
+            </div>
           </div>
 
           <svg
@@ -983,6 +1074,7 @@ export default function CricketActionVisualizer({
                   onMouseDown={() => setDraggedFielderId(fielder.id)}
                   className="cursor-grab active:cursor-grabbing"
                 >
+                  <title>{fielder.role} ({fielder.name})</title>
                   <circle
                     r="9.5"
                     fill={isCatching ? "#9333EA" : isBoundary ? "#2563EB" : "#059669"}
@@ -996,44 +1088,49 @@ export default function CricketActionVisualizer({
                   />
                   <circle r="2.8" fill="#0F172A" />
 
-                  {/* Position Label Pill */}
-                  <g transform="translate(0, 14)">
-                    <rect
-                      x="-26"
-                      y="-7"
-                      width="52"
-                      height="13"
-                      rx="3.5"
-                      fill="#0B132B"
-                      stroke={fielder.isMoving ? "#22D3EE" : "rgba(255,255,255,0.25)"}
-                      strokeWidth="0.8"
-                      opacity="0.92"
-                    />
-                    <text
-                      textAnchor="middle"
-                      y="2.5"
-                      fill={fielder.isMoving ? "#22D3EE" : "#F8FAFC"}
-                      fontSize="7"
-                      fontWeight="900"
-                    >
-                      {fielder.role}
-                    </text>
-                  </g>
+                  {/* Position Label Pill: Only displayed in LABELS mode */}
+                  {effectiveDisplayMode === 'LABELS' && (
+                    <g transform="translate(0, 14)">
+                      <rect
+                        x="-26"
+                        y="-7"
+                        width="52"
+                        height="13"
+                        rx="3.5"
+                        fill="#0B132B"
+                        stroke={fielder.isMoving ? "#22D3EE" : "rgba(255,255,255,0.25)"}
+                        strokeWidth="0.8"
+                        opacity="0.92"
+                      />
+                      <text
+                        textAnchor="middle"
+                        y="2.5"
+                        fill={fielder.isMoving ? "#22D3EE" : "#F8FAFC"}
+                        fontSize="7"
+                        fontWeight="900"
+                      >
+                        {fielder.role}
+                      </text>
+                    </g>
+                  )}
                 </g>
               );
             })}
 
             {/* 7. Wicketkeeper (Anchor at y=460) */}
             <g transform="translate(300, 460)">
+              <title>Wicketkeeper</title>
               <circle r="9" fill="#F59E0B" opacity="0.6" />
               <circle r="7.5" fill="#FBBF24" stroke="#FFF" strokeWidth="1.8" />
               <circle r="2.8" fill="#78350F" />
-              <g transform="translate(0, 14)">
-                <rect x="-24" y="-7" width="48" height="13" rx="3.5" fill="#0B132B" stroke="#F59E0B" strokeWidth="0.8" opacity="0.9" />
-                <text textAnchor="middle" y="2.5" fill="#FDE68A" fontSize="7" fontWeight="900">
-                  Wicketkeeper
-                </text>
-              </g>
+              {effectiveDisplayMode === 'LABELS' && (
+                <g transform="translate(0, 14)">
+                  <rect x="-24" y="-7" width="48" height="13" rx="3.5" fill="#0B132B" stroke="#F59E0B" strokeWidth="0.8" opacity="0.9" />
+                  <text textAnchor="middle" y="2.5" fill="#FDE68A" fontSize="7" fontWeight="900">
+                    Wicketkeeper
+                  </text>
+                </g>
+              )}
             </g>
 
             {/* 8. Non-Striker & Bowler Markers */}
@@ -1143,7 +1240,7 @@ export default function CricketActionVisualizer({
 
           {/* Field Changing Badge */}
           {isFieldChanging && (
-            <div className="absolute top-4 left-4 bg-slate-950/85 backdrop-blur-md border border-cyan-500/40 px-3 py-1.5 rounded-xl flex items-center gap-2 text-xs font-bold text-cyan-300 shadow-xl z-20">
+            <div className="absolute top-14 left-3.5 bg-slate-950/85 backdrop-blur-md border border-cyan-500/40 px-3 py-1.5 rounded-xl flex items-center gap-2 text-xs font-bold text-cyan-300 shadow-xl z-20">
               <RefreshCw className="w-3.5 h-3.5 animate-spin text-cyan-400" />
               <span>FIELDERS MOVING... ({fieldChangeProgress}%)</span>
             </div>
