@@ -22,6 +22,8 @@ CrexArena/
 │   │   └── ...
 │   │
 │   ├── engine/                     # Cricket Simulation Core
+│   │   ├── config/
+│   │   │   └── MatchFormatConfig.ts    # Centralized rules, overs, caps, run distributions & DRS
 │   │   ├── ai/
 │   │   │   ├── AICaptainEngine.ts      # Bowler rotation, workload limits, tactical adjustments
 │   │   │   ├── BatterDecisionEngine.ts # Settledness (0-100%), psychology, 7 batting intents
@@ -48,7 +50,10 @@ CrexArena/
 │   │   ├── match.ts                # PitchType, WeatherCondition, InningsData, DRSReview
 │   │   └── common.ts               # Player, Franchise, SkillStats interfaces
 │   │
-│   └── tests/                      # Automated Vitest Suite (65+ tests)
+│   └── tests/                      # Automated Vitest Suite (77 tests across 12 suites)
+│       ├── formatConfig.test.ts          # Format overs, bowler caps, wicket probabilities & runs
+│       ├── fieldMapCoordinates.test.ts   # Boundary clamping, pitch strip safety, left-hand mirroring
+│       ├── singleSourceOfTruth.test.ts   # DeliveryResult immutability & replay safety
 │       ├── aiTacticsAndBalancing.test.ts # All 14 tactical & balancing engine scenarios
 │       ├── aiCaptainEngine.test.ts       # Bowler selection & tactical adjustments
 │       ├── batterDecisionEngine.test.ts  # Settledness progression & intent adaptation

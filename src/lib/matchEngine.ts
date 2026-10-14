@@ -16,6 +16,7 @@ import {
 } from '../types/match';
 import { calculateEffectiveRating } from './ratingEngine';
 import { ArenaFormat } from '../stores/useGameStore';
+import { getMatchFormatConfig } from '../engine/config/MatchFormatConfig';
 
 // ═══════════════════════════════════════════════════════════════════════
 //  IPL Match Engine — Real IPL Rules
@@ -37,12 +38,11 @@ import { ArenaFormat } from '../stores/useGameStore';
 
 export class MatchEngine {
   static getOversPerMatch(format?: string): number {
-    return format === 'ODI' ? 50 : 20;
+    return getMatchFormatConfig(format).oversPerInnings;
   }
   static readonly BALLS_PER_OVER = 6;
   static getMaxOversPerBowler(format?: string): number {
-    if (format === 'TEST') return Infinity;
-    return format === 'ODI' ? 10 : 4;
+    return getMatchFormatConfig(format).maxOversPerBowler;
   }
   static readonly MIN_BOWLERS = 5;
   static readonly MAX_DRS_REVIEWS = 2;
@@ -328,8 +328,8 @@ export class MatchEngine {
     );
 
     // ── Bounded Multipliers (Calibrated Model) ──
-    // Base rate calibrated per format (test: ~1.6%, odi: ~2.2%, t20: ~2.8%)
-    const baseWicketProb = arenaFormat === 'TEST' ? 0.016 : arenaFormat === 'ODI' ? 0.022 : 0.028;
+    const formatConfig = getMatchFormatConfig(arenaFormat);
+    const baseWicketProb = formatConfig.baseWicketProbability;
 
     // Batter risk multiplier
     const batSkillMod = this.clamp(1.0 - (batterSkill - 70) / 140, 0.70, 1.30);
@@ -409,8 +409,8 @@ export class MatchEngine {
       rawWicketProb = 0.002; // Free Hit: only rare run out
     }
 
-    const minWicket = isFreeHit ? 0.001 : arenaFormat === 'TEST' ? 0.005 : arenaFormat === 'ODI' ? 0.008 : 0.010;
-    const maxWicket = isFreeHit ? 0.005 : arenaFormat === 'TEST' ? 0.075 : arenaFormat === 'ODI' ? 0.085 : 0.110;
+    const minWicket = isFreeHit ? 0.001 : formatConfig.minWicketProbability;
+    const maxWicket = isFreeHit ? 0.005 : formatConfig.maxWicketProbability;
     const finalWicketProb = this.clamp(rawWicketProb, minWicket, maxWicket);
 
     const isWicket = wickets < 10 && Math.random() < finalWicketProb;
@@ -462,49 +462,37 @@ export class MatchEngine {
     }
 
     // ═══ RUNS DISTRIBUTION (WHEN NOT A WICKET) ═══
-    let dot = 38;
-    let one = 36;
-    let two = 10;
-    let three = 1.5;
-    let four = 10;
-    let six = 4.5;
+    let { dot, one, two, three, four, six } = { ...formatConfig.baseRunDistribution };
 
     // Adjust base weights based on intent
     if (effectiveIntent === 'SURVIVAL' || effectiveIntent === 'DEFENSIVE') {
-      dot = 72;
-      one = 18;
-      two = 4;
-      three = 0.5;
-      four = 4;
-      six = 0.5;
+      dot = Math.round(dot * 1.30);
+      one = Math.max(5, Math.round(one * 0.55));
+      two = Math.max(1, Math.round(two * 0.4));
+      three = Math.max(0.1, Math.round(three * 0.3));
+      four = Math.max(0.5, Math.round(four * 0.25));
+      six = Math.max(0.05, Math.round(six * 0.1));
     } else if (effectiveIntent === 'SETTLING') {
-      dot = 52;
-      one = 34;
-      two = 7;
-      three = 1;
-      four = 5;
-      six = 1;
+      dot = Math.round(dot * 1.12);
+      one = Math.round(one * 0.90);
+      four = Math.max(1, Math.round(four * 0.65));
+      six = Math.max(0.1, Math.round(six * 0.35));
     } else if (effectiveIntent === 'ROTATE_STRIKE' || effectiveIntent === 'ROTATE') {
-      dot = 34;
-      one = 44;
-      two = 11;
-      three = 2;
-      four = 7;
-      six = 2;
+      dot = Math.max(12, Math.round(dot * 0.75));
+      one = Math.round(one * 1.25);
+      two = Math.round(two * 1.20);
+      four = Math.max(1.5, Math.round(four * 0.70));
+      six = Math.max(0.2, Math.round(six * 0.40));
     } else if (effectiveIntent === 'CONTROLLED_ATTACK' || effectiveIntent === 'AGGRESSIVE') {
-      dot = 26;
-      one = 28;
-      two = 10;
-      three = 2;
-      four = 20;
-      six = 10;
+      dot = Math.max(10, Math.round(dot * 0.65));
+      one = Math.round(one * 0.85);
+      four = Math.round(four * 1.55);
+      six = Math.round(six * 1.65);
     } else if (effectiveIntent === 'ACCELERATE' || effectiveIntent === 'ALL_OUT_ATTACK') {
-      dot = 22;
-      one = 22;
-      two = 9;
-      three = 1;
-      four = 25;
-      six = 16;
+      dot = Math.max(8, Math.round(dot * 0.50));
+      one = Math.round(one * 0.70);
+      four = Math.round(four * 1.95);
+      six = Math.round(six * 2.30);
     }
 
     // PowerPlay effects (fewer fielders deep -> slightly more boundaries)

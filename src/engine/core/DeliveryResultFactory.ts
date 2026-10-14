@@ -53,9 +53,16 @@ export class DeliveryResultFactory {
     const tBoundary = (-b + disc) / 2;
     const t = Math.max(25, tBoundary * distanceFactor);
     
+    const rawX = this.GROUND_CENTER + dx * t;
+    const rawY = this.BATTER_CREASE_Y + dy * t;
+    const distCenter = Math.hypot(rawX - this.GROUND_CENTER, rawY - this.GROUND_CENTER);
+    const maxCenterDist = 274.5; // Strictly inside visible field grass circle (R=280), factoring in Math.round
+    const finalX = distCenter > maxCenterDist ? this.GROUND_CENTER + ((rawX - this.GROUND_CENTER) / distCenter) * maxCenterDist : rawX;
+    const finalY = distCenter > maxCenterDist ? this.GROUND_CENTER + ((rawY - this.GROUND_CENTER) / distCenter) * maxCenterDist : rawY;
+
     return {
-      x: Math.round(this.GROUND_CENTER + dx * t),
-      y: Math.round(this.BATTER_CREASE_Y + dy * t),
+      x: Math.round(finalX),
+      y: Math.round(finalY),
     };
   }
 

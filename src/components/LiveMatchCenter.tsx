@@ -1211,6 +1211,28 @@ export default function LiveMatchCenter() {
     }
   };
 
+  const handleReturnToHub = () => {
+    if (inning?.isComplete && inningNo === 2) {
+      saveLiveMatchState(null);
+    } else {
+      saveLiveMatchState({
+        currentMatchId,
+        inningNo,
+        innings,
+        strikerId,
+        nonStrikerId,
+        bowlerId,
+        lastOverBowlerId,
+        battingCursor,
+        pending,
+        pendingBatterEnd,
+        pitch,
+        weather,
+      });
+    }
+    setGameState(GameState.ARENA_HUB);
+  };
+
   const newsArticles = useMemo(() => [
     {
       id: 'news-1',
@@ -1260,19 +1282,7 @@ export default function LiveMatchCenter() {
           {/* Left: Brand Logo & Main Nav Links */}
           <div className="flex items-center gap-4 sm:gap-6">
             <button
-              onClick={() => {
-                if (inning?.isComplete && inningNo === 2) {
-                  saveLiveMatchState(null);
-                  setGameState(GameState.ARENA_HUB);
-                } else {
-                  saveLiveMatchState({
-                    currentMatchId, inningNo, innings, strikerId, nonStrikerId,
-                    bowlerId, lastOverBowlerId, battingCursor, pending,
-                    pendingBatterEnd, pitch, weather
-                  });
-                  setGameState(GameState.ARENA_HUB);
-                }
-              }}
+              onClick={handleReturnToHub}
               className="p-1.5 rounded-lg border border-slate-200 hover:bg-slate-100 text-slate-600 transition-colors"
               title="Return to Hub"
             >
@@ -1292,10 +1302,10 @@ export default function LiveMatchCenter() {
 
             {/* Navigation Links */}
             <nav className="hidden lg:flex items-center gap-5 text-xs font-bold text-slate-600">
-              <button onClick={() => setGameState(GameState.ARENA_HUB)} className="hover:text-blue-600 transition-colors">Home</button>
-              <button onClick={() => setGameState(GameState.ARENA_HUB)} className="hover:text-blue-600 transition-colors">Series</button>
-              <button onClick={() => setGameState(GameState.ARENA_HUB)} className="hover:text-blue-600 transition-colors">Teams</button>
-              <button onClick={() => setGameState(GameState.ARENA_HUB)} className="hover:text-blue-600 transition-colors">Fixtures</button>
+              <button onClick={handleReturnToHub} className="hover:text-blue-600 transition-colors">Home</button>
+              <button onClick={handleReturnToHub} className="hover:text-blue-600 transition-colors">Series</button>
+              <button onClick={handleReturnToHub} className="hover:text-blue-600 transition-colors">Teams</button>
+              <button onClick={handleReturnToHub} className="hover:text-blue-600 transition-colors">Fixtures</button>
               <button onClick={() => setActiveTab('Points Table')} className="hover:text-blue-600 transition-colors">Stats</button>
               <button onClick={() => setActiveTab('Points Table')} className="hover:text-blue-600 transition-colors">Rankings</button>
             </nav>

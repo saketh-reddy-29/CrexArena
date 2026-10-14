@@ -117,6 +117,19 @@ const BATTER_CREASE: Point = { x: 300, y: 410 };
 const NON_STRIKER_CREASE: Point = { x: 300, y: 200 };
 const BOUNDARY_RADIUS = 268;
 
+export const clampFielderCoordinate = (p: Point): Point => {
+  const dist = Math.hypot(p.x - 300, p.y - 300);
+  const maxR = 260; // strictly inside 268 boundary
+  let clampedX = dist > maxR ? 300 + ((p.x - 300) / dist) * maxR : p.x;
+  let clampedY = dist > maxR ? 300 + ((p.y - 300) / dist) * maxR : p.y;
+
+  // Guard pitch rectangle (x: 270-330, y: 165-435) - keep fielders off the central pitch strip
+  if (clampedX >= 270 && clampedX <= 330 && clampedY >= 165 && clampedY <= 435) {
+    clampedX = clampedX < 300 ? 255 : 345;
+  }
+  return { x: Math.round(clampedX), y: Math.round(clampedY) };
+};
+
 export default function CricketActionVisualizer({
   striker,
   nonStriker,
@@ -227,22 +240,25 @@ export default function CricketActionVisualizer({
 
   // Physical Fielders in 2D Space
   const [fielders, setFielders] = useState<FielderLiveState[]>(() => {
-    return fieldConfig.fielders.map((f) => ({
-      id: f.id,
-      name: f.name,
-      role: f.positionName,
-      currentX: f.targetPos.x,
-      currentY: f.targetPos.y,
-      targetX: f.targetPos.x,
-      targetY: f.targetPos.y,
-      fromX: f.targetPos.x,
-      fromY: f.targetPos.y,
-      category: f.isCatching ? 'CATCHING' : f.isOutsideCircle ? 'BOUNDARY' : 'RING',
-      isOutsideCircle: f.isOutsideCircle,
-      isCatching: f.isCatching,
-      tacticalRole: f.tacticalRole,
-      isMoving: false,
-    }));
+    return fieldConfig.fielders.map((f) => {
+      const pos = clampFielderCoordinate(f.targetPos);
+      return {
+        id: f.id,
+        name: f.name,
+        role: f.positionName,
+        currentX: pos.x,
+        currentY: pos.y,
+        targetX: pos.x,
+        targetY: pos.y,
+        fromX: pos.x,
+        fromY: pos.y,
+        category: f.isCatching ? 'CATCHING' : f.isOutsideCircle ? 'BOUNDARY' : 'RING',
+        isOutsideCircle: f.isOutsideCircle,
+        isCatching: f.isCatching,
+        tacticalRole: f.tacticalRole,
+        isMoving: false,
+      };
+    });
   });
 
   const [isFieldChanging, setIsFieldChanging] = useState<boolean>(false);
@@ -343,8 +359,10 @@ export default function CricketActionVisualizer({
     const movingList: FieldConfiguration['changedFielders'] = [];
 
     const updatedFielders: FielderLiveState[] = newConfig.fielders.map((f) => {
-      const current = currentPositionsMap.get(f.id) || { x: f.targetPos.x, y: f.targetPos.y, role: f.positionName };
-      const dist = Math.hypot(f.targetPos.x - current.x, f.targetPos.y - current.y);
+      const clampedTarget = clampFielderCoordinate(f.targetPos);
+      const rawCurrent = currentPositionsMap.get(f.id) || { x: clampedTarget.x, y: clampedTarget.y, role: f.positionName };
+      const clampedCurrent = clampFielderCoordinate(rawCurrent);
+      const dist = Math.hypot(clampedTarget.x - clampedCurrent.x, clampedTarget.y - clampedCurrent.y);
       const isMoving = dist > 4;
 
       if (isMoving) {
@@ -352,10 +370,10 @@ export default function CricketActionVisualizer({
         movingList.push({
           playerId: f.id,
           playerName: f.name,
-          fromRole: current.role,
+          fromRole: rawCurrent.role,
           toRole: f.positionName,
-          fromPoint: { x: Math.round(current.x), y: Math.round(current.y) },
-          toPoint: { x: Math.round(f.targetPos.x), y: Math.round(f.targetPos.y) },
+          fromPoint: { x: clampedCurrent.x, y: clampedCurrent.y },
+          toPoint: { x: clampedTarget.x, y: clampedTarget.y },
         });
       }
 
@@ -363,12 +381,12 @@ export default function CricketActionVisualizer({
         id: f.id,
         name: f.name,
         role: f.positionName,
-        currentX: current.x,
-        currentY: current.y,
-        targetX: f.targetPos.x,
-        targetY: f.targetPos.y,
-        fromX: current.x,
-        fromY: current.y,
+        currentX: clampedCurrent.x,
+        currentY: clampedCurrent.y,
+        targetX: clampedTarget.x,
+        targetY: clampedTarget.y,
+        fromX: clampedCurrent.x,
+        fromY: clampedCurrent.y,
         category: f.isCatching ? 'CATCHING' : f.isOutsideCircle ? 'BOUNDARY' : 'RING',
         isOutsideCircle: f.isOutsideCircle,
         isCatching: f.isCatching,
@@ -455,7 +473,7 @@ export default function CricketActionVisualizer({
   // ───────────────────────────────────────────────────────────────────────────
   // 2. CONTINUOUS 2D BALL MOVEMENT & TRAIL PLAYBACK
   // ─────────────────────────────────────────────────────────────────────────
-  const runContinuousBallAnimation = useCallback((delivery: DeliveryResult, resumeFromProgress: number = 0) => {
+  const runContinuousBallAnimation = useCallback((delivery: DeliveryResult, resumeFromProgress: number = 0, isReplay: boolean = false) => {
     if (speed === 0) {
       // Instant / Skip mode
       setBallVisible(false);
@@ -463,8 +481,10 @@ export default function CricketActionVisualizer({
       setAnimProgress(100);
       setPlaybackStage('OUTCOME');
       setResultBanner(delivery.wicket ? (delivery.wicketType?.toUpperCase() || 'WICKET!') : delivery.totalRuns === 6 ? 'SIX!' : delivery.totalRuns === 4 ? 'FOUR!' : delivery.totalRuns > 0 ? `${delivery.totalRuns} RUNS` : 'DOT BALL');
-      onContactReachedRef.current?.();
-      onPlaybackCompleteRef.current?.();
+      if (!isReplay) {
+        onContactReachedRef.current?.();
+        onPlaybackCompleteRef.current?.();
+      }
       return;
     }
 
@@ -507,44 +527,54 @@ export default function CricketActionVisualizer({
       let curY = path.start.y;
       let curScale = 1;
 
-      // ── Stage 1: Bowler Run-up to Pitch Bounce (0.00 - 0.35)
-      if (progress < 0.35) {
+      // ── Stage 1: Bowler Run-up to Bowling Crease (0.00 - 0.22)
+      if (progress < 0.22) {
         setPlaybackStage('BOWLER_RELEASE');
-        const pNorm = progress / 0.35;
-        // Runup movement
+        const pNorm = progress / 0.22;
         const bY = 120 + (pNorm * 65);
         setBowlerPos({ x: 300, y: bY });
 
-        // Ball release to pitch bounce
-        curX = path.start.x + (path.bounce.x - path.start.x) * pNorm;
-        curY = path.start.y + (path.bounce.y - path.start.y) * pNorm;
-        curScale = 1 + Math.sin(pNorm * Math.PI) * 0.2;
+        // Ball remains in bowler's hand
+        curX = 300;
+        curY = bY;
+        curScale = 1;
       }
-      // ── Stage 2: Pitch Bounce to Bat Contact (0.35 - 0.50)
-      else if (progress < 0.50) {
+      // ── Stage 2: Bowler Crease to Pitch Bounce (0.22 - 0.45)
+      else if (progress < 0.45) {
+        setPlaybackStage('BOWLER_RELEASE');
+        setBowlerPos({ x: 300, y: 185 });
+        const pRelease = (progress - 0.22) / 0.23;
+
+        curX = path.start.x + (path.bounce.x - path.start.x) * pRelease;
+        curY = path.start.y + (path.bounce.y - path.start.y) * pRelease;
+        curScale = 1 + Math.sin(pRelease * Math.PI) * 0.22;
+      }
+      // ── Stage 3: Pitch Bounce to Bat Contact (0.45 - 0.58)
+      else if (progress < 0.58) {
         setPlaybackStage('PITCH_BOUNCE');
-        const pBounce = (progress - 0.35) / 0.15;
+        const pBounce = (progress - 0.45) / 0.13;
         curX = path.bounce.x + (path.contact.x - path.bounce.x) * pBounce;
         curY = path.bounce.y + (path.contact.y - path.bounce.y) * pBounce;
         // Batter swing anticipation
         setBatRotation(Math.sin(pBounce * Math.PI) * -38);
       }
-      // ── Stage 3: Bat Contact to Target Zone / Boundary (0.50 - 0.90)
+      // ── Stage 4: Bat Contact to Target Zone / Boundary (0.58 - 0.90)
       else if (progress < 0.90) {
         setPlaybackStage('BALL_TRAVEL');
-        const pTravel = (progress - 0.50) / 0.40;
+        const pTravel = (progress - 0.58) / 0.32;
 
         if (!contactTriggered) {
           contactTriggered = true;
           setImpactBurst({ x: path.contact.x, y: path.contact.y });
-          onContactReachedRef.current?.();
+          if (!isReplay) {
+            onContactReachedRef.current?.();
+          }
         }
 
         curX = path.contact.x + (path.target.x - path.contact.x) * pTravel;
         curY = path.contact.y + (path.target.y - path.contact.y) * pTravel;
 
         if (path.isAerial) {
-          // 2D depth scale for aerial ball
           const arc = Math.sin(pTravel * Math.PI);
           curScale = 1 + arc * 0.75;
         } else {
@@ -566,7 +596,7 @@ export default function CricketActionVisualizer({
           setBailsFlying(true);
         }
       }
-      // ── Stage 4: Outcome & Boundary Wave (0.90 - 1.00)
+      // ── Stage 5: Outcome & Boundary Wave (0.90 - 1.00)
       else {
         setPlaybackStage('OUTCOME');
         curX = path.target.x;
@@ -603,7 +633,9 @@ export default function CricketActionVisualizer({
       if (progress < 1) {
         animFrameRef.current = requestAnimationFrame(step);
       } else {
-        onPlaybackCompleteRef.current?.();
+        if (!isReplay) {
+          onPlaybackCompleteRef.current?.();
+        }
       }
     };
 
@@ -616,7 +648,7 @@ export default function CricketActionVisualizer({
       lastPlayedDeliveryIdRef.current = activeDelivery.id;
       setIsPaused(false);
       pausedProgressRef.current = 0;
-      runContinuousBallAnimation(activeDelivery, 0);
+      runContinuousBallAnimation(activeDelivery, 0, false);
     }
   }, [activeDelivery, isFieldChanging, runContinuousBallAnimation]);
 
@@ -634,7 +666,7 @@ export default function CricketActionVisualizer({
     if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
     setIsPaused(false);
     pausedProgressRef.current = 0;
-    runContinuousBallAnimation(activeDelivery, 0);
+    runContinuousBallAnimation(activeDelivery, 0, true);
   };
 
   // Skip Current Playback
@@ -670,7 +702,7 @@ export default function CricketActionVisualizer({
       if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
       setIsPaused(false);
       pausedProgressRef.current = 0;
-      runContinuousBallAnimation(replayDeliveryResult, 0);
+      runContinuousBallAnimation(replayDeliveryResult, 0, true);
     }
   }, [replayDeliveryResult, runContinuousBallAnimation]);
 
@@ -960,13 +992,15 @@ export default function CricketActionVisualizer({
             </span>
           </div>
 
-          <svg
-            ref={svgRef}
-            viewBox="0 0 600 600"
-            className="w-full h-full max-w-[560px] aspect-square drop-shadow-[0_0_50px_rgba(0,0,0,0.95)] cursor-crosshair relative z-10"
-            onMouseMove={handleSvgMouseMove}
-            onMouseUp={() => setDraggedFielderId(null)}
-          >
+          <div className="w-full max-w-[540px] aspect-square mx-auto relative flex items-center justify-center">
+            <svg
+              ref={svgRef}
+              viewBox="0 0 600 600"
+              preserveAspectRatio="xMidYMid meet"
+              className="w-full h-full drop-shadow-[0_0_50px_rgba(0,0,0,0.95)] cursor-crosshair relative z-10 select-none"
+              onMouseMove={handleSvgMouseMove}
+              onMouseUp={() => setDraggedFielderId(null)}
+            >
             <defs>
               {/* Field Turf Radial Gradient */}
               <radialGradient id="fieldGrass2D" cx="50%" cy="50%" r="50%">
@@ -1156,7 +1190,7 @@ export default function CricketActionVisualizer({
 
                   {/* Position Label Pill: Only displayed in LABELS mode */}
                   {effectiveDisplayMode === 'LABELS' && (
-                    <g transform="translate(0, 14)">
+                    <g transform={`translate(0, ${fielder.currentY > 480 ? -14 : 14})`}>
                       <rect
                         x="-26"
                         y="-7"
@@ -1281,6 +1315,7 @@ export default function CricketActionVisualizer({
               </g>
             )}
           </svg>
+          </div>
 
           {/* Delivery Result Banner Overlay */}
           <AnimatePresence>
