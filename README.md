@@ -33,6 +33,8 @@ CrexArena/
 │   │   └── BoardSelection.tsx      # 15-man tournament squad builder with AI squad advisor
 │   │
 │   ├── engine/                     # Cricket Simulation Core
+│   │   ├── control/
+│   │   │   └── MatchControlPermissions.ts    # Role-based control permissions & authority matrix
 │   │   ├── fielding/
 │   │   │   ├── BallLifecycleController.ts   # Ball retrieval state machine & next-delivery gate
 │   │   │   ├── FieldingInterceptionEngine.ts # Fielder pursuit trajectory & boundary cut-off
@@ -42,6 +44,8 @@ CrexArena/
 │   │   ├── scheduling/
 │   │   │   └── FixtureScheduler.ts     # Realistic durations, overlap conflict detection, rest days & Test reservations
 │   │   ├── ai/
+│   │   │   ├── BattingAIController.ts  # Opponent batting intent adaptation & chase intelligence
+│   │   │   ├── BowlingAIController.ts  # Opponent bowler rotation, plan crafting & death bowling
 │   │   │   ├── WorkloadRotationEngine.ts # Fatigue tracking, rest recovery, pitch adaptation & smart Playing XI rotation
 │   │   │   ├── AICaptainEngine.ts      # Bowler rotation, workload limits, tactical adjustments
 │   │   │   ├── BatterDecisionEngine.ts # Settledness (0-100%), psychology, 7 batting intents
@@ -71,7 +75,10 @@ CrexArena/
 │   │   ├── match.ts                # PitchType, WeatherCondition, Fixture, Standing, DRSReview
 │   │   └── common.ts               # Player, Franchise, SkillStats interfaces
 │   │
-│   └── tests/                      # Automated Vitest Suite (144 tests across 19 suites)
+│   └── tests/                      # Automated Vitest Suite (163 tests across 22 suites)
+│       ├── battingAIController.test.ts   # Opponent batting intent adaptation & collapse recovery
+│       ├── bowlingAIController.test.ts   # Opponent bowler selection & tactical planning
+│       ├── matchControlPermissions.test.ts # Authority matrix & user/AI role restrictions
 │       ├── ballLifecycle.test.ts         # Ball retrieval transitions & delivery blocking
 │       ├── fieldingInterception.test.ts  # Fielder pursuit vectors & boundary save calculations
 │       ├── fieldingRestrictionEngine.test.ts # Powerplay circle rules across formats

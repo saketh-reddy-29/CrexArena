@@ -47,6 +47,14 @@ import { BowlingPlanEngine, DetailedBowlingPlan } from '../engine/ai/BowlingPlan
 import { BowlerFieldStrategyEngine, CANONICAL_POSITIONS } from '../engine/strategy/BowlerFieldStrategyEngine';
 import { BallLifecycleController, BallLifecycleState } from '../engine/fielding/BallLifecycleController';
 import { validateField, getFieldingPhase, getRestrictionSummary, overFromBalls } from '../engine/fielding/FieldingRestrictionEngine';
+import {
+  computeControlPermissions,
+  canPerformAction,
+  describeControlOwnership,
+  getUserInteractiveActions,
+} from '../engine/control/MatchControlPermissions';
+import { decideBowlingChange } from '../engine/ai/BowlingAIController';
+import { selectAINextBatter, selectAIOpeningBatters } from '../engine/ai/BattingAIController';
 import { cn } from '../lib/utils';
 
 const IPL_TEAM_LOGOS: Record<string, string> = {
@@ -440,34 +448,6 @@ export default function LiveMatchCenter() {
     }
   }, [currentDeliveryResult]);
 
-  const handleConfirmOpeners = (sId: string, nsId: string) => {
-    setStrikerId(sId);
-    setNonStrikerId(nsId);
-    setBattingCursor(2);
-    setPending('bowler');
-    setManualDrawerOpen(null);
-  };
-
-  const handleConfirmBatter = (bId: string) => {
-    if (pendingBatterEnd === 'non-striker') {
-      setNonStrikerId(bId);
-    } else {
-      setStrikerId(bId);
-    }
-    setPending(queueBowlerAfterBatter ? 'bowler' : null);
-    setQueueBowlerAfterBatter(false);
-    setManualDrawerOpen(null);
-  };
-
-  const handleConfirmBowler = (bwId: string) => {
-    setBowlerId(bwId);
-    setPending(null);
-    setManualDrawerOpen(null);
-    if (aiCaptainRecommendation) {
-      setAiCaptainRecommendation(null);
-    }
-  };
-
   const handleImpactSubstitution = () => {
     if (!impactIncomingId || !impactOutgoingId) return;
     
@@ -551,6 +531,62 @@ export default function LiveMatchCenter() {
 
   const isMyTeamBatting = battingTeam.id === myTeamId;
   const isMyTeamBowling = bowlingTeam.id === myTeamId;
+
+  // ─── Central control authority ───────────────────────────────────────────
+  // The user controls ONLY their own team's batting decisions. All bowling,
+  // bowling-plan and fielding decisions, plus the opponent's batting, are
+  // owned by the AI. Every user command is gated through this permission set
+  // so the rule is enforced in the application logic, not just the UI.
+  const controlPermissions = useMemo(
+    () =>
+      computeControlPermissions({
+        userTeamId: myTeamId || null,
+        battingTeamId: inning?.battingTeamId || battingTeam.id,
+        bowlingTeamId: inning?.bowlingTeamId || bowlingTeam.id,
+        phase:
+          innings.length === 0
+            ? 'PRE_INNINGS'
+            : inning?.isComplete
+              ? inningNo === 2
+                ? 'MATCH_COMPLETE'
+                : 'INNINGS_BREAK'
+              : 'IN_INNINGS',
+      }),
+    [myTeamId, inning?.battingTeamId, inning?.bowlingTeamId, inning?.isComplete, innings.length, inningNo, battingTeam.id, bowlingTeam.id],
+  );
+  const userCanSelectOpeners = canPerformAction(controlPermissions, 'SELECT_OPENING_BATTERS');
+  const userCanSelectIncomingBatter = canPerformAction(controlPermissions, 'SELECT_INCOMING_BATTER');
+  const userCanSetBattingIntent = canPerformAction(controlPermissions, 'SET_BATTING_INTENT');
+  const controlSummary = describeControlOwnership(controlPermissions);
+
+  const handleConfirmOpeners = (sId: string, nsId: string) => {
+    if (!userCanSelectOpeners) return; // enforce: only the user's own batting lineup
+    setStrikerId(sId);
+    setNonStrikerId(nsId);
+    setBattingCursor(2);
+    setPending('bowler');
+    setManualDrawerOpen(null);
+  };
+
+  const handleConfirmBatter = (bId: string) => {
+    if (!userCanSelectIncomingBatter) return; // enforce: never pick the opponent's batter
+    if (pendingBatterEnd === 'non-striker') {
+      setNonStrikerId(bId);
+    } else {
+      setStrikerId(bId);
+    }
+    setPending(queueBowlerAfterBatter ? 'bowler' : null);
+    setQueueBowlerAfterBatter(false);
+    setManualDrawerOpen(null);
+  };
+
+  // Manual bowler selection is permanently AI-owned → this handler is inert.
+  const handleConfirmBowler = (bwId: string) => {
+    if (!canPerformAction(controlPermissions, 'SELECT_BOWLER')) return;
+    setBowlerId(bwId);
+    setPending(null);
+    setManualDrawerOpen(null);
+  };
 
   const getAvailableBatters = useCallback((score: InningsState | undefined, squad: Player[], striker?: string | null, nonStriker?: string | null) => {
     return squad.filter((player) => !score?.batters[player.id]?.out && player.id !== striker && player.id !== nonStriker);
@@ -640,67 +676,101 @@ export default function LiveMatchCenter() {
 
   useEffect(() => {
     if (!inning || !pending) return;
+
     if (pending === 'openers') {
-      if (isMyTeamBatting && !autoPlay) return;
-      setStrikerId(battingSquad[0]?.id || null);
-      setNonStrikerId(battingSquad[1]?.id || null);
+      if (isMyTeamBatting) {
+        // The user owns their own batting lineup — wait for the opening-batter dialog.
+        setManualDrawerOpen('OPENERS');
+        return;
+      }
+      // Opponent batting: the AI picks the openers automatically.
+      const openers = selectAIOpeningBatters({
+        format: (selectedFormat as ArenaFormat) || 'T20',
+        squad: battingSquad,
+        batters: inning.batters,
+        strikerId,
+        nonStrikerId,
+        wickets: inning.wickets,
+        runs: inning.runs,
+        balls: inning.balls,
+      });
+      setStrikerId(openers.striker?.id || battingSquad[0]?.id || null);
+      setNonStrikerId(openers.nonStriker?.id || battingSquad[1]?.id || null);
       setBattingCursor(2);
       setPending('bowler');
       return;
     }
+
     if (pending === 'batter') {
-      if (isMyTeamBatting && !autoPlay) return;
-      const next = getAvailableBatters(inning, battingSquad, strikerId, nonStrikerId)[0] || battingSquad[battingCursor];
-      if (next) {
-        if (pendingBatterEnd === 'non-striker') setNonStrikerId(next.id);
-        else setStrikerId(next.id);
+      if (isMyTeamBatting) {
+        // The user chooses the incoming batter — open the "Wicket! Select Next Batter" dialog.
+        setManualDrawerOpen('BATTER');
+        return;
+      }
+      // Opponent batting: AI selects the incoming batter automatically.
+      const selection = selectAINextBatter({
+        format: (selectedFormat as ArenaFormat) || 'T20',
+        squad: battingSquad,
+        batters: inning.batters,
+        strikerId,
+        nonStrikerId,
+        battingCursor,
+        wickets: inning.wickets,
+        runs: inning.runs,
+        balls: inning.balls,
+        target: inningNo === 2 ? (innings[0]?.runs || 0) + 1 : undefined,
+        recentBalls: inning.recentBalls,
+      });
+      if (selection.player) {
+        if (pendingBatterEnd === 'non-striker') setNonStrikerId(selection.player.id);
+        else setStrikerId(selection.player.id);
         setBattingCursor((value) => value + 1);
       }
       setPending(queueBowlerAfterBatter ? 'bowler' : null);
       setQueueBowlerAfterBatter(false);
       return;
     }
+
     if (pending === 'bowler') {
-      const availBowlers = getAvailableBowlers(inning, bowlingSquad, lastOverBowlerId);
-      const aiDecision = AICaptainEngine.decideCaptainAction({
+      // Bowling is ALWAYS autonomous — the AI captain of the fielding team,
+      // whether that is the user's team or the opponent, chooses the bowler,
+      // the plan and a legal field formation. The user never selects a bowler.
+      const decision = decideBowlingChange({
         format: (selectedFormat as ArenaFormat) || 'T20',
-        teamId: bowlingTeam.id,
-        inningsState: {
-          score: inning.runs,
-          wickets: inning.wickets,
-          balls: inning.balls,
-          recentBalls: inning.recentBalls,
-        },
-        availableBowlers: availBowlers,
+        over: Math.floor(inning.balls / 6) + 1,
+        balls: inning.balls,
+        wickets: inning.wickets,
+        runs: inning.runs,
+        target: inningNo === 2 ? (innings[0]?.runs || 0) + 1 : undefined,
+        recentBalls: inning.recentBalls,
+        fieldingSquad: bowlingSquad,
+        bowlerStats: inning.bowlers,
         previousOverBowlerId: lastOverBowlerId,
+        currentBowler: null,
         striker: striker || null,
         nonStriker: nonStriker || null,
-        pitchState: { pitchType: pitch },
-        decisionTrigger: 'OVER_END',
+        pitch,
+        weather,
+        fatigue: playerFatigue,
+        eligibleBowlerIds: getAvailableBowlers(inning, bowlingSquad, lastOverBowlerId).map((p) => p.id),
+        previousFieldPresetKey: fieldPresetKey,
+        trigger: inning.balls === 0 ? 'INITIAL' : 'OVER_END',
       });
-
-      if (isMyTeamBowling) {
-        if (userTeamControlMode === 'FULL_AUTO' || autoPlay) {
-          const chosenId = aiDecision.selectedBowlerId || chooseAiBowler(inning, bowlingSquad, lastOverBowlerId)?.id || null;
-          setBowlerId(chosenId);
-          if (aiDecision.bowlingPlan) {
-            setUserBowlingPlan(aiDecision.bowlingPlan as DetailedBowlingPlan);
-          }
-          setPending(null);
-        } else {
-          // Manual or AI recommendations: provide recommendation for player to review
-          setAiCaptainRecommendation(aiDecision);
-          return;
-        }
-      } else {
-        // Opponent is bowling: autonomous intelligent decision
-        const chosenId = aiDecision.selectedBowlerId || chooseAiBowler(inning, bowlingSquad, lastOverBowlerId)?.id || null;
-        setBowlerId(chosenId);
-        setOpponentTacticalNotice(`${bowlingTeam.name} Captain: ${aiDecision.reasoning}`);
-        setPending(null);
-      }
+      if (decision.bowlerId) setBowlerId(decision.bowlerId);
+      if (decision.bowlingPlan) setUserBowlingPlan(decision.bowlingPlan);
+      if (decision.fieldPresetKey) setFieldPresetKey(decision.fieldPresetKey);
+      if (decision.notification) setOpponentTacticalNotice(decision.notification);
+      setAiCaptainRecommendation(null);
+      setPending(null);
     }
-  }, [pending, inning, battingSquad, bowlingSquad, battingCursor, isMyTeamBatting, isMyTeamBowling, strikerId, nonStrikerId, getAvailableBatters, getAvailableBowlers, chooseAiBowler, queueBowlerAfterBatter, lastOverBowlerId, pendingBatterEnd, autoPlay, selectedFormat, bowlingTeam, pitch, userTeamControlMode, striker, nonStriker]);
+  }, [pending, inning, innings, inningNo, battingSquad, bowlingSquad, battingCursor, isMyTeamBatting, strikerId, nonStrikerId, queueBowlerAfterBatter, lastOverBowlerId, pendingBatterEnd, selectedFormat, pitch, weather, playerFatigue, fieldPresetKey, striker, nonStriker, getAvailableBowlers]);
+
+  // Auto-dismiss the unobtrusive AI field-change notice after a few seconds.
+  useEffect(() => {
+    if (!opponentTacticalNotice) return;
+    const timer = setTimeout(() => setOpponentTacticalNotice(null), 6000);
+    return () => clearTimeout(timer);
+  }, [opponentTacticalNotice]);
 
   // Ball retrieval lifecycle handler (driven by the visualizer). Advances the
   // authoritative controller through legal transitions and mirrors its state so
@@ -897,57 +967,42 @@ export default function LiveMatchCenter() {
       });
     }
 
-    // Check tactical events: Wicket fall or boundary cluster
-    if (wicket) {
-      if (!isMyTeamBowling) {
-        setOpponentTacticalNotice(`${bowlingTeam.name} Captain: Wicket! Attacking close-in catchers deployed for new batter.`);
-      } else if (userTeamControlMode === 'AI_RECOMMENDATIONS') {
-        const avail = getAvailableBowlers(inning, bowlingSquad, lastOverBowlerId);
-        const rec = AICaptainEngine.decideCaptainAction({
-          format: (selectedFormat as ArenaFormat) || 'T20',
-          teamId: bowlingTeam.id,
-          inningsState: {
-            score: (inning?.runs || 0) + ballRuns,
-            wickets: (inning?.wickets || 0) + 1,
-            balls: (inning?.balls || 0) + (isLegalDelivery ? 1 : 0),
-            recentBalls: [...(inning?.recentBalls || []), wicket ? 'W' : String(ballRuns)],
-          },
-          availableBowlers: avail,
-          currentBowler,
-          previousOverBowlerId: lastOverBowlerId,
-          pitchState: { pitchType: pitch },
-          decisionTrigger: 'WICKET_FALL',
-        });
-        setAiCaptainRecommendation(rec);
+    // AI captain reacts to a wicket or a boundary cluster by re-planning the
+    // field. The resulting formation is always validated against the fielding
+    // restrictions inside the controller, then applied to the live field.
+    const recentForField = [...(inning?.recentBalls || []), wicket ? 'W' : String(ballRuns)];
+    const boundaryCluster =
+      !wicket && recentForField.slice(-6).filter((b) => b === '4' || b === '6').length >= 2;
+    if ((wicket || boundaryCluster) && currentBowler) {
+      const fieldDecision = decideBowlingChange({
+        format: (selectedFormat as ArenaFormat) || 'T20',
+        over: Math.floor((inning?.balls || 0) / 6) + 1,
+        balls: (inning?.balls || 0) + (isLegalDelivery ? 1 : 0),
+        wickets: (inning?.wickets || 0) + (wicket ? 1 : 0),
+        runs: (inning?.runs || 0) + ballRuns,
+        recentBalls: recentForField,
+        fieldingSquad: bowlingSquad,
+        bowlerStats: inning?.bowlers || {},
+        previousOverBowlerId: lastOverBowlerId,
+        currentBowler,
+        striker: striker || null,
+        nonStriker: nonStriker || null,
+        pitch,
+        weather,
+        previousFieldPresetKey: fieldPresetKey,
+        trigger: wicket ? 'WICKET_FALL' : 'BOUNDARY_CLUSTER',
+      });
+      if (fieldDecision.fieldChanged) {
+        setFieldPresetKey(fieldDecision.fieldPresetKey);
       }
-    } else {
-      const recent = [...(inning?.recentBalls || []), String(ballRuns)].slice(-6);
-      const bCount = recent.filter((b) => b === '4' || b === '6').length;
-      if (bCount >= 2) {
-        if (!isMyTeamBowling) {
-          setOpponentTacticalNotice(`${bowlingTeam.name} Captain: Boundary surge detected! Deep boundary protection deployed.`);
-        } else if (userTeamControlMode === 'AI_RECOMMENDATIONS' && !aiCaptainRecommendation) {
-          const avail = getAvailableBowlers(inning, bowlingSquad, lastOverBowlerId);
-          const rec = AICaptainEngine.decideCaptainAction({
-            format: (selectedFormat as ArenaFormat) || 'T20',
-            teamId: bowlingTeam.id,
-            inningsState: {
-              score: (inning?.runs || 0) + ballRuns,
-              wickets: (inning?.wickets || 0),
-              balls: (inning?.balls || 0) + (isLegalDelivery ? 1 : 0),
-              recentBalls: recent,
-            },
-            availableBowlers: avail,
-            currentBowler,
-            previousOverBowlerId: lastOverBowlerId,
-            pitchState: { pitchType: pitch },
-            decisionTrigger: 'BOUNDARY_CLUSTER',
-          });
-          setAiCaptainRecommendation(rec);
-        }
-      }
+      setOpponentTacticalNotice(
+        fieldDecision.notification ||
+          `${bowlingTeam.name} AI: ${
+            wicket ? 'Wicket! Applying pressure with a fresh field.' : 'Boundary surge — protecting the rope.'
+          }`,
+      );
     }
-  }, [currentDeliveryResult, inningNo, battingTeam.shortName, maxBalls, striker, currentMatchId, isMyTeamBowling, bowlingTeam.name, bowlingTeam.id, userTeamControlMode, inning, bowlingSquad, lastOverBowlerId, currentBowler, pitch, selectedFormat, aiCaptainRecommendation, getAvailableBowlers]);
+  }, [currentDeliveryResult, inningNo, battingTeam.shortName, maxBalls, striker, currentMatchId, bowlingTeam.name, inning, bowlingSquad, lastOverBowlerId, currentBowler, pitch, weather, selectedFormat, fieldPresetKey, nonStriker]);
 
   const handlePlaybackComplete = useCallback(() => {
     if (!currentDeliveryResult) return;
@@ -1054,28 +1109,12 @@ export default function LiveMatchCenter() {
       const currentStrikerState = batterStates[striker.id] || BatterDecisionEngine.createInitialBatterState(striker.id, `${currentMatchId}_in${inningNo}`, striker);
 
       // Resolve Batting Intent
+      // • User's own innings → the user's chosen intent (they own their batting).
+      // • Opponent innings → the opponent AI decides autonomously.
       let effectiveBattingIntent: BattingIntent = 'NORMAL';
-      if (isMyTeamBatting) {
-        if (userTeamControlMode === 'FULL_AUTO') {
-          effectiveBattingIntent = BatterDecisionEngine.selectBattingIntent(currentStrikerState, {
-            format: (selectedFormat as ArenaFormat) || 'T20',
-            batter: striker,
-            bowler: currentBowler,
-            inningsState: {
-              score: current.runs,
-              wickets: current.wickets,
-              balls: current.balls,
-              target,
-              partnershipRuns: current.partnershipRuns,
-              partnershipBalls: current.partnershipBalls,
-            },
-            pitchType: pitch,
-          });
-        } else {
-          effectiveBattingIntent = userBattingIntent;
-        }
+      if (isMyTeamBatting && userCanSetBattingIntent) {
+        effectiveBattingIntent = userBattingIntent;
       } else {
-        // Opponent is batting: autonomous intelligent intent
         effectiveBattingIntent = BatterDecisionEngine.selectBattingIntent(currentStrikerState, {
           format: (selectedFormat as ArenaFormat) || 'T20',
           batter: striker,
@@ -1092,25 +1131,19 @@ export default function LiveMatchCenter() {
         });
       }
 
-      // Resolve Bowling Plan
-      let effectiveBowlingPlan: DetailedBowlingPlan | undefined = undefined;
-      if (isMyTeamBowling) {
-        if (userBowlingPlan) {
-          effectiveBowlingPlan = userBowlingPlan;
-        }
-      } else {
-        effectiveBowlingPlan = BowlingPlanEngine.selectBowlingPlan(currentBowler, striker, {
-          format: (selectedFormat as ArenaFormat) || 'T20',
-          overs: Math.floor(current.balls / 6),
-          balls: current.balls,
-          wickets: current.wickets,
-          target,
-          pitch,
-          strikerBalls: strikerLine.balls,
-          strikerRuns: strikerLine.runs,
-          bouncersThisOver: currentBowlerLine.bouncersThisOver || 0,
-        });
-      }
+      // Resolve Bowling Plan — always AI-generated (the bowling captain owns it),
+      // for both the user's team and the opponent.
+      const effectiveBowlingPlan: DetailedBowlingPlan | undefined = BowlingPlanEngine.selectBowlingPlan(currentBowler, striker, {
+        format: (selectedFormat as ArenaFormat) || 'T20',
+        overs: Math.floor(current.balls / 6),
+        balls: current.balls,
+        wickets: current.wickets,
+        target,
+        pitch,
+        strikerBalls: strikerLine.balls,
+        strikerRuns: strikerLine.runs,
+        bouncersThisOver: currentBowlerLine.bouncersThisOver || 0,
+      });
 
       const deliveryRes = DeliveryResultFactory.createDeliveryResult({
         striker,
@@ -1285,6 +1318,10 @@ export default function LiveMatchCenter() {
 
   const lastWicket = inning?.wicketLog.length ? inning.wicketLog[inning.wicketLog.length - 1] : null;
   const lastWicketBatter = lastWicket ? players.find((p) => p.id === lastWicket.playerId) : null;
+  const dismissedBatterLabel = lastWicket
+    ? `${lastWicketBatter?.name || 'Batter'} ${lastWicket.status} — ${lastWicket.wicketType}`
+    : null;
+  const scoreLabel = inning ? `${battingTeam.shortName} ${inning.runs}/${inning.wickets} (${formatOvers(inning.balls)})` : null;
 
   const last6 = (inning?.recentBalls || []).slice(-6);
   const recentCommentaryLines = (inning?.commentary || []).slice(0, 2);
@@ -1558,29 +1595,11 @@ export default function LiveMatchCenter() {
               </div>
             </div>
 
-            {/* Playback & Tactical Mode Controls */}
+            {/* Playback Controls (bowling & fielding are AI-controlled, so no manual tactical mode) */}
             <div className="flex items-center gap-2 bg-slate-50 p-1.5 rounded-xl border border-slate-200">
-              {/* Tactical Mode Toggle */}
-              <div className="flex items-center bg-white p-0.5 rounded-lg border border-slate-200">
-                {(['MANUAL', 'AI_RECOMMENDATIONS', 'FULL_AUTO'] as const).map((m) => (
-                  <button
-                    key={m}
-                    onClick={() => {
-                      setUserTeamControlMode(m);
-                      if (m === 'FULL_AUTO') setAutoPlay(true);
-                      else if (m === 'MANUAL') setAutoPlay(false);
-                    }}
-                    className={cn(
-                      "px-2 py-1 rounded text-[9px] font-black uppercase transition-all",
-                      userTeamControlMode === m
-                        ? "bg-blue-600 text-white shadow-xs"
-                        : "text-slate-500 hover:text-slate-900"
-                    )}
-                  >
-                    {m === 'AI_RECOMMENDATIONS' ? 'AI REC' : m === 'FULL_AUTO' ? 'AUTO' : 'MANUAL'}
-                  </button>
-                ))}
-              </div>
+              <span className="hidden md:inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-slate-100 border border-slate-200 text-[9px] font-black uppercase text-slate-500">
+                {controlSummary}
+              </span>
 
               {/* Play / Pause Toggle */}
               <button
@@ -1742,32 +1761,14 @@ export default function LiveMatchCenter() {
                   partnershipBalls={inning?.partnershipBalls}
                   onFieldChangingChange={setIsFieldChanging}
                   onBallLifecycleChange={handleBallLifecycleChange}
-                  userTeamControlMode={userTeamControlMode}
-                  onUserTeamControlModeChange={setUserTeamControlMode}
-                  aiCaptainRecommendation={aiCaptainRecommendation}
-                  onApplyAIRecommendation={(rec) => {
-                    if (rec.selectedBowlerId) {
-                      setBowlerId(rec.selectedBowlerId);
-                      setPending(null);
-                    }
-                    if (rec.bowlingPlan) {
-                      setUserBowlingPlan(rec.bowlingPlan as DetailedBowlingPlan);
-                    }
-                    if (rec.battingIntent) {
-                      setUserBattingIntent(rec.battingIntent);
-                    }
-                    setAiCaptainRecommendation(null);
-                  }}
-                  onIgnoreAIRecommendation={() => setAiCaptainRecommendation(null)}
+                  userTeamControlMode="FULL_AUTO"
+                  aiCaptainRecommendation={null}
+                  manualControlsEnabled={false}
                   userBattingIntent={userBattingIntent}
                   onUserBattingIntentChange={setUserBattingIntent}
-                  userBowlingPlan={userBowlingPlan || undefined}
-                  onUserBowlingPlanChange={setUserBowlingPlan}
                   isUserTeamBatting={isMyTeamBatting}
                   isUserTeamBowling={isMyTeamBowling}
                   opponentTacticalNotice={opponentTacticalNotice}
-                  eligibleBowlers={selectableBowlers}
-                  onSelectBowlerManual={handleConfirmBowler}
                   batterState={striker ? batterStates[striker.id] || null : null}
                   playbackSpeed={playbackSpeed}
                   onPlaybackSpeedChange={setPlaybackSpeed}
@@ -1792,18 +1793,17 @@ export default function LiveMatchCenter() {
 
           {/* ── RIGHT COLUMN: BATTERS, BOWLER & NEXT ACTION (~1/3) ── */}
           <div className="lg:col-span-4 space-y-3">
-            {/* Pending Selection Prompt (critical progression CTA) */}
-            {pending && (
+            {/* Pending Selection Prompt (user-owned batting decisions only) */}
+            {pending && (userCanSelectOpeners || userCanSelectIncomingBatter) && (
               <button
                 onClick={() => {
                   if (pending === 'openers') setManualDrawerOpen('OPENERS');
                   else if (pending === 'batter') setManualDrawerOpen('BATTER');
-                  else if (pending === 'bowler') setManualDrawerOpen('BOWLER');
                 }}
                 className="w-full py-2.5 rounded-2xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-black uppercase shadow-sm flex items-center justify-center gap-2 animate-pulse"
               >
                 <Sparkles className="w-4 h-4" />
-                <span>{pending === 'openers' ? 'Select Openers' : pending === 'batter' ? 'Select New Batter' : 'Select Bowler'}</span>
+                <span>{pending === 'openers' ? 'Select Opening Batters' : 'Wicket! Select Next Batter'}</span>
               </button>
             )}
 
@@ -1850,14 +1850,7 @@ export default function LiveMatchCenter() {
             <div className="bg-white rounded-2xl border border-slate-200/90 shadow-sm p-3.5 space-y-2.5">
               <div className="flex items-center justify-between">
                 <span className="text-xs font-black text-slate-800 uppercase tracking-wide">Current Bowler</span>
-                {isMyTeamBowling && (
-                  <button
-                    onClick={() => setManualDrawerOpen('BOWLER')}
-                    className="text-[10px] font-bold text-blue-600 hover:underline flex items-center gap-1"
-                  >
-                    <UserCheck className="w-3 h-3" /> Change Bowler
-                  </button>
-                )}
+                <span className="text-[9px] font-black uppercase px-2 py-0.5 rounded-full bg-slate-100 text-slate-500 border border-slate-200">AI Selected</span>
               </div>
 
               <div className="flex items-center gap-3">
@@ -1899,13 +1892,13 @@ export default function LiveMatchCenter() {
                   <Target className="w-3.5 h-3.5 text-blue-600" /> Next Action
                 </span>
                 <span className="text-[9px] font-black uppercase px-2 py-0.5 rounded-full bg-slate-100 text-slate-500 border border-slate-200">
-                  {autoPlay && !isPlaybackPaused ? 'Auto Play' : userTeamControlMode === 'FULL_AUTO' ? 'Full Auto' : userTeamControlMode === 'AI_RECOMMENDATIONS' ? 'AI Rec' : 'Manual'}
+                  {autoPlay && !isPlaybackPaused ? 'Auto Play' : userCanSetBattingIntent ? 'Your Batting' : 'AI Controlled'}
                 </span>
               </div>
 
               <div className="rounded-xl bg-blue-50/70 border border-blue-100 px-3 py-2">
                 <span className="text-[9px] font-black uppercase text-blue-500 block">
-                  {isMyTeamBatting ? 'Batting Shot' : 'Bowl Plan'}
+                  {isMyTeamBatting ? 'Your Batting Shot' : 'AI Bowl Plan'}
                 </span>
                 <span className="text-xs font-black text-slate-900">{nextActionLabel}</span>
               </div>
@@ -1933,135 +1926,42 @@ export default function LiveMatchCenter() {
 
               {/* Compact tactical menus */}
               <div className="space-y-1.5">
-                <TacticalMenu
-                  label="Batting Intent"
-                  hint={userBattingIntent.replace(/_/g, ' ')}
-                  open={openTacticalMenu === 'BATTING'}
-                  onToggle={() => setOpenTacticalMenu(openTacticalMenu === 'BATTING' ? null : 'BATTING')}
-                >
-                  <div className="grid grid-cols-2 gap-1.5">
-                    {(['SURVIVAL', 'DEFENSIVE', 'SETTLING', 'ROTATE_STRIKE', 'NORMAL', 'CONTROLLED_ATTACK', 'ACCELERATE'] as const).map((intent) => (
-                      <button
-                        key={intent}
-                        onClick={() => setUserBattingIntent(intent)}
-                        className={cn(
-                          "py-1.5 px-2 rounded-lg text-[9px] font-bold uppercase transition-all border text-left truncate",
-                          userBattingIntent === intent
-                            ? "bg-blue-600 text-white border-blue-700 shadow-xs"
-                            : "bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100"
-                        )}
-                      >
-                        {intent === 'ROTATE_STRIKE' ? 'Rotate' : intent === 'CONTROLLED_ATTACK' ? 'Attack' : intent}
-                      </button>
-                    ))}
-                  </div>
-                </TacticalMenu>
-
-                <TacticalMenu
-                  label="Bowling Plan"
-                  hint={(userBowlingPlan?.intent || 'WICKET_TAKING').replace(/_/g, ' ')}
-                  open={openTacticalMenu === 'BOWLING'}
-                  onToggle={() => setOpenTacticalMenu(openTacticalMenu === 'BOWLING' ? null : 'BOWLING')}
-                >
-                  <div className="grid grid-cols-2 gap-1.5">
-                    {(['WICKET_TAKING', 'CONTAINING', 'DEFENSIVE', 'ATTACKING', 'SHORT_BALL_TRAP'] as const).map((intent) => (
-                      <button
-                        key={intent}
-                        onClick={() => setUserBowlingPlan(prev => ({ ...(prev || DEFAULT_BOWLING_PLAN), intent }))}
-                        className={cn(
-                          "py-1.5 px-2 rounded-lg text-[9px] font-bold uppercase transition-all border text-left truncate",
-                          userBowlingPlan?.intent === intent
-                            ? "bg-purple-600 text-white border-purple-700 shadow-xs"
-                            : "bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100"
-                        )}
-                      >
-                        {intent.replace(/_/g, ' ')}
-                      </button>
-                    ))}
-                  </div>
-                  <button
-                    onClick={() => setManualDrawerOpen('BOWLER')}
-                    className="w-full py-2 rounded-xl bg-purple-100 hover:bg-purple-200 text-purple-800 text-[10px] font-bold transition-colors flex items-center justify-center gap-1.5 border border-purple-200"
+                {userCanSetBattingIntent ? (
+                  <TacticalMenu
+                    label="Your Batting Intent"
+                    hint={userBattingIntent.replace(/_/g, ' ')}
+                    open={openTacticalMenu === 'BATTING'}
+                    onToggle={() => setOpenTacticalMenu(openTacticalMenu === 'BATTING' ? null : 'BATTING')}
                   >
-                    <UserCheck className="w-3.5 h-3.5" />
-                    Change Bowler
-                  </button>
-                </TacticalMenu>
-
-                <TacticalMenu
-                  label="Field Setup"
-                  hint={fieldPresetKey ? (BowlerFieldStrategyEngine.PRESET_OVERLAYS[fieldPresetKey]?.name.split('(')[0].trim() || 'Preset') : 'Default'}
-                  open={openTacticalMenu === 'FIELD'}
-                  onToggle={() => setOpenTacticalMenu(openTacticalMenu === 'FIELD' ? null : 'FIELD')}
-                >
-                  <div className="grid grid-cols-2 gap-1.5">
-                    {Object.entries(BowlerFieldStrategyEngine.PRESET_OVERLAYS).map(([pKey, pDef]) => (
-                      <button
-                        key={pKey}
-                        onClick={() => setFieldPresetKey(pKey)}
-                        className={cn(
-                          "py-1.5 px-2 rounded-lg text-[9px] font-bold transition-all border text-left truncate",
-                          fieldPresetKey === pKey
-                            ? "bg-cyan-600 text-white border-cyan-700 shadow-xs"
-                            : "bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100"
-                        )}
-                      >
-                        {pDef.name.split('(')[0].trim()}
-                      </button>
-                    ))}
+                    <div className="grid grid-cols-2 gap-1.5">
+                      {(['SURVIVAL', 'DEFENSIVE', 'SETTLING', 'ROTATE_STRIKE', 'NORMAL', 'CONTROLLED_ATTACK', 'ACCELERATE'] as const).map((intent) => (
+                        <button
+                          key={intent}
+                          onClick={() => setUserBattingIntent(intent)}
+                          className={cn(
+                            "py-1.5 px-2 rounded-lg text-[9px] font-bold uppercase transition-all border text-left truncate",
+                            userBattingIntent === intent
+                              ? "bg-blue-600 text-white border-blue-700 shadow-xs"
+                              : "bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100"
+                          )}
+                        >
+                          {intent === 'ROTATE_STRIKE' ? 'Rotate' : intent === 'CONTROLLED_ATTACK' ? 'Attack' : intent}
+                        </button>
+                      ))}
+                    </div>
+                  </TacticalMenu>
+                ) : (
+                  <div className="rounded-xl bg-purple-50/70 border border-purple-100 px-3 py-2 space-y-0.5">
+                    <span className="text-[9px] font-black uppercase text-purple-500 block">AI Bowling Plan</span>
+                    <span className="text-xs font-black text-slate-900">
+                      {(userBowlingPlan?.intent || 'WICKET_TAKING').replace(/_/g, ' ')}
+                    </span>
+                    <span className="text-[9px] text-slate-500 block">
+                      The bowling captain picks the bowler, plan and field automatically.
+                    </span>
                   </div>
-                  <button
-                    onClick={() => setFieldPresetKey(null)}
-                    className="w-full py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-[10px] font-bold transition-colors border border-slate-200"
-                  >
-                    Auto Field
-                  </button>
-                  <p className="text-[9px] text-slate-400 leading-snug">Tip: turn on “Edit Field” on the map to drag fielders into position.</p>
-                </TacticalMenu>
+                )}
               </div>
-
-              {/* AI Captain suggestion (lightbulb) */}
-              {aiCaptainRecommendation && (
-                <div className="rounded-xl bg-indigo-50 border border-indigo-200 p-2.5 space-y-1.5">
-                  <div className="flex items-center justify-between">
-                    <span className="text-[10px] font-black uppercase text-indigo-800 flex items-center gap-1.5">
-                      <Lightbulb className="w-3.5 h-3.5 text-indigo-600" />
-                      Captain Suggestion
-                    </span>
-                    <span className="px-1.5 py-0.5 rounded-full text-[9px] font-black uppercase bg-indigo-200/70 text-indigo-800">
-                      {aiCaptainRecommendation.confidence}%
-                    </span>
-                  </div>
-                  <p className="text-[11px] font-bold text-indigo-950 leading-snug">{aiCaptainRecommendation.observation}</p>
-                  <p className="text-[10px] text-slate-600 leading-snug">{aiCaptainRecommendation.reasoning}</p>
-                  <div className="flex items-center gap-2 pt-0.5">
-                    <button
-                      onClick={() => {
-                        if (aiCaptainRecommendation.selectedBowlerId) {
-                          setBowlerId(aiCaptainRecommendation.selectedBowlerId);
-                          setPending(null);
-                        }
-                        if (aiCaptainRecommendation.bowlingPlan) {
-                          setUserBowlingPlan(aiCaptainRecommendation.bowlingPlan as DetailedBowlingPlan);
-                        }
-                        if (aiCaptainRecommendation.battingIntent) {
-                          setUserBattingIntent(aiCaptainRecommendation.battingIntent);
-                        }
-                        setAiCaptainRecommendation(null);
-                      }}
-                      className="flex-1 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-[11px] font-bold transition-colors"
-                    >
-                      Apply
-                    </button>
-                    <button
-                      onClick={() => setAiCaptainRecommendation(null)}
-                      className="px-3 py-1.5 bg-white border border-slate-200 text-slate-600 rounded-lg text-[11px] font-bold hover:bg-slate-50 transition-colors"
-                    >
-                      Dismiss
-                    </button>
-                  </div>
-                </div>
-              )}
             </div>
           </div>
 
@@ -2355,161 +2255,90 @@ export default function LiveMatchCenter() {
             </span>
           </div>
 
-          {pending && (
+          {pending && (userCanSelectOpeners || userCanSelectIncomingBatter) && (
             <button
               onClick={() => {
                 if (pending === 'openers') setManualDrawerOpen('OPENERS');
                 else if (pending === 'batter') setManualDrawerOpen('BATTER');
-                else if (pending === 'bowler') setManualDrawerOpen('BOWLER');
               }}
               className="w-full py-3 rounded-2xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-black uppercase shadow-sm flex items-center justify-center gap-2 animate-pulse"
             >
               <Sparkles className="w-4 h-4" />
-              <span>{pending === 'openers' ? 'Select Openers' : pending === 'batter' ? 'Select New Batter' : 'Select Bowler'}</span>
+              <span>{pending === 'openers' ? 'Select Opening Batters' : 'Wicket! Select Next Batter'}</span>
             </button>
           )}
 
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 items-start">
-            {/* Batting Intent */}
-            <div className="bg-white rounded-2xl border border-slate-200/90 shadow-sm p-3.5 space-y-3">
-              <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+            {/* Batting Intent — owned by the user only while their team is batting */}
+            {userCanSetBattingIntent ? (
+              <div className="bg-white rounded-2xl border border-slate-200/90 shadow-sm p-3.5 space-y-3">
+                <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+                  <span className="text-xs font-black text-slate-800 uppercase tracking-wide">Your Batting Intent</span>
+                  <span className="text-[10px] font-black text-blue-600">{userBattingIntent.replace(/_/g, ' ')}</span>
+                </div>
+                <div className="grid grid-cols-2 gap-1.5">
+                  {(['SURVIVAL', 'DEFENSIVE', 'SETTLING', 'ROTATE_STRIKE', 'NORMAL', 'CONTROLLED_ATTACK', 'ACCELERATE'] as const).map((intent) => (
+                    <button
+                      key={intent}
+                      onClick={() => setUserBattingIntent(intent)}
+                      className={cn(
+                        "py-1.5 px-2 rounded-lg text-[9px] font-bold uppercase transition-all border text-left truncate",
+                        userBattingIntent === intent
+                          ? "bg-blue-600 text-white border-blue-700 shadow-xs"
+                          : "bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100"
+                      )}
+                    >
+                      {intent === 'ROTATE_STRIKE' ? 'Rotate' : intent === 'CONTROLLED_ATTACK' ? 'Attack' : intent}
+                    </button>
+                  ))}
+                </div>
+                <div className="text-[10px] text-slate-500 bg-slate-50 border border-slate-100 rounded-lg px-2.5 py-2">
+                  <span className="font-black uppercase text-slate-400 block text-[9px]">Next Action</span>
+                  {BATTING_INTENT_SHOT[userBattingIntent] || 'Balanced Stroke'}
+                </div>
+              </div>
+            ) : (
+              <div className="bg-white rounded-2xl border border-slate-200/90 shadow-sm p-3.5 space-y-2">
                 <span className="text-xs font-black text-slate-800 uppercase tracking-wide">Batting Intent</span>
-                <span className="text-[10px] font-black text-blue-600">{userBattingIntent.replace(/_/g, ' ')}</span>
+                <p className="text-[11px] text-slate-500 leading-snug">
+                  AI-controlled. {isMyTeamBatting ? 'Waiting for your innings.' : 'The opponent is setting its own approach.'}
+                </p>
               </div>
-              <div className="grid grid-cols-2 gap-1.5">
-                {(['SURVIVAL', 'DEFENSIVE', 'SETTLING', 'ROTATE_STRIKE', 'NORMAL', 'CONTROLLED_ATTACK', 'ACCELERATE'] as const).map((intent) => (
-                  <button
-                    key={intent}
-                    onClick={() => setUserBattingIntent(intent)}
-                    className={cn(
-                      "py-1.5 px-2 rounded-lg text-[9px] font-bold uppercase transition-all border text-left truncate",
-                      userBattingIntent === intent
-                        ? "bg-blue-600 text-white border-blue-700 shadow-xs"
-                        : "bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100"
-                    )}
-                  >
-                    {intent === 'ROTATE_STRIKE' ? 'Rotate' : intent === 'CONTROLLED_ATTACK' ? 'Attack' : intent}
-                  </button>
-                ))}
-              </div>
-              <div className="text-[10px] text-slate-500 bg-slate-50 border border-slate-100 rounded-lg px-2.5 py-2">
-                <span className="font-black uppercase text-slate-400 block text-[9px]">Next Action</span>
-                {BATTING_INTENT_SHOT[userBattingIntent] || 'Balanced Stroke'}
-              </div>
-            </div>
+            )}
 
-            {/* Bowling Plan */}
+            {/* Bowling Plan — always chosen by the bowling captain AI */}
             <div className="bg-white rounded-2xl border border-slate-200/90 shadow-sm p-3.5 space-y-3">
               <div className="flex items-center justify-between border-b border-slate-100 pb-2">
-                <span className="text-xs font-black text-slate-800 uppercase tracking-wide">Bowling Plan</span>
-                <span className="text-[10px] font-black text-purple-600">{(userBowlingPlan?.intent || 'WICKET_TAKING').replace(/_/g, ' ')}</span>
+                <span className="text-xs font-black text-slate-800 uppercase tracking-wide">AI Bowling Plan</span>
+                <span className="text-[9px] font-black uppercase px-2 py-0.5 rounded-full bg-purple-100 text-purple-700 border border-purple-200">AI</span>
               </div>
-              <div className="grid grid-cols-2 gap-1.5">
-                {(['WICKET_TAKING', 'CONTAINING', 'DEFENSIVE', 'ATTACKING', 'SHORT_BALL_TRAP'] as const).map((intent) => (
-                  <button
-                    key={intent}
-                    onClick={() => setUserBowlingPlan(prev => ({ ...(prev || DEFAULT_BOWLING_PLAN), intent }))}
-                    className={cn(
-                      "py-1.5 px-2 rounded-lg text-[9px] font-bold uppercase transition-all border text-left truncate",
-                      userBowlingPlan?.intent === intent
-                        ? "bg-purple-600 text-white border-purple-700 shadow-xs"
-                        : "bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100"
-                    )}
-                  >
-                    {intent.replace(/_/g, ' ')}
-                  </button>
-                ))}
+              <div className="rounded-xl bg-purple-50/70 border border-purple-100 px-3 py-2 space-y-0.5">
+                <span className="text-[9px] font-black uppercase text-purple-500 block">Current Plan</span>
+                <span className="text-sm font-black text-slate-900">{(userBowlingPlan?.intent || 'WICKET_TAKING').replace(/_/g, ' ')}</span>
               </div>
-              <button
-                onClick={() => setManualDrawerOpen('BOWLER')}
-                className="w-full py-2 rounded-xl bg-purple-100 hover:bg-purple-200 text-purple-800 text-[10px] font-bold transition-colors flex items-center justify-center gap-1.5 border border-purple-200"
-              >
-                <UserCheck className="w-3.5 h-3.5" />
-                Select Next Bowler
-              </button>
               <div className="text-[10px] text-slate-500 bg-slate-50 border border-slate-100 rounded-lg px-2.5 py-2">
                 <span className="font-black uppercase text-slate-400 block text-[9px]">Next Ball</span>
                 {BOWLING_INTENT_ACTION[userBowlingPlan?.intent || 'WICKET_TAKING'] || 'Attack the Stumps'}
               </div>
             </div>
 
-            {/* Field Setup */}
+            {/* Field Setup — always AI-selected and restriction-validated */}
             <div className="bg-white rounded-2xl border border-slate-200/90 shadow-sm p-3.5 space-y-3">
               <div className="flex items-center justify-between border-b border-slate-100 pb-2">
-                <span className="text-xs font-black text-slate-800 uppercase tracking-wide">Field Setup</span>
-                <span className="text-[10px] font-black text-cyan-600">
-                  {fieldPresetKey ? (BowlerFieldStrategyEngine.PRESET_OVERLAYS[fieldPresetKey]?.name.split('(')[0].trim() || 'Preset') : 'Default'}
+                <span className="text-xs font-black text-slate-800 uppercase tracking-wide">AI Field Setup</span>
+                <span className="text-[9px] font-black uppercase px-2 py-0.5 rounded-full bg-cyan-100 text-cyan-700 border border-cyan-200">AI</span>
+              </div>
+              <div className="rounded-xl bg-cyan-50/70 border border-cyan-100 px-3 py-2 space-y-0.5">
+                <span className="text-[9px] font-black uppercase text-cyan-500 block">Active Formation</span>
+                <span className="text-sm font-black text-slate-900">
+                  {fieldPresetKey ? (BowlerFieldStrategyEngine.PRESET_OVERLAYS[fieldPresetKey]?.name.split('(')[0].trim() || 'Preset') : 'Balanced Ring'}
                 </span>
               </div>
-              <div className="grid grid-cols-1 gap-1.5">
-                {Object.entries(BowlerFieldStrategyEngine.PRESET_OVERLAYS).map(([pKey, pDef]) => (
-                  <button
-                    key={pKey}
-                    onClick={() => setFieldPresetKey(pKey)}
-                    title={pDef.intent}
-                    className={cn(
-                      "py-1.5 px-2 rounded-lg text-[9px] font-bold transition-all border text-left truncate",
-                      fieldPresetKey === pKey
-                        ? "bg-cyan-600 text-white border-cyan-700 shadow-xs"
-                        : "bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100"
-                    )}
-                  >
-                    {pDef.name}
-                  </button>
-                ))}
-                <button
-                  onClick={() => setFieldPresetKey(null)}
-                  className="py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-[10px] font-bold transition-colors border border-slate-200 flex items-center justify-center gap-1.5"
-                >
-                  <RefreshCw className="w-3 h-3" /> Auto Field
-                </button>
-              </div>
-              <p className="text-[9px] text-slate-400 leading-snug">Turn on “Edit Field” on the 2D map to drag fielders manually.</p>
+              <p className="text-[9px] text-slate-400 leading-snug">
+                The bowling captain sets the field automatically and every formation is validated against the format's fielding restrictions.
+              </p>
             </div>
           </div>
-
-          {/* AI Captain Recommendation (full) */}
-          {aiCaptainRecommendation && (
-            <div className="p-3.5 rounded-2xl bg-gradient-to-br from-indigo-50 to-blue-50 border border-indigo-200 shadow-sm space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-black text-indigo-900 uppercase flex items-center gap-1.5">
-                  <Lightbulb className="w-3.5 h-3.5 text-indigo-600" />
-                  AI Captain Recommendation
-                </span>
-                <span className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase bg-indigo-200/60 text-indigo-800">
-                  {aiCaptainRecommendation.confidence}% Confidence
-                </span>
-              </div>
-              <p className="text-xs font-bold text-indigo-950">{aiCaptainRecommendation.observation}</p>
-              <p className="text-[10px] text-slate-600">{aiCaptainRecommendation.reasoning}</p>
-              <div className="flex items-center gap-2 pt-1">
-                <button
-                  onClick={() => {
-                    if (aiCaptainRecommendation.selectedBowlerId) {
-                      setBowlerId(aiCaptainRecommendation.selectedBowlerId);
-                      setPending(null);
-                    }
-                    if (aiCaptainRecommendation.bowlingPlan) {
-                      setUserBowlingPlan(aiCaptainRecommendation.bowlingPlan as DetailedBowlingPlan);
-                    }
-                    if (aiCaptainRecommendation.battingIntent) {
-                      setUserBattingIntent(aiCaptainRecommendation.battingIntent);
-                    }
-                    setAiCaptainRecommendation(null);
-                  }}
-                  className="flex-1 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold transition-colors"
-                >
-                  Apply
-                </button>
-                <button
-                  onClick={() => setAiCaptainRecommendation(null)}
-                  className="px-3 py-1.5 bg-white border border-slate-200 text-slate-600 rounded-lg text-xs font-bold hover:bg-slate-50 transition-colors"
-                >
-                  Dismiss
-                </button>
-              </div>
-            </div>
-          )}
         </div>
         {/* ─────────────────────────────────────────────────────────────────
             TAB 5: STATS — MATCH ANALYTICS + LEAGUE STANDINGS
@@ -2765,24 +2594,11 @@ export default function LiveMatchCenter() {
           7. MANUAL PLAYER SELECTION DRAWER / MODAL
       ═══════════════════════════════════════════════════════════════════════ */}
       <PlayerSelectionDrawer
-        isOpen={
-          manualDrawerOpen !== null ||
-          (pending === 'openers' && isMyTeamBatting && !autoPlay) ||
-          (pending === 'batter' && isMyTeamBatting && !autoPlay) ||
-          (pending === 'bowler' && isMyTeamBowling && !autoPlay && userTeamControlMode !== 'FULL_AUTO')
-        }
+        isOpen={manualDrawerOpen === 'OPENERS' || manualDrawerOpen === 'BATTER'}
         onClose={() => setManualDrawerOpen(null)}
-        mode={
-          manualDrawerOpen
-            ? manualDrawerOpen
-            : pending === 'openers'
-              ? 'OPENERS'
-              : pending === 'batter'
-                ? 'BATTER'
-                : 'BOWLER'
-        }
-        teamName={pending === 'bowler' || manualDrawerOpen === 'BOWLER' ? bowlingTeam.name : battingTeam.name}
-        squad={pending === 'bowler' || manualDrawerOpen === 'BOWLER' ? bowlingSquad : battingSquad}
+        mode={manualDrawerOpen === 'OPENERS' ? 'OPENERS' : 'BATTER'}
+        teamName={battingTeam.name}
+        squad={battingSquad}
         format={(selectedFormat as ArenaFormat) || 'T20'}
         currentScore={{
           batters: inning?.batters,
@@ -2792,20 +2608,10 @@ export default function LiveMatchCenter() {
         currentStrikerId={strikerId}
         currentNonStrikerId={nonStrikerId}
         lastOverBowlerId={lastOverBowlerId}
-        aiRecommendedPlayerId={
-          pending === 'bowler' || manualDrawerOpen === 'BOWLER'
-            ? aiCaptainRecommendation?.selectedBowlerId || chooseAiBowler(inning, bowlingSquad, lastOverBowlerId)?.id
-            : pending === 'batter'
-              ? selectableBatters[0]?.id
-              : battingSquad[0]?.id
-        }
-        aiReasoning={
-          pending === 'bowler' || manualDrawerOpen === 'BOWLER'
-            ? aiCaptainRecommendation?.reasoning || 'Optimal tactical matchup based on batter stats and pitch condition'
-            : pending === 'batter'
-              ? 'Highest rated batsman available in the playing squad'
-              : 'Standard opening pair for team composition'
-        }
+        aiRecommendedPlayerId={null}
+        aiReasoning={null}
+        scoreLabel={scoreLabel}
+        dismissedBatterLabel={pending === 'batter' ? dismissedBatterLabel : null}
         onConfirmOpeners={handleConfirmOpeners}
         onConfirmBatter={handleConfirmBatter}
         onConfirmBowler={handleConfirmBowler}

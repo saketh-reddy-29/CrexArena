@@ -34,6 +34,9 @@ export interface PlayerSelectionDrawerProps {
   lastOverBowlerId?: string | null;
   aiRecommendedPlayerId?: string | null;
   aiReasoning?: string | null;
+  /** Optional live-match context shown in the incoming-batter (wicket) dialog. */
+  scoreLabel?: string | null;
+  dismissedBatterLabel?: string | null;
   onConfirmOpeners?: (strikerId: string, nonStrikerId: string) => void;
   onConfirmBatter?: (batterId: string) => void;
   onConfirmBowler?: (bowlerId: string) => void;
@@ -52,6 +55,8 @@ export default function PlayerSelectionDrawer({
   lastOverBowlerId,
   aiRecommendedPlayerId,
   aiReasoning,
+  scoreLabel,
+  dismissedBatterLabel,
   onConfirmOpeners,
   onConfirmBatter,
   onConfirmBowler,
@@ -190,7 +195,7 @@ export default function PlayerSelectionDrawer({
                 {mode === 'OPENERS' 
                   ? 'Select Opening Batter Pair' 
                   : mode === 'BATTER' 
-                  ? 'Choose Next Batter to Enter Crease' 
+                  ? 'Wicket! Select Next Batter' 
                   : 'Assign Next Bowler for the Over'}
               </h2>
             </div>
@@ -201,6 +206,21 @@ export default function PlayerSelectionDrawer({
               <X className="w-5 h-5" />
             </button>
           </div>
+
+          {/* Live-match score & dismissal context (incoming-batter dialog) */}
+          {mode === 'BATTER' && (scoreLabel || dismissedBatterLabel) && (
+            <div className="mx-5 mt-4 p-3 rounded-xl bg-red-950/30 border border-red-500/30 flex flex-col gap-1">
+              {scoreLabel && (
+                <span className="text-xs font-black text-white tabular-nums">{scoreLabel}</span>
+              )}
+              {dismissedBatterLabel && (
+                <span className="text-[11px] font-bold text-red-300">{dismissedBatterLabel}</span>
+              )}
+              <span className="text-[10px] text-slate-400">
+                Choose the next batter to walk in. Ineligible players are greyed out.
+              </span>
+            </div>
+          )}
 
           {/* AI Recommendation Banner (if available) */}
           {aiRecommendedPlayerId && (
@@ -362,10 +382,25 @@ export default function PlayerSelectionDrawer({
                     ) : (
                       <div className="space-y-0.5">
                         <div className="text-xs font-black text-white tabular-nums">
-                          {bLine ? `${bLine.runs} runs (${bLine.balls}b)` : 'Yet to bat'}
+                          {bLine && bLine.balls > 0
+                            ? `${bLine.runs} runs (${bLine.balls}b) • SR ${Math.round((bLine.runs / bLine.balls) * 100)}`
+                            : 'Yet to bat'}
                         </div>
                         <div className="text-[10px] text-slate-400">
                           Bat Rating: <span className="text-cyan-300 font-bold">{player.stats?.batting || 70}</span>
+                          {typeof player.form === 'number' && (
+                            <>
+                              {' • '}Form:{' '}
+                              <span
+                                className={cn(
+                                  'font-bold',
+                                  player.form >= 70 ? 'text-emerald-300' : player.form >= 40 ? 'text-amber-300' : 'text-red-300'
+                                )}
+                              >
+                                {player.form >= 70 ? 'Hot' : player.form >= 40 ? 'Steady' : 'Cold'}
+                              </span>
+                            </>
+                          )}
                         </div>
                       </div>
                     )}

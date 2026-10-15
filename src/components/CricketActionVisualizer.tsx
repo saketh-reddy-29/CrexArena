@@ -103,6 +103,10 @@ export interface VisualizerProps {
   // Ball retrieval & fielding interception lifecycle (blocked next delivery until READY)
   onBallLifecycleChange?: (state: BallLifecycleState, interception: InterceptionResult | null) => void;
   ballRetrievalEnabled?: boolean;
+
+  // When false, all manual bowling/field controls are hidden — bowling and
+  // fielding are owned by the AI captain and are not user-editable.
+  manualControlsEnabled?: boolean;
 }
 
 interface FielderLiveState {
@@ -198,6 +202,7 @@ export default function CricketActionVisualizer({
   replayDeliveryResult,
   onBallLifecycleChange,
   ballRetrievalEnabled = true,
+  manualControlsEnabled = true,
 }: VisualizerProps) {
   // Format state
   const [selectedFormat, setSelectedFormat] = useState<ArenaFormat>(initialFormat);
@@ -1067,40 +1072,44 @@ export default function CricketActionVisualizer({
 
           {/* Field Strategy Preset & Field Status Badge */}
           <div className="absolute top-3.5 right-3.5 z-30 flex items-center gap-1.5 sm:gap-2">
-            {/* Edit Field Toggle (enables drag-repositioning of fielders) */}
-            <button
-              type="button"
-              onClick={handleEditFieldToggle}
-              title={editFieldEnabled ? 'Editing on â€” drag fielders to reposition them' : 'Turn on to drag fielders into position'}
-              className={cn(
-                "px-2.5 py-1.5 rounded-xl text-[10px] sm:text-xs font-black backdrop-blur-md shadow-lg border flex items-center gap-1.5 transition-all",
-                editFieldEnabled
-                  ? "bg-cyan-500 text-slate-950 border-cyan-300"
-                  : "bg-slate-950/90 text-slate-300 border-white/15 hover:text-white"
-              )}
-            >
-              {editFieldEnabled ? <Unlock className="w-3 h-3" /> : <Lock className="w-3 h-3" />}
-              Edit Field
-            </button>
+            {/* Edit Field Toggle (enables drag-repositioning of fielders) — AI-owned, hidden from the user */}
+            {manualControlsEnabled && (
+              <button
+                type="button"
+                onClick={handleEditFieldToggle}
+                title={editFieldEnabled ? 'Editing on â€” drag fielders to reposition them' : 'Turn on to drag fielders into position'}
+                className={cn(
+                  "px-2.5 py-1.5 rounded-xl text-[10px] sm:text-xs font-black backdrop-blur-md shadow-lg border flex items-center gap-1.5 transition-all",
+                  editFieldEnabled
+                    ? "bg-cyan-500 text-slate-950 border-cyan-300"
+                    : "bg-slate-950/90 text-slate-300 border-white/15 hover:text-white"
+                )}
+              >
+                {editFieldEnabled ? <Unlock className="w-3 h-3" /> : <Lock className="w-3 h-3" />}
+                Edit Field
+              </button>
+            )}
 
-            {/* Tactical Presets Dropdown */}
-            <select
-              value={activePresetKey || ''}
-              onChange={(e) => {
-                const val = e.target.value;
-                setActivePresetKey(val || null);
-                triggerTacticalRecalculation(val || undefined);
-              }}
-              className="bg-slate-950/90 backdrop-blur-md text-slate-200 text-[10px] sm:text-xs font-bold px-2.5 py-1.5 rounded-xl border border-white/15 focus:outline-none focus:border-cyan-400 shadow-lg cursor-pointer"
-              title="Select Field Preset"
-            >
-              <option value="">Default Preset</option>
-              {Object.entries(BowlerFieldStrategyEngine.PRESET_OVERLAYS).map(([pKey, pDef]) => (
-                <option key={pKey} value={pKey}>
-                  {pDef.name.split('(')[0].trim()}
-                </option>
-              ))}
-            </select>
+            {/* Tactical Presets Dropdown — AI-owned, hidden from the user */}
+            {manualControlsEnabled && (
+              <select
+                value={activePresetKey || ''}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setActivePresetKey(val || null);
+                  triggerTacticalRecalculation(val || undefined);
+                }}
+                className="bg-slate-950/90 backdrop-blur-md text-slate-200 text-[10px] sm:text-xs font-bold px-2.5 py-1.5 rounded-xl border border-white/15 focus:outline-none focus:border-cyan-400 shadow-lg cursor-pointer"
+                title="Select Field Preset"
+              >
+                <option value="">Default Preset</option>
+                {Object.entries(BowlerFieldStrategyEngine.PRESET_OVERLAYS).map(([pKey, pDef]) => (
+                  <option key={pKey} value={pKey}>
+                    {pDef.name.split('(')[0].trim()}
+                  </option>
+                ))}
+              </select>
+            )}
 
             {/* Field Status Pill */}
             <span
@@ -1498,29 +1507,31 @@ export default function CricketActionVisualizer({
         {!hideSideAndBottomPanels && (
           <div className="w-full lg:w-84 xl:w-96 bg-slate-950/80 backdrop-blur-xl border-t lg:border-t-0 lg:border-l border-white/10 p-4 flex flex-col justify-between gap-4 z-20">
             <div className="space-y-4 overflow-y-auto max-h-[520px] pr-1">
-              {/* Team Tactical Control Mode */}
-              <div className="p-2.5 rounded-xl bg-white/[0.03] border border-white/5 space-y-1.5">
-              <div className="flex items-center justify-between text-[10px] font-bold">
-                <span className="text-slate-400 uppercase tracking-wider">Tactical Control</span>
-                <span className="text-cyan-400 font-black">{userTeamControlMode.replace('_', ' ')}</span>
-              </div>
-              <div className="grid grid-cols-3 gap-1">
-                {(['MANUAL', 'AI_RECOMMENDATIONS', 'FULL_AUTO'] as const).map((m) => (
-                  <button
-                    key={m}
-                    onClick={() => onUserTeamControlModeChange?.(m)}
-                    className={cn(
-                      "py-1 rounded text-[8px] font-black uppercase transition-all truncate border",
-                      userTeamControlMode === m
-                        ? "bg-cyan-500/20 text-cyan-200 border-cyan-400 shadow-sm"
-                        : "bg-black/30 text-slate-400 hover:text-white border-white/5"
-                    )}
-                  >
-                    {m === 'AI_RECOMMENDATIONS' ? 'AI REC' : m.replace('_', ' ')}
-                  </button>
-                ))}
-              </div>
-            </div>
+              {/* Team Tactical Control Mode — hidden when bowling/fielding are AI-owned */}
+              {manualControlsEnabled && (
+                <div className="p-2.5 rounded-xl bg-white/[0.03] border border-white/5 space-y-1.5">
+                  <div className="flex items-center justify-between text-[10px] font-bold">
+                    <span className="text-slate-400 uppercase tracking-wider">Tactical Control</span>
+                    <span className="text-cyan-400 font-black">{userTeamControlMode.replace('_', ' ')}</span>
+                  </div>
+                  <div className="grid grid-cols-3 gap-1">
+                    {(['MANUAL', 'AI_RECOMMENDATIONS', 'FULL_AUTO'] as const).map((m) => (
+                      <button
+                        key={m}
+                        onClick={() => onUserTeamControlModeChange?.(m)}
+                        className={cn(
+                          "py-1 rounded text-[8px] font-black uppercase transition-all truncate border",
+                          userTeamControlMode === m
+                            ? "bg-cyan-500/20 text-cyan-200 border-cyan-400 shadow-sm"
+                            : "bg-black/30 text-slate-400 hover:text-white border-white/5"
+                        )}
+                      >
+                        {m === 'AI_RECOMMENDATIONS' ? 'AI REC' : m.replace('_', ' ')}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
 
             {/* AI Captain Recommendation Card */}
             {aiCaptainRecommendation && (
