@@ -30,6 +30,8 @@ import {
   Point
 } from '../engine/strategy/BowlerFieldStrategyEngine';
 import { DeliveryResult, DeliveryLifecycle } from '../types/delivery';
+import { evaluateInterception, InterceptionResult } from '../engine/fielding/FieldingInterceptionEngine';
+import { BallLifecycleState } from '../engine/fielding/BallLifecycleController';
 import { CaptainDecision } from '../engine/ai/AICaptainEngine';
 import { DetailedBowlingPlan } from '../engine/ai/BowlingPlanEngine';
 import { BattingIntent, BatterInningsState } from '../engine/ai/BatterDecisionEngine';
@@ -97,6 +99,10 @@ export interface VisualizerProps {
   replayTrigger?: number;
   skipTrigger?: number;
   replayDeliveryResult?: DeliveryResult | null;
+
+  // Ball retrieval & fielding interception lifecycle (blocked next delivery until READY)
+  onBallLifecycleChange?: (state: BallLifecycleState, interception: InterceptionResult | null) => void;
+  ballRetrievalEnabled?: boolean;
 }
 
 interface FielderLiveState {
@@ -190,6 +196,8 @@ export default function CricketActionVisualizer({
   replayTrigger,
   skipTrigger,
   replayDeliveryResult,
+  onBallLifecycleChange,
+  ballRetrievalEnabled = true,
 }: VisualizerProps) {
   // Format state
   const [selectedFormat, setSelectedFormat] = useState<ArenaFormat>(initialFormat);
@@ -365,6 +373,15 @@ export default function CricketActionVisualizer({
   const svgRef = useRef<SVGSVGElement | null>(null);
   const lastPlayedDeliveryIdRef = useRef<string | null>(null);
 
+  // Ball retrieval lifecycle refs (defers onPlaybackComplete until ball is back with the bowler)
+  const onBallLifecycleChangeRef = useRef(onBallLifecycleChange);
+  onBallLifecycleChangeRef.current = onBallLifecycleChange;
+  const ballRetrievalEnabledRef = useRef(ballRetrievalEnabled);
+  ballRetrievalEnabledRef.current = ballRetrievalEnabled;
+  const fieldersRef = useRef(fielders);
+  fieldersRef.current = fielders;
+  const lastInterceptionRef = useRef<InterceptionResult | null>(null);
+
   // Tracking paused progress
   const pausedProgressRef = useRef<number>(0);
   const isPausedRef = useRef<boolean>(false);
@@ -507,6 +524,75 @@ export default function CricketActionVisualizer({
   // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   // 2. CONTINUOUS 2D BALL MOVEMENT & TRAIL PLAYBACK
   // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // 2. BALL RETRIEVAL & FIELDING INTERCEPTION LIFECYCLE
+  // After the strike, the ball is physically returned to the bowler. `onPlaybackComplete`
+  // is intentionally deferred until the ball arrives, so the parent cannot release the
+  // next delivery until retrieval finishes (satisfies the mandatory-block requirement).
+  const runRetrievalAnimation = useCallback((delivery: DeliveryResult, isReplay: boolean, forceInstant: boolean = false) => {
+    const interception = evaluateInterception({
+      ballPath: delivery.ballPath,
+      fielders: fieldersRef.current.map((f) => ({ id: f.id, name: f.name, x: f.currentX, y: f.currentY })),
+    });
+    lastInterceptionRef.current = interception;
+
+    // Fast/skip and replay: evaluate the same interception + lifecycle sequence but
+    // resolve the retrieval instantly (no animation) so state stays consistent.
+    if (isReplay || forceInstant || speed === 0) {
+      onBallLifecycleChangeRef.current?.('BALL_IN_PLAY', interception);
+      onBallLifecycleChangeRef.current?.(interception.reachable ? 'FIELDER_INTERCEPTING' : 'BALL_IN_PLAY', interception);
+      onBallLifecycleChangeRef.current?.(interception.outcome === 'BOUNDARY' ? 'BALL_IN_PLAY' : 'BALL_COLLECTED', interception);
+      onBallLifecycleChangeRef.current?.(interception.outcome === 'BOUNDARY' ? 'BALL_COLLECTED' : 'RETURNING_BALL', interception);
+      if (interception.outcome === 'BOUNDARY') onBallLifecycleChangeRef.current?.('BOWLER_RETRIEVING', interception);
+      onBallLifecycleChangeRef.current?.('BALL_READY', interception);
+      onPlaybackCompleteRef.current?.();
+      return;
+    }
+
+    onBallLifecycleChangeRef.current?.('BALL_IN_PLAY', interception);
+
+    // Animate the return: the ball travels from the intercept/boundary point back to the bowler.
+    const from = interception.interceptPoint;
+    const bowlerHome = { x: 300, y: 190 };
+    const distToBowler = Math.hypot(from.x - bowlerHome.x, from.y - bowlerHome.y);
+    const baseMs = Math.min(850, Math.max(320, distToBowler * 2.0));
+    const speedMult = speed === 1 ? 1 : speed === 1.5 ? 1.4 : 2.2;
+    const duration = baseMs / speedMult;
+
+    const t0 = performance.now();
+    setBallVisible(true);
+    setPlaybackStage('OUTCOME');
+    onBallLifecycleChangeRef.current?.(
+      interception.reachable ? 'FIELDER_INTERCEPTING' : interception.outcome === 'BOUNDARY' ? 'BOWLER_RETRIEVING' : 'BALL_COLLECTED',
+      interception
+    );
+
+    const frame = (now: number) => {
+      if (isPausedRef.current) {
+        fieldMoveAnimFrameRef.current = requestAnimationFrame(frame);
+        return;
+      }
+      const t = Math.min(1, (now - t0) / duration);
+      const eased = t * t * (3 - 2 * t); // smoothstep
+      const bx = from.x + (bowlerHome.x - from.x) * eased;
+      const by = from.y + (bowlerHome.y - from.y) * eased;
+      setBallPos({ x: bx, y: by });
+      setBallScale(0.7);
+      setBallTrail((prev) => [...prev.slice(-5), { x: bx, y: by }]);
+
+      if (t < 1) {
+        fieldMoveAnimFrameRef.current = requestAnimationFrame(frame);
+      } else {
+        // Ball is back with the bowler: retrieval complete, next delivery may now be released.
+        onBallLifecycleChangeRef.current?.('BALL_READY', interception);
+        onPlaybackCompleteRef.current?.();
+      }
+    };
+    fieldMoveAnimFrameRef.current = requestAnimationFrame(frame);
+  }, [speed]);
+  const runRetrievalAnimationRef = useRef(runRetrievalAnimation);
+  runRetrievalAnimationRef.current = runRetrievalAnimation;
+
+  // 3. CONTINUOUS 2D BALL MOVEMENT & TRAIL PLAYBACK
   const runContinuousBallAnimation = useCallback((delivery: DeliveryResult, resumeFromProgress: number = 0, isReplay: boolean = false) => {
     if (speed === 0) {
       // Instant / Skip mode
@@ -517,7 +603,8 @@ export default function CricketActionVisualizer({
       setResultBanner(delivery.wicket ? (delivery.wicketType?.toUpperCase() || 'WICKET!') : delivery.totalRuns === 6 ? 'SIX!' : delivery.totalRuns === 4 ? 'FOUR!' : delivery.totalRuns > 0 ? `${delivery.totalRuns} RUNS` : 'DOT BALL');
       if (!isReplay) {
         onContactReachedRef.current?.();
-        onPlaybackCompleteRef.current?.();
+        // Fast mode still runs the retrieval lifecycle (resolved instantly) so gating is identical.
+        runRetrievalAnimationRef.current?.(delivery, false);
       }
       return;
     }
@@ -668,7 +755,9 @@ export default function CricketActionVisualizer({
         animFrameRef.current = requestAnimationFrame(step);
       } else {
         if (!isReplay) {
-          onPlaybackCompleteRef.current?.();
+          // Route through the retrieval lifecycle; onPlaybackComplete fires only once
+          // the ball has been returned to the bowler (deferred on purpose).
+          runRetrievalAnimationRef.current?.(delivery, false);
         }
       }
     };
@@ -710,7 +799,8 @@ export default function CricketActionVisualizer({
     setIsPaused(false);
     setAnimProgress(100);
     setPlaybackStage('OUTCOME');
-    onPlaybackCompleteRef.current?.();
+    // Resolve the retrieval lifecycle instantly (no animation) so gating stays consistent.
+    runRetrievalAnimationRef.current?.(activeDelivery, false, true);
   };
 
   const prevReplayRef = useRef(replayTrigger);

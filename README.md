@@ -33,6 +33,10 @@ CrexArena/
 │   │   └── BoardSelection.tsx      # 15-man tournament squad builder with AI squad advisor
 │   │
 │   ├── engine/                     # Cricket Simulation Core
+│   │   ├── fielding/
+│   │   │   ├── BallLifecycleController.ts   # Ball retrieval state machine & next-delivery gate
+│   │   │   ├── FieldingInterceptionEngine.ts # Fielder pursuit trajectory & boundary cut-off
+│   │   │   └── FieldingRestrictionEngine.ts  # Powerplay fielding circle limits & validation
 │   │   ├── analytics/
 │   │   │   └── QualificationEngine.ts  # Monte Carlo 1,000-run playoff projection engine
 │   │   ├── scheduling/
@@ -67,7 +71,10 @@ CrexArena/
 │   │   ├── match.ts                # PitchType, WeatherCondition, Fixture, Standing, DRSReview
 │   │   └── common.ts               # Player, Franchise, SkillStats interfaces
 │   │
-│   └── tests/                      # Automated Vitest Suite (96 tests across 16 suites)
+│   └── tests/                      # Automated Vitest Suite (144 tests across 19 suites)
+│       ├── ballLifecycle.test.ts         # Ball retrieval transitions & delivery blocking
+│       ├── fieldingInterception.test.ts  # Fielder pursuit vectors & boundary save calculations
+│       ├── fieldingRestrictionEngine.test.ts # Powerplay circle rules across formats
 │       ├── qualificationEngine.test.ts   # Monte Carlo simulation, mathematical certainty & brackets
 │       ├── fixtureScheduler.test.ts      # Durations, overlap conflicts, Test reservations, rest validation
 │       ├── workloadRotationEngine.test.ts# Fatigue, recovery, balance checks, pitch adaptation, rotation

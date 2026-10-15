@@ -44,7 +44,9 @@ import { DeliveryResultFactory } from '../engine/core/DeliveryResultFactory';
 import { AICaptainEngine, CaptainDecision } from '../engine/ai/AICaptainEngine';
 import { BatterDecisionEngine, BatterInningsState, BattingIntent } from '../engine/ai/BatterDecisionEngine';
 import { BowlingPlanEngine, DetailedBowlingPlan } from '../engine/ai/BowlingPlanEngine';
-import { BowlerFieldStrategyEngine } from '../engine/strategy/BowlerFieldStrategyEngine';
+import { BowlerFieldStrategyEngine, CANONICAL_POSITIONS } from '../engine/strategy/BowlerFieldStrategyEngine';
+import { BallLifecycleController, BallLifecycleState } from '../engine/fielding/BallLifecycleController';
+import { validateField, getFieldingPhase, getRestrictionSummary, overFromBalls } from '../engine/fielding/FieldingRestrictionEngine';
 import { cn } from '../lib/utils';
 
 const IPL_TEAM_LOGOS: Record<string, string> = {
@@ -402,6 +404,11 @@ export default function LiveMatchCenter() {
   const [isBallAnimating, setIsBallAnimating] = useState(false);
   const [isFieldChanging, setIsFieldChanging] = useState(false);
 
+  // Ball retrieval lifecycle (authoritative gate: next delivery blocked until ball returns to bowler)
+  const ballLifecycleRef = useRef(new BallLifecycleController());
+  const [ballLifecycleState, setBallLifecycleState] = useState<BallLifecycleState>('READY');
+  const isRetrieving = ballLifecycleState !== 'READY';
+
   // AI Captain & Tactical Controls
   const [userTeamControlMode, setUserTeamControlMode] = useState<'MANUAL' | 'AI_RECOMMENDATIONS' | 'FULL_AUTO'>('AI_RECOMMENDATIONS');
   const [userBattingIntent, setUserBattingIntent] = useState<BattingIntent>('NORMAL');
@@ -694,6 +701,25 @@ export default function LiveMatchCenter() {
       }
     }
   }, [pending, inning, battingSquad, bowlingSquad, battingCursor, isMyTeamBatting, isMyTeamBowling, strikerId, nonStrikerId, getAvailableBatters, getAvailableBowlers, chooseAiBowler, queueBowlerAfterBatter, lastOverBowlerId, pendingBatterEnd, autoPlay, selectedFormat, bowlingTeam, pitch, userTeamControlMode, striker, nonStriker]);
+
+  // Ball retrieval lifecycle handler (driven by the visualizer). Advances the
+  // authoritative controller through legal transitions and mirrors its state so
+  // the next delivery stays blocked until the ball is back with the bowler.
+  const handleBallLifecycleChange = useCallback((state: BallLifecycleState) => {
+    const controller = ballLifecycleRef.current;
+    const ORDER: BallLifecycleState[] = ['BALL_IN_PLAY', 'FIELDER_INTERCEPTING', 'BALL_COLLECTED', 'RETURNING_BALL', 'BOWLER_RETRIEVING', 'BALL_READY'];
+    const tgt = ORDER.indexOf(state);
+    if (tgt < 0) return;
+    // Step forward one legal transition at a time so any reported state (even one
+    // that skips an intermediate stage, e.g. a boundary) resolves legally.
+    let guard = 0;
+    while (ORDER.indexOf(controller.getState()) < tgt && guard < 10) {
+      const next = ORDER[ORDER.indexOf(controller.getState()) + 1];
+      if (!next || !controller.transition(next)) break;
+      guard += 1;
+    }
+    setBallLifecycleState(controller.getState());
+  }, []);
 
   const handleContactReached = useCallback(() => {
     if (!currentDeliveryResult) return;
@@ -992,6 +1018,10 @@ export default function LiveMatchCenter() {
       setManualBallRequests((value) => Math.max(0, value - 1));
     }
 
+    // Retrieval finished (ball is back with the bowler) — open the gate for the next delivery.
+    ballLifecycleRef.current.completeDelivery();
+    setBallLifecycleState('READY');
+
     setIsBallAnimating(false);
     setDeliveryLifecycle('FIELD_READY');
     setTimeout(() => {
@@ -1004,7 +1034,7 @@ export default function LiveMatchCenter() {
 
   useEffect(() => {
     if (!inning || inning.isComplete || pending || !striker || !nonStriker || !currentBowler) return;
-    if (isBallAnimating || isFieldChanging) return;
+    if (isBallAnimating || isFieldChanging || isRetrieving) return;
     if (deliveryLifecycle !== 'READY' && deliveryLifecycle !== 'NEXT_DELIVERY') return;
     if (!autoPlay && manualBallRequests <= 0) return;
 
@@ -1141,6 +1171,11 @@ export default function LiveMatchCenter() {
       setDeliveryLifecycle('RESULT_LOCKED');
       setIsBallAnimating(true);
       setDeliveryLifecycle('BALL_PATH_PLAYBACK');
+      // Start a fresh ball lifecycle; the gate stays closed until retrieval returns the ball.
+      ballLifecycleRef.current.reset();
+      ballLifecycleRef.current.beginDelivery();
+      ballLifecycleRef.current.ballEnteredPlay();
+      setBallLifecycleState('BALL_IN_PLAY');
     };
 
     const timer = window.setTimeout(playDelivery, autoPlay ? 600 : 0);
@@ -1162,6 +1197,7 @@ export default function LiveMatchCenter() {
     bowlingTeam,
     isBallAnimating,
     isFieldChanging,
+    isRetrieving,
     deliveryLifecycle,
     selectedFormat,
     maxBalls,
@@ -1199,6 +1235,33 @@ export default function LiveMatchCenter() {
   const currentRunRate = inning && inning.balls ? (inning.runs / (inning.balls / 6)).toFixed(2) : '0.00';
   const currentOverIdx = inning?.balls ? (inning.balls % 6 === 0 ? Math.floor(inning.balls / 6) - 1 : Math.floor(inning.balls / 6)) : 0;
   const currentOverBalls = (inning?.deliveries || []).filter((d) => d.over === currentOverIdx).map((d) => d.outcome);
+
+  // Format/phase fielding-restriction status (authoritative circle limits from getRules)
+  const fieldStatus = useMemo(() => {
+    const over = overFromBalls(inning?.balls || 0);
+    const phase = getFieldingPhase(selectedFormat, over);
+    const preset = fieldPresetKey ? BowlerFieldStrategyEngine.PRESET_OVERLAYS[fieldPresetKey] : null;
+    const keys = preset?.keys ?? [];
+    const hasPreset = keys.length > 0;
+    const fielderPositions = keys.map((k, idx) => {
+      const p = CANONICAL_POSITIONS[k];
+      return { id: `${k}_${idx}`, name: p?.name, x: p?.x ?? 300, y: p?.y ?? 300, isOutsideCircle: p?.isOutsideCircle, role: 'Batsman' };
+    });
+    const validation = validateField({
+      format: selectedFormat,
+      over,
+      fielders: fielderPositions,
+      options: { enforcePlayerCount: false },
+    });
+    const legal = !hasPreset || validation.valid;
+    return { over, phase, outside: validation.outsideCircleCount, hasPreset, legal, validation };
+  }, [inning?.balls, selectedFormat, fieldPresetKey]);
+  const fieldStatusLabel = !fieldStatus.phase.restricted
+    ? `${fieldStatus.phase.shortLabel} · No circle restriction`
+    : fieldStatus.hasPreset
+      ? getRestrictionSummary(fieldStatus.phase, fieldStatus.outside)
+      : `${fieldStatus.phase.shortLabel} · Max ${fieldStatus.phase.maxOutsideCircle} outside`;
+  const retrievalStatus = isRetrieving ? ballLifecycleRef.current.getMessage() : 'Ready for next delivery';
   const sortedStandings = [...standings].sort((a, b) => {
     if (b.points !== a.points) return b.points - a.points;
     return b.nrr - a.nrr;
@@ -1678,6 +1741,7 @@ export default function LiveMatchCenter() {
                   partnershipRuns={inning?.partnershipRuns}
                   partnershipBalls={inning?.partnershipBalls}
                   onFieldChangingChange={setIsFieldChanging}
+                  onBallLifecycleChange={handleBallLifecycleChange}
                   userTeamControlMode={userTeamControlMode}
                   onUserTeamControlModeChange={setUserTeamControlMode}
                   aiCaptainRecommendation={aiCaptainRecommendation}
@@ -2033,6 +2097,37 @@ export default function LiveMatchCenter() {
                 })}
               </div>
               <span className="text-[10px] font-bold text-slate-400 tabular-nums">{formatOvers(inning?.balls || 0)} ov</span>
+              <div className="hidden sm:block w-px self-stretch bg-slate-100" />
+              <div
+                className="flex items-center gap-2"
+                title={
+                  fieldStatus.phase.restricted
+                    ? fieldStatus.legal
+                      ? `${fieldStatus.phase.label}. Maximum ${fieldStatus.phase.maxOutsideCircle} fielders outside the circle.`
+                      : `Illegal field: ${fieldStatus.outside} outside, maximum ${fieldStatus.phase.maxOutsideCircle}. Move ${fieldStatus.outside - fieldStatus.phase.maxOutsideCircle} fielder(s) inside.`
+                    : `${fieldStatus.phase.label}. No powerplay fielding restriction.`
+                }
+              >
+                <span
+                  className={cn(
+                    'text-[9px] font-black uppercase tracking-wider px-2 py-1 rounded-full border whitespace-nowrap',
+                    fieldStatus.legal
+                      ? 'bg-cyan-50 text-cyan-700 border-cyan-200'
+                      : 'bg-rose-50 text-rose-700 border-rose-200'
+                  )}
+                >
+                  {fieldStatusLabel}
+                </span>
+                <span
+                  className={cn(
+                    'text-[9px] font-bold px-2 py-1 rounded-full border flex items-center gap-1 whitespace-nowrap',
+                    isRetrieving ? 'bg-amber-50 text-amber-700 border-amber-200' : 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                  )}
+                >
+                  <span className={cn('h-1.5 w-1.5 rounded-full', isRetrieving ? 'bg-amber-500 animate-pulse' : 'bg-emerald-500')} />
+                  {retrievalStatus}
+                </span>
+              </div>
             </div>
 
             <div className="hidden lg:block w-px self-stretch bg-slate-100" />
