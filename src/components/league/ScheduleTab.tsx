@@ -315,3 +315,4 @@ export default function ScheduleTab({ franchises }: ScheduleTabProps) {
     </div>
   );
 }
+

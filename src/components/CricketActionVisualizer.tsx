@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
+﻿import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   Play, 
@@ -84,6 +84,12 @@ export interface VisualizerProps {
   hideSideAndBottomPanels?: boolean;
   displayMode?: 'STANDARD' | 'LABELS';
   onDisplayModeChange?: (mode: 'STANDARD' | 'LABELS') => void;
+
+  // Field preset & edit-field control (can be driven from outside the visualizer)
+  fieldPresetKey?: string | null;
+  onFieldPresetChange?: (presetKey: string | null) => void;
+  editFieldMode?: boolean;
+  onEditFieldModeChange?: (enabled: boolean) => void;
   playbackSpeed?: AnimationSpeed;
   onPlaybackSpeedChange?: (speed: AnimationSpeed) => void;
   isPlaybackPaused?: boolean;
@@ -173,6 +179,10 @@ export default function CricketActionVisualizer({
   hideSideAndBottomPanels = false,
   displayMode: propDisplayMode,
   onDisplayModeChange,
+  fieldPresetKey: propFieldPresetKey,
+  onFieldPresetChange,
+  editFieldMode: propEditFieldMode,
+  onEditFieldModeChange,
   playbackSpeed: propSpeed,
   onPlaybackSpeedChange,
   isPlaybackPaused: propIsPaused,
@@ -202,8 +212,24 @@ export default function CricketActionVisualizer({
   const [speed, setSpeed] = useState<AnimationSpeed>(propSpeed !== undefined ? propSpeed : 1);
   const [isPaused, setIsPaused] = useState<boolean>(propIsPaused !== undefined ? propIsPaused : false);
   const [activeBottomTab, setActiveBottomTab] = useState<BottomPanelTab>('FIELD_MAP');
-  const [activePresetKey, setActivePresetKey] = useState<string | null>(null);
+  const [internalPresetKey, setInternalPresetKey] = useState<string | null>(null);
   const [showDebugHUD, setShowDebugHUD] = useState<boolean>(false);
+
+  // Edit Field gate: fielders can only be dragged while editing is enabled
+  const [internalEditField, setInternalEditField] = useState<boolean>(false);
+  const editFieldEnabled = propEditFieldMode !== undefined ? propEditFieldMode : internalEditField;
+  const handleEditFieldToggle = () => {
+    const next = !editFieldEnabled;
+    setInternalEditField(next);
+    onEditFieldModeChange?.(next);
+  };
+
+  // Preset can be driven from outside (sidebar Field Setup menu) or from the field overlay select
+  const activePresetKey = propFieldPresetKey !== undefined ? propFieldPresetKey : internalPresetKey;
+  const setActivePresetKey = (key: string | null) => {
+    setInternalPresetKey(key);
+    if (propFieldPresetKey !== undefined) onFieldPresetChange?.(key);
+  };
 
   useEffect(() => {
     if (propSpeed !== undefined) {
@@ -348,9 +374,9 @@ export default function CricketActionVisualizer({
   const ballColor = isTest ? '#DC2626' : '#FFFFFF';
   const ballStroke = isTest ? '#7F1D1D' : '#CBD5E1';
 
-  // ───────────────────────────────────────────────────────────────────────────
+  // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   // 1. PHYSICAL 2D FIELDER MOVEMENT ENGINE
-  // ─────────────────────────────────────────────────────────────────────────
+  // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const applyNewFieldConfiguration = useCallback((newConfig: FieldConfiguration) => {
     setFieldConfig(newConfig);
 
@@ -470,9 +496,17 @@ export default function CricketActionVisualizer({
     applyNewFieldConfiguration(newConfig);
   }, [selectedFormat, bowler, striker, nonStriker, score, target, pitch, weather, partnershipRuns, partnershipBalls, fieldingSquad, fieldConfig, testDaySession, applyNewFieldConfiguration]);
 
-  // ───────────────────────────────────────────────────────────────────────────
+  // External preset changes (e.g. Field Setup menu in the live-match sidebar)
+  useEffect(() => {
+    if (propFieldPresetKey === undefined) return;
+    if (propFieldPresetKey === internalPresetKey) return;
+    setInternalPresetKey(propFieldPresetKey);
+    triggerTacticalRecalculation(propFieldPresetKey || undefined);
+  }, [propFieldPresetKey, internalPresetKey, triggerTacticalRecalculation]);
+
+  // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   // 2. CONTINUOUS 2D BALL MOVEMENT & TRAIL PLAYBACK
-  // ─────────────────────────────────────────────────────────────────────────
+  // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const runContinuousBallAnimation = useCallback((delivery: DeliveryResult, resumeFromProgress: number = 0, isReplay: boolean = false) => {
     if (speed === 0) {
       // Instant / Skip mode
@@ -527,7 +561,7 @@ export default function CricketActionVisualizer({
       let curY = path.start.y;
       let curScale = 1;
 
-      // ── Stage 1: Bowler Run-up to Bowling Crease (0.00 - 0.22)
+      // â”€â”€ Stage 1: Bowler Run-up to Bowling Crease (0.00 - 0.22)
       if (progress < 0.22) {
         setPlaybackStage('BOWLER_RELEASE');
         const pNorm = progress / 0.22;
@@ -539,7 +573,7 @@ export default function CricketActionVisualizer({
         curY = bY;
         curScale = 1;
       }
-      // ── Stage 2: Bowler Crease to Pitch Bounce (0.22 - 0.45)
+      // â”€â”€ Stage 2: Bowler Crease to Pitch Bounce (0.22 - 0.45)
       else if (progress < 0.45) {
         setPlaybackStage('BOWLER_RELEASE');
         setBowlerPos({ x: 300, y: 185 });
@@ -549,7 +583,7 @@ export default function CricketActionVisualizer({
         curY = path.start.y + (path.bounce.y - path.start.y) * pRelease;
         curScale = 1 + Math.sin(pRelease * Math.PI) * 0.22;
       }
-      // ── Stage 3: Pitch Bounce to Bat Contact (0.45 - 0.58)
+      // â”€â”€ Stage 3: Pitch Bounce to Bat Contact (0.45 - 0.58)
       else if (progress < 0.58) {
         setPlaybackStage('PITCH_BOUNCE');
         const pBounce = (progress - 0.45) / 0.13;
@@ -558,7 +592,7 @@ export default function CricketActionVisualizer({
         // Batter swing anticipation
         setBatRotation(Math.sin(pBounce * Math.PI) * -38);
       }
-      // ── Stage 4: Bat Contact to Target Zone / Boundary (0.58 - 0.90)
+      // â”€â”€ Stage 4: Bat Contact to Target Zone / Boundary (0.58 - 0.90)
       else if (progress < 0.90) {
         setPlaybackStage('BALL_TRAVEL');
         const pTravel = (progress - 0.58) / 0.32;
@@ -596,7 +630,7 @@ export default function CricketActionVisualizer({
           setBailsFlying(true);
         }
       }
-      // ── Stage 5: Outcome & Boundary Wave (0.90 - 1.00)
+      // â”€â”€ Stage 5: Outcome & Boundary Wave (0.90 - 1.00)
       else {
         setPlaybackStage('OUTCOME');
         curX = path.target.x;
@@ -734,9 +768,9 @@ export default function CricketActionVisualizer({
       "w-full rounded-2xl overflow-hidden border border-slate-800/80 bg-gradient-to-b from-[#0a0f1d] via-[#070b14] to-[#04060a] text-slate-100 shadow-2xl font-sans select-none relative",
       className
     )}>
-      {/* ═══════════════════════════════════════════════════════════════════════
+      {/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
           TOP MATCH BAR: BRANDING, FORMAT, SCORE, SPEED & PLAYBACK CONTROLS
-      ═══════════════════════════════════════════════════════════════════════ */}
+      â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */}
       {!hideTopHeader && (
         <div className="w-full px-4 py-3 bg-slate-950/90 backdrop-blur-xl border-b border-white/10 flex flex-wrap items-center justify-between gap-3 z-30">
         {/* Branding & Format Selector */}
@@ -824,7 +858,7 @@ export default function CricketActionVisualizer({
           {isTest && testDaySession && (
             <div className="hidden md:flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-red-950/40 border border-red-500/30 text-[10px] font-bold text-red-200">
               <Award className="w-3 h-3 text-red-400" />
-              <span>Day {testDaySession.day} • {testDaySession.session}</span>
+              <span>Day {testDaySession.day} â€¢ {testDaySession.session}</span>
             </div>
           )}
         </div>
@@ -898,11 +932,11 @@ export default function CricketActionVisualizer({
       </div>
       )}
 
-      {/* ═══════════════════════════════════════════════════════════════════════
+      {/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
           MAIN RESPONSIVE SECTION: CIRCULAR 2D FIELD + RIGHT TACTICS PANEL
-      ═══════════════════════════════════════════════════════════════════════ */}
+      â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */}
       <div className="w-full flex flex-col lg:flex-row items-stretch justify-between relative bg-[#060913]">
-        {/* ── 2D CIRCULAR PLAYING GROUND (SVG) ── */}
+        {/* â”€â”€ 2D CIRCULAR PLAYING GROUND (SVG) â”€â”€ */}
         <div className="flex-1 relative flex items-center justify-center p-3 sm:p-5 overflow-hidden min-h-[460px] lg:min-h-[560px]">
           {/* Subtle Outer Stadium Glow */}
           <div className="absolute inset-0 pointer-events-none overflow-hidden">
@@ -943,6 +977,22 @@ export default function CricketActionVisualizer({
 
           {/* Field Strategy Preset & Field Status Badge */}
           <div className="absolute top-3.5 right-3.5 z-30 flex items-center gap-1.5 sm:gap-2">
+            {/* Edit Field Toggle (enables drag-repositioning of fielders) */}
+            <button
+              type="button"
+              onClick={handleEditFieldToggle}
+              title={editFieldEnabled ? 'Editing on â€” drag fielders to reposition them' : 'Turn on to drag fielders into position'}
+              className={cn(
+                "px-2.5 py-1.5 rounded-xl text-[10px] sm:text-xs font-black backdrop-blur-md shadow-lg border flex items-center gap-1.5 transition-all",
+                editFieldEnabled
+                  ? "bg-cyan-500 text-slate-950 border-cyan-300"
+                  : "bg-slate-950/90 text-slate-300 border-white/15 hover:text-white"
+              )}
+            >
+              {editFieldEnabled ? <Unlock className="w-3 h-3" /> : <Lock className="w-3 h-3" />}
+              Edit Field
+            </button>
+
             {/* Tactical Presets Dropdown */}
             <select
               value={activePresetKey || ''}
@@ -968,7 +1018,7 @@ export default function CricketActionVisualizer({
                 "px-2.5 py-1 rounded-xl text-[10px] font-black uppercase flex items-center gap-1.5 tracking-wider backdrop-blur-md shadow-lg border",
                 isFieldChanging
                   ? "bg-amber-500/20 text-amber-300 border-amber-500/40 animate-pulse"
-                  : playbackStage === 'BALL_TRAVEL' || playbackStage === 'PITCH_BOUNCE' || playbackStage === 'BOWLER_RUNUP'
+                  : playbackStage === 'BALL_TRAVEL' || playbackStage === 'PITCH_BOUNCE'
                   ? "bg-blue-500/20 text-blue-300 border-blue-500/40"
                   : "bg-emerald-500/20 text-emerald-300 border-emerald-500/40"
               )}
@@ -978,7 +1028,7 @@ export default function CricketActionVisualizer({
                   "w-1.5 h-1.5 rounded-full",
                   isFieldChanging
                     ? "bg-amber-400"
-                    : playbackStage === 'BALL_TRAVEL' || playbackStage === 'PITCH_BOUNCE' || playbackStage === 'BOWLER_RUNUP'
+                    : playbackStage === 'BALL_TRAVEL' || playbackStage === 'PITCH_BOUNCE'
                     ? "bg-blue-400"
                     : "bg-emerald-400"
                 )}
@@ -1171,22 +1221,18 @@ export default function CricketActionVisualizer({
                 <g
                   key={fielder.id}
                   transform={`translate(${fielder.currentX}, ${fielder.currentY})`}
-                  onMouseDown={() => setDraggedFielderId(fielder.id)}
-                  className="cursor-grab active:cursor-grabbing"
+                  onMouseDown={() => { if (editFieldEnabled) setDraggedFielderId(fielder.id); }}
+                  className={editFieldEnabled ? 'cursor-grab active:cursor-grabbing' : 'cursor-default'}
                 >
-                  <title>{fielder.role} ({fielder.name})</title>
+                  <title>{editFieldEnabled ? `${fielder.role} (${fielder.name}) â€” drag to reposition` : `${fielder.role} (${fielder.name})`}</title>
                   <circle
                     r="9.5"
-                    fill={isCatching ? "#9333EA" : isBoundary ? "#2563EB" : "#059669"}
-                    opacity={fielder.isMoving ? "0.9" : "0.5"}
+                    fill={fielder.isMoving ? "#22D3EE" : "#2563EB"}
+                    stroke="#FFFFFF"
+                    strokeWidth="2"
+                    opacity={fielder.isMoving ? "0.95" : "0.92"}
                   />
-                  <circle
-                    r="7.5"
-                    fill={fielder.isMoving ? "#22D3EE" : "#FFFFFF"}
-                    stroke={isCatching ? "#C084FC" : isBoundary ? "#60A5FA" : "#34D399"}
-                    strokeWidth="1.8"
-                  />
-                  <circle r="2.8" fill="#0F172A" />
+                  <circle r="2.8" fill="#FFFFFF" />
 
                   {/* Position Label Pill: Only displayed in LABELS mode */}
                   {effectiveDisplayMode === 'LABELS' && (
@@ -1356,9 +1402,9 @@ export default function CricketActionVisualizer({
           )}
         </div>
 
-        {/* ═══════════════════════════════════════════════════════════════════════
+        {/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
             RIGHT-SIDE FIELD TACTICS PANEL
-        ═══════════════════════════════════════════════════════════════════════ */}
+        â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */}
         {!hideSideAndBottomPanels && (
           <div className="w-full lg:w-84 xl:w-96 bg-slate-950/80 backdrop-blur-xl border-t lg:border-t-0 lg:border-l border-white/10 p-4 flex flex-col justify-between gap-4 z-20">
             <div className="space-y-4 overflow-y-auto max-h-[520px] pr-1">
@@ -1639,9 +1685,9 @@ export default function CricketActionVisualizer({
         )}
       </div>
 
-      {/* ═══════════════════════════════════════════════════════════════════════
+      {/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
           BOTTOM PANEL: TABS & DELIVERY STATUS
-      ═══════════════════════════════════════════════════════════════════════ */}
+      â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */}
       {!hideSideAndBottomPanels && (
         <div className="w-full bg-slate-950/95 backdrop-blur-xl border-t border-white/10">
           <div className="px-4 py-2 border-b border-white/5 flex flex-wrap items-center justify-between gap-2">
@@ -1675,7 +1721,7 @@ export default function CricketActionVisualizer({
               {isFieldChanging ? (
                 <>
                   <Lock className="w-3 h-3 text-amber-400" />
-                  DELIVERY LOCKED — FIELD IN MOTION
+                  DELIVERY LOCKED â€” FIELD IN MOTION
                 </>
               ) : lifecycle === 'BALL_PATH_PLAYBACK' ? (
                 <>
@@ -1761,7 +1807,7 @@ export default function CricketActionVisualizer({
           {activeBottomTab === 'SCORING_ZONES' && (
             <div className="space-y-2">
               <div className="flex items-center justify-between text-[11px] text-slate-400 font-bold px-1">
-                <span>360° Ground Wagon Wheel Zone</span>
+                <span>360Â° Ground Wagon Wheel Zone</span>
                 <span>Protection & Risk Status</span>
               </div>
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
@@ -1769,7 +1815,7 @@ export default function CricketActionVisualizer({
                   <div key={idx} className="bg-white/[0.03] p-2.5 rounded-xl border border-white/5 flex items-center justify-between">
                     <div>
                       <div className="text-[11px] font-black text-white">{z.zone}</div>
-                      <div className="text-[9px] text-slate-400">Angle: {z.angleRange[0]}° to {z.angleRange[1]}°</div>
+                      <div className="text-[9px] text-slate-400">Angle: {z.angleRange[0]}Â° to {z.angleRange[1]}Â°</div>
                     </div>
                     <div className="text-right">
                       <span className={cn(
@@ -1837,7 +1883,7 @@ export default function CricketActionVisualizer({
                   <div className="space-y-1.5 text-[10px]">
                     <div className="flex items-center justify-between bg-black/40 p-1.5 rounded-lg border border-white/5">
                       <span className="text-slate-400">{striker?.name || 'Striker'}</span>
-                      <span className="text-cyan-300 font-bold">{isLeftHander ? 'LHB' : 'RHB'} · {striker?.role || 'Batter'}</span>
+                      <span className="text-cyan-300 font-bold">{isLeftHander ? 'LHB' : 'RHB'} Â· {striker?.role || 'Batter'}</span>
                     </div>
                     <div className="flex items-center justify-between bg-black/40 p-1.5 rounded-lg border border-white/5">
                       <span className="text-slate-400">{bowler?.name || 'Bowler'}</span>
@@ -1855,9 +1901,9 @@ export default function CricketActionVisualizer({
                   <div className="space-y-1 text-[9px] text-slate-300">
                     <p className="bg-black/30 p-2 rounded-lg border border-white/5">
                       <span className="text-amber-400 font-bold block mb-0.5">Plan Trade-Off:</span>
-                      {bowlingPlan.intent === 'ATTACK' 
+                      {bowlingPlan.intent === 'ATTACKING'
                         ? 'Aggressive lines create wicket chances but leave boundary gaps if bowler errs in length.'
-                        : bowlingPlan.intent === 'DEFEND'
+                        : bowlingPlan.intent === 'DEFENSIVE'
                         ? 'Deep boundary protection limits 4s/6s, but concedes easy singles and strike rotation.'
                         : 'Balanced field seeks to build dot-ball pressure without taking excessive boundary risk.'}
                     </p>
@@ -1903,9 +1949,9 @@ export default function CricketActionVisualizer({
       </div>
       )}
 
-      {/* ═══════════════════════════════════════════════════════════════════════
+      {/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
           DEVELOPMENT-ONLY DEBUG HUD PANEL
-      ═══════════════════════════════════════════════════════════════════════ */}
+      â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */}
       {showDebugHUD && (
         <div className="p-3 bg-black/95 border-t border-purple-500/30 font-mono text-[10px] text-purple-300 space-y-2">
           <div className="flex items-center justify-between font-bold text-white border-b border-purple-500/20 pb-1">

@@ -37,8 +37,27 @@ export default function LeaderboardTab({ franchises }: LeaderboardTabProps) {
     return b.nrr - a.nrr;
   });
   
+  const { setActiveTab } = useGameStore();
+
   return (
     <div className="space-y-4">
+      {/* Top Banner with Playoff Projections shortcut */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white p-4 rounded-2xl border border-slate-200/90 shadow-xs">
+        <div>
+          <h2 className="text-base font-black text-slate-900 tracking-tight">
+            {isTest ? 'ICC World Test Championship' : `${selectedFormat || 'IPL'} 2026 Standings`}
+          </h2>
+          <p className="text-xs text-slate-500">Official tournament points table & qualification race</p>
+        </div>
+        <button
+          onClick={() => setActiveTab('PLAYOFFS')}
+          className="px-4 py-2 rounded-xl bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-bold transition-all border border-blue-200/80 flex items-center gap-1.5 self-start sm:self-center"
+        >
+          <span>🎯</span>
+          <span>View Playoff & Qualification Odds</span>
+        </button>
+      </div>
+
       {/* Points table card */}
       <div className="bg-white rounded-2xl border border-slate-200/90 shadow-xs overflow-hidden">
         {/* Table Header */}
@@ -197,3 +216,4 @@ export default function LeaderboardTab({ franchises }: LeaderboardTabProps) {
     </div>
   );
 }
+

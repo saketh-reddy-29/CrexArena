@@ -163,3 +163,4 @@ describe('WorkloadRotationEngine', () => {
     expect(selection.playingXI).not.toContain('pacer1');
   });
 });
+

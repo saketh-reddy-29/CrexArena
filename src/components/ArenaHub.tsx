@@ -4,11 +4,13 @@ import { ArrowLeft } from 'lucide-react';
 import ArenaDashboard from './ArenaDashboard';
 import ScheduleTab from './league/ScheduleTab';
 import LeaderboardTab from './league/LeaderboardTab';
+import QualificationTab from './league/QualificationTab';
 import SquadPlanner from './SquadPlanner';
 import AuctionRoom from './AuctionRoom';
 import PlayerStatsView from './stats/PlayerStatsView';
 import TeamStatsView from './stats/TeamStatsView';
 import TopMatchesCarousel from './TopMatchesCarousel';
+import GlobalNavBar from './common/GlobalNavBar';
 import { cn } from '../lib/utils';
 
 export default function ArenaHub() {
@@ -41,10 +43,12 @@ export default function ArenaHub() {
       tabs.push({ id: 'SERIES', label: 'SERIES' });
       tabs.push({ id: 'SQUAD', label: 'SQUAD' });
       tabs.push({ id: 'MATCHES', label: 'MATCHES' });
+      tabs.push({ id: 'TABLE', label: 'WTC TABLE' });
     } else {
       tabs.push({ id: 'SQUAD', label: 'SQUAD' });
       tabs.push({ id: 'MATCHES', label: 'MATCHES' });
       tabs.push({ id: 'TABLE', label: 'TABLE' });
+      tabs.push({ id: 'PLAYOFFS', label: 'PLAYOFFS' });
     }
 
     tabs.push({ id: 'PLAYER_STATS', label: 'PLAYER STATS' });
@@ -72,12 +76,13 @@ export default function ArenaHub() {
         return <AuctionRoom />;
       case 'MATCHES':
       case 'SERIES':
-      case 'PLAYOFFS':
         return (
           <div className="p-4 sm:p-6 max-w-6xl mx-auto">
             <ScheduleTab franchises={franchises} />
           </div>
         );
+      case 'PLAYOFFS':
+        return <QualificationTab />;
       case 'TABLE':
         return (
           <div className="p-4 sm:p-6 max-w-6xl mx-auto">
@@ -98,6 +103,9 @@ export default function ArenaHub() {
   return (
     <div className="min-h-screen flex flex-col bg-[#f4f6f9] text-slate-900 font-sans overflow-hidden">
       
+      {/* Global Navigation Bar */}
+      <GlobalNavBar />
+
       {/* Top Header */}
       <header className="bg-white border-b border-slate-200/90 shrink-0 shadow-xs z-30">
         <div className="max-w-7xl mx-auto px-4 sm:px-6">
@@ -159,3 +167,4 @@ export default function ArenaHub() {
     </div>
   );
 }
+

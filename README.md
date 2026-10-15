@@ -12,20 +12,29 @@ A broadcast-quality cricket match simulation engine and interactive 2D stadium v
 CrexArena/
 ├── src/
 │   ├── components/                 # UI Layer (Unified CREX Design System)
+│   │   ├── common/
+│   │   │   ├── GlobalNavBar.tsx    # Global broadcast header with routes & persistence
+│   │   │   └── SettingsModal.tsx   # Career persistence, simulation speed & reset controls
+│   │   ├── stats/
+│   │   │   ├── PlayerStatsView.tsx # Orange Cap & Purple Cap podiums, records & search
+│   │   │   └── TeamStatsView.tsx   # Team performance, win rates, NRR & form streaks
+│   │   ├── league/
+│   │   │   ├── ScheduleTab.tsx     # Fixture calendar with match status, scores & auto-sim
+│   │   │   ├── LeaderboardTab.tsx  # CREX points table with NRR, Test PCT% & recent form pills
+│   │   │   └── QualificationTab.tsx# Monte Carlo qualification odds & playoff bracket projections
 │   │   ├── TopMatchesCarousel.tsx  # Horizontal match carousel with format/status filter pills
 │   │   ├── CricketActionVisualizer.tsx # 2D stadium, Canvas trajectory, fielders, AI Captain HUD
 │   │   ├── PlayerSelectionDrawer.tsx # Modal drawer for manual openers, batter & bowler selection
-│   │   ├── LiveMatchCenter.tsx     # Central match coordinator, broadcast scoreboard, timeline
+│   │   ├── LiveMatchCenter.tsx     # Central match coordinator, recent delivery ribbon, bowler stamina
 │   │   ├── PreMatch.tsx            # Match-Day Team Selection & Coin Toss with fatigue & pitch adaptation
+│   │   ├── PlayingXIBuilder.tsx    # CREX Match-Day Playing XI builder with role balance meters
 │   │   ├── ArenaHub.tsx            # Unified tournament hub with CREX pill navigation
 │   │   ├── TeamSelection.tsx       # Tournament franchise / international team picker
-│   │   ├── BoardSelection.tsx      # 15-man tournament squad builder with AI squad advisor
-│   │   ├── league/
-│   │   │   ├── ScheduleTab.tsx     # Fixture calendar with match status, scores & auto-sim
-│   │   │   └── LeaderboardTab.tsx  # CREX points table with NRR, Test PCT% & recent form pills
-│   │   └── ...
+│   │   └── BoardSelection.tsx      # 15-man tournament squad builder with AI squad advisor
 │   │
 │   ├── engine/                     # Cricket Simulation Core
+│   │   ├── analytics/
+│   │   │   └── QualificationEngine.ts  # Monte Carlo 1,000-run playoff projection engine
 │   │   ├── scheduling/
 │   │   │   └── FixtureScheduler.ts     # Realistic durations, overlap conflict detection, rest days & Test reservations
 │   │   ├── ai/
@@ -47,6 +56,7 @@ CrexArena/
 │   ├── lib/
 │   │   ├── matchEngine.ts          # Match math, powerplay phases, DRS rules, Super Overs
 │   │   ├── ratingEngine.ts         # Player attribute formulas and form multipliers
+│   │   ├── teamLogos.ts            # Centralized vector team logo resolver
 │   │   └── playerImages.ts         # Player headshot resolution and fallbacks
 │   │
 │   ├── stores/
@@ -57,7 +67,8 @@ CrexArena/
 │   │   ├── match.ts                # PitchType, WeatherCondition, Fixture, Standing, DRSReview
 │   │   └── common.ts               # Player, Franchise, SkillStats interfaces
 │   │
-│   └── tests/                      # Automated Vitest Suite (93 tests across 15 suites)
+│   └── tests/                      # Automated Vitest Suite (96 tests across 16 suites)
+│       ├── qualificationEngine.test.ts   # Monte Carlo simulation, mathematical certainty & brackets
 │       ├── fixtureScheduler.test.ts      # Durations, overlap conflicts, Test reservations, rest validation
 │       ├── workloadRotationEngine.test.ts# Fatigue, recovery, balance checks, pitch adaptation, rotation
 │       ├── matchIsolationAndStandings.test.ts # Fixture Playing XI isolation, idempotency, Test PCT & NRR

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, useRef } from 'react';
+﻿import { useCallback, useEffect, useMemo, useState, useRef, type ReactNode } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   ArrowLeft,
@@ -17,6 +17,7 @@ import {
   Clock,
   Layers,
   ChevronDown,
+  Lightbulb,
   Search,
   Bell,
   User,
@@ -43,6 +44,7 @@ import { DeliveryResultFactory } from '../engine/core/DeliveryResultFactory';
 import { AICaptainEngine, CaptainDecision } from '../engine/ai/AICaptainEngine';
 import { BatterDecisionEngine, BatterInningsState, BattingIntent } from '../engine/ai/BatterDecisionEngine';
 import { BowlingPlanEngine, DetailedBowlingPlan } from '../engine/ai/BowlingPlanEngine';
+import { BowlerFieldStrategyEngine } from '../engine/strategy/BowlerFieldStrategyEngine';
 import { cn } from '../lib/utils';
 
 const IPL_TEAM_LOGOS: Record<string, string> = {
@@ -63,7 +65,85 @@ function resolveTeamLogo(team?: { shortName: string; logo?: string } | null): st
   return getIntlTeamLogoUrl(team.shortName) || IPL_TEAM_LOGOS[team.shortName] || team.logo || '';
 }
 
-type Tab = 'Live' | 'Scorecard' | 'Commentary' | 'Points Table' | 'News';
+type Tab = 'Live' | 'Scorecard' | 'Commentary' | 'Tactics' | 'Stats';
+
+type TacticalMenuKey = 'BATTING' | 'BOWLING' | 'FIELD';
+
+function ballChipClass(outcome: string): string {
+  if (!outcome) return 'bg-slate-100 text-slate-300 border border-dashed border-slate-200';
+  if (outcome === 'W') return 'bg-red-600 text-white border border-red-700';
+  if (outcome === 'Wd' || outcome === 'Nb') return 'bg-amber-100 text-amber-700 border border-amber-300';
+  if (outcome === '4' || outcome === '6') return 'bg-blue-600 text-white border border-blue-700';
+  if (outcome === '0') return 'bg-slate-200 text-slate-500 border border-slate-300';
+  return 'bg-emerald-100 text-emerald-700 border border-emerald-300';
+}
+
+const BATTING_INTENT_SHOT: Record<string, string> = {
+  SURVIVAL: 'Solid Defence',
+  DEFENSIVE: 'Forward Defence',
+  SETTLING: 'Leave Outside Off',
+  ROTATE_STRIKE: 'Nudge Into the Gap',
+  NORMAL: 'Balanced Stroke',
+  CONTROLLED_ATTACK: 'Cover Drive',
+  ACCELERATE: 'Lofted Straight Drive',
+};
+
+const BOWLING_INTENT_ACTION: Record<string, string> = {
+  WICKET_TAKING: 'Attack the Stumps',
+  CONTAINING: 'Tight Line, No Freebies',
+  DEFENSIVE: 'Wide Yorker Channel',
+  ATTACKING: 'Hard Length at the Batter',
+  SHORT_BALL_TRAP: 'Bouncer Into the Surface',
+};
+
+const DEFAULT_BOWLING_PLAN: DetailedBowlingPlan = {
+  planType: 'DEFENSIVE_LINE',
+  line: 'STUMPS',
+  length: 'GOOD',
+  variation: 'NORMAL',
+  intent: 'WICKET_TAKING',
+  tacticalPurpose: 'Build pressure with a disciplined line and length',
+  targetScoringZones: ['COVER', 'MID_OFF'],
+  riskProfile: 'MEDIUM',
+  summary: 'Balanced stock delivery aimed at the stumps',
+};
+
+function playerInitials(name?: string): string {
+  if (!name) return '--';
+  const parts = name.trim().split(/\s+/);
+  return ((parts[0]?.[0] || '') + (parts[1]?.[0] || '')).toUpperCase() || name.slice(0, 2).toUpperCase();
+}
+
+function TacticalMenu({
+  label,
+  hint,
+  open,
+  onToggle,
+  children,
+}: {
+  label: string;
+  hint?: string;
+  open: boolean;
+  onToggle: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <div className="border border-slate-200 rounded-xl overflow-hidden">
+      <button
+        type="button"
+        onClick={onToggle}
+        className="w-full flex items-center justify-between px-3 py-2 bg-slate-50 hover:bg-slate-100 transition-colors"
+      >
+        <span className="text-[10px] font-black uppercase tracking-wide text-slate-600">{label}</span>
+        <span className="flex items-center gap-1.5">
+          {hint && <span className="text-[9px] font-bold text-blue-600">{hint}</span>}
+          <ChevronDown className={cn('w-3.5 h-3.5 text-slate-400 transition-transform', open && 'rotate-180')} />
+        </span>
+      </button>
+      {open && <div className="p-2.5 space-y-2 border-t border-slate-100">{children}</div>}
+    </div>
+  );
+}
 
 interface BatterLine {
   balls: number;
@@ -291,7 +371,7 @@ function emptyInnings(battingTeamId: string, bowlingTeamId: string): InningsStat
 }
 
 export default function LiveMatchCenter() {
-  const { currentMatchId, fixtures, franchises, players, selectedFranchiseId, selectedSquadIds, playingXIIds, setSelectedSquadIds, setPlayingXIIds, currentMatchToss, standings, setGameState, updateMatchResult, liveMatchState, saveLiveMatchState, selectedFormat } = useGameStore();
+  const { currentMatchId, fixtures, franchises, players, selectedFranchiseId, selectedSquadIds, playingXIIds, setSelectedSquadIds, setPlayingXIIds, currentMatchToss, standings, setGameState, updateMatchResult, liveMatchState, saveLiveMatchState, selectedFormat, playerFatigue } = useGameStore();
   const [activeTab, setActiveTab] = useState<Tab>('Live');
   const [autoPlay, setAutoPlay] = useState(true);
   
@@ -340,6 +420,8 @@ export default function LiveMatchCenter() {
   const [replayDelivery, setReplayDelivery] = useState<DeliveryResult | null>(null);
   const [commentaryFilter, setCommentaryFilter] = useState<'ALL' | 'HIGHLIGHTS' | 'OVERS' | 'WICKETS' | 'BOUNDARIES'>('ALL');
   const [tacticalSubTab, setTacticalSubTab] = useState<'BATTING' | 'BOWLING' | 'FIELD'>('BATTING');
+  const [openTacticalMenu, setOpenTacticalMenu] = useState<TacticalMenuKey | null>('BATTING');
+  const [fieldPresetKey, setFieldPresetKey] = useState<string | null>(null);
   const [historyDeliveryResults, setHistoryDeliveryResults] = useState<DeliveryResult[]>([]);
 
   useEffect(() => {
@@ -1125,7 +1207,7 @@ export default function LiveMatchCenter() {
   const firstWorm = wormPoints(innings[0]);
   const secondWorm = wormPoints(innings[1]);
   const maxWormRuns = Math.max(200, ...firstWorm.map((point) => point.runs), ...secondWorm.map((point) => point.runs));
-  const projectedScore = inning?.balls ? Math.round((inning.runs / inning.balls) * 120) : 0;
+  const projectedScore = inning?.balls ? Math.round((inning.runs / inning.balls) * (maxBalls || 120)) : 0;
   const matchStatus = inning?.isComplete && inningNo === 2 ? 'Result official' : inningNo === 1 ? 'First innings live' : 'Chase live';
   const matchInfo = [
     ['Toss result', currentMatchToss ? `${tossWinner?.shortName} won, ${currentMatchToss.decision.toLowerCase()} first` : `${team1.shortName} batting first`],
@@ -1140,6 +1222,12 @@ export default function LiveMatchCenter() {
 
   const lastWicket = inning?.wicketLog.length ? inning.wicketLog[inning.wicketLog.length - 1] : null;
   const lastWicketBatter = lastWicket ? players.find((p) => p.id === lastWicket.playerId) : null;
+
+  const last6 = (inning?.recentBalls || []).slice(-6);
+  const recentCommentaryLines = (inning?.commentary || []).slice(0, 2);
+  const nextActionLabel = isMyTeamBatting
+    ? BATTING_INTENT_SHOT[userBattingIntent] || 'Balanced Stroke'
+    : BOWLING_INTENT_ACTION[userBowlingPlan?.intent || 'WICKET_TAKING'] || 'Attack the Stumps';
 
   const strikerLine = inning?.batters[striker?.id || ''] || { balls: 0, fours: 0, out: false, runs: 0, sixes: 0, status: 'not out' };
   const nonStrikerLine = inning?.batters[nonStriker?.id || ''] || { balls: 0, fours: 0, out: false, runs: 0, sixes: 0, status: 'not out' };
@@ -1210,11 +1298,7 @@ export default function LiveMatchCenter() {
 
   const handleReplayBall = (ballItem?: CommentaryLine) => {
     if (!ballItem) return;
-    const match = historyDeliveryResults.find(d => {
-      const overNum = d.ballPath ? Math.floor(d.currentBalls / 6) : 0;
-      const ballNum = d.ballPath ? (d.currentBalls % 6) + 1 : 1;
-      return `${overNum}.${ballNum}` === ballItem.ball;
-    }) || currentDeliveryResult;
+    const match = historyDeliveryResults.find(d => `${d.overIndex}.${d.ballInOver}` === ballItem.ball) || currentDeliveryResult;
     if (match) {
       setReplayDelivery({ ...match, id: `replay_${Date.now()}_${Math.random()}` });
     }
@@ -1241,45 +1325,6 @@ export default function LiveMatchCenter() {
     }
     setGameState(GameState.ARENA_HUB);
   };
-
-  const newsArticles = useMemo(() => [
-    {
-      id: 'news-1',
-      tag: 'MATCH REPORT',
-      title: `${battingTeam.name} vs ${bowlingTeam.name}: High-Intensity ${selectedFormat || 'T20'} Clash at Wankhede`,
-      snippet: `${battingTeam.shortName} stand at ${inning?.runs || 0}/${inning?.wickets || 0} in ${formatOvers(inning?.balls || 0)} overs. Both captains implement tactical shifts across the innings.`,
-      time: 'Just now',
-      source: 'Cricket Arena Bureau',
-      readTime: '2 min read',
-    },
-    {
-      id: 'news-2',
-      tag: 'TACTICS & ANALYSIS',
-      title: `Field Strategy Breakdown: Ring Restriction & Boundary Protection Tactics`,
-      snippet: `Detailed analysis of slip cordons and boundary sweeper deployments in varying pitch conditions. How field pressure influences batting risk thresholds.`,
-      time: '18 mins ago',
-      source: 'Tactical Desk',
-      readTime: '4 min read',
-    },
-    {
-      id: 'news-3',
-      tag: 'PLAYER SPOTLIGHT',
-      title: `${striker?.name || 'Top Batter'} Takes Control in the Middle Overs`,
-      snippet: `With a strike rate of ${strikeRate(strikerLine.runs, strikerLine.balls)}, the current partnership of ${inning?.partnershipRuns || 0} runs is pivotal for ${battingTeam.shortName}.`,
-      time: '45 mins ago',
-      source: 'Arena Insider',
-      readTime: '3 min read',
-    },
-    {
-      id: 'news-4',
-      tag: 'POINTS TABLE',
-      title: `Tournament Equations: Playoff Scenarios for ${team1.shortName} and ${team2.shortName}`,
-      snippet: `A decisive victory alters the championship standings. Projected Net Run Rate swings and upcoming round fixtures examined.`,
-      time: '2 hours ago',
-      source: 'League Analytics',
-      readTime: '5 min read',
-    },
-  ], [battingTeam.name, battingTeam.shortName, bowlingTeam.name, bowlingTeam.shortName, inning?.runs, inning?.wickets, inning?.balls, inning?.partnershipRuns, selectedFormat, striker?.name, strikerLine.runs, strikerLine.balls, team1.shortName, team2.shortName]);
 
   return (
     <div className="relative min-h-screen bg-[#f4f6f9] text-slate-800 font-sans pb-16 selection:bg-blue-100 selection:text-blue-900">
@@ -1315,8 +1360,8 @@ export default function LiveMatchCenter() {
               <button onClick={handleReturnToHub} className="hover:text-blue-600 transition-colors">Series</button>
               <button onClick={handleReturnToHub} className="hover:text-blue-600 transition-colors">Teams</button>
               <button onClick={handleReturnToHub} className="hover:text-blue-600 transition-colors">Fixtures</button>
-              <button onClick={() => setActiveTab('Points Table')} className="hover:text-blue-600 transition-colors">Stats</button>
-              <button onClick={() => setActiveTab('Points Table')} className="hover:text-blue-600 transition-colors">Rankings</button>
+              <button onClick={() => setActiveTab('Stats')} className="hover:text-blue-600 transition-colors">Stats</button>
+              <button onClick={() => setActiveTab('Stats')} className="hover:text-blue-600 transition-colors">Rankings</button>
             </nav>
           </div>
 
@@ -1355,11 +1400,17 @@ export default function LiveMatchCenter() {
           {/* Metadata Row */}
           <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500 pb-2.5 border-b border-slate-100">
             <div className="flex items-center gap-2">
-              <span className="font-bold text-slate-900">{currentMatch?.title || 'Indian Premier League 2026'}</span>
+              <span className="font-bold text-slate-900">
+                {currentMatch?.playoffType
+                  ? `${currentMatch.playoffType} · ${team1.shortName} vs ${team2.shortName}`
+                  : currentMatch
+                    ? `Match ${currentMatch.matchNumber} · ${team1.shortName} vs ${team2.shortName}`
+                    : `${team1.shortName} vs ${team2.shortName}`}
+              </span>
               <span>·</span>
               <span className="font-semibold text-blue-600">{selectedFormat || 'T20'} Match</span>
               <span>·</span>
-              <span className="text-slate-500">Wankhede Stadium, Mumbai</span>
+              <span className="text-slate-500">{currentMatch?.venue || 'Wankhede Stadium, Mumbai'}</span>
             </div>
 
             <div className="flex items-center gap-3">
@@ -1397,8 +1448,10 @@ export default function LiveMatchCenter() {
                       <span className="bg-blue-100 text-blue-700 border border-blue-200 text-[9px] font-black px-1.5 py-0.5 rounded">YOU</span>
                     )}
                   </div>
-                  <div className="text-xs text-slate-500 font-semibold">
-                    CRR: <span className="font-bold text-slate-800">{currentRunRate}</span>
+                  <div className="text-xs text-slate-500 font-semibold flex items-center gap-1.5">
+                    <span>CRR: <span className="font-bold text-slate-800">{currentRunRate}</span></span>
+                    <span className="text-slate-300">|</span>
+                    <span className="font-bold text-slate-700">{inningNo === 1 ? '1st' : '2nd'} Innings</span>
                   </div>
                 </div>
               </div>
@@ -1510,7 +1563,7 @@ export default function LiveMatchCenter() {
                 <RotateCcw className="w-3.5 h-3.5" />
               </button>
 
-              {/* Bowl / Skip Button */}
+              {/* Bowl / Next Ball Button */}
               <button
                 onClick={() => {
                   if (isBallAnimating) {
@@ -1528,8 +1581,30 @@ export default function LiveMatchCenter() {
                       ? "bg-blue-600 text-white border-blue-700 shadow-sm hover:bg-blue-700"
                       : "opacity-40 bg-slate-200 border-slate-300 text-slate-400 cursor-not-allowed"
                 )}
+                title="Simulate next delivery"
               >
-                {isBallAnimating ? 'Skip' : 'Bowl'}
+                {isBallAnimating ? 'Skip' : 'Next Ball'}
+              </button>
+
+              {/* Play Over Button */}
+              <button
+                onClick={() => {
+                  if (!autoPlay && canPlayManualBall) {
+                    const ballsInCurrentOver = (inning?.balls || 0) % 6;
+                    const remInOver = ballsInCurrentOver === 0 ? 6 : 6 - ballsInCurrentOver;
+                    setManualBallRequests(n => n + remInOver);
+                  }
+                }}
+                disabled={autoPlay || !canPlayManualBall}
+                className={cn(
+                  "px-3 py-1 rounded-lg text-[10px] font-black uppercase transition-all border",
+                  !autoPlay && canPlayManualBall
+                    ? "bg-indigo-600 text-white border-indigo-700 shadow-sm hover:bg-indigo-700"
+                    : "opacity-40 bg-slate-200 border-slate-300 text-slate-400 cursor-not-allowed"
+                )}
+                title="Simulate remainder of current over"
+              >
+                Play Over
               </button>
             </div>
           </div>
@@ -1541,7 +1616,7 @@ export default function LiveMatchCenter() {
       ═══════════════════════════════════════════════════════════════════════ */}
       <nav className="bg-white border-b border-slate-200 shadow-xs px-3 sm:px-6 sticky top-[57px] z-30">
         <div className="mx-auto max-w-7xl flex items-center gap-1 sm:gap-2 overflow-x-auto no-scrollbar">
-          {(['Live', 'Scorecard', 'Commentary', 'Points Table', 'News'] as Tab[]).map((tab) => (
+          {(['Live', 'Scorecard', 'Commentary', 'Tactics', 'Stats'] as Tab[]).map((tab) => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
@@ -1563,351 +1638,339 @@ export default function LiveMatchCenter() {
       ═══════════════════════════════════════════════════════════════════════ */}
       <main className="mx-auto max-w-7xl px-3 sm:px-6 py-4">
         {/* ─────────────────────────────────────────────────────────────────
-            TAB 1: LIVE (3-COLUMN DESKTOP GRID)
+            TAB 1: LIVE — 2D FIELD (~2/3) + ACTION SIDEBAR (~1/3) + BOTTOM STRIP
         ───────────────────────────────────────────────────────────────── */}
-        {activeTab === 'Live' && (
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
-            {/* ── LEFT COLUMN: 2D FIELD VISUALIZATION (lg:col-span-4 xl:col-span-5) ── */}
-            <div className="lg:col-span-4 xl:col-span-5 space-y-3">
-              {/* Field Map Card */}
-              <div className="bg-white rounded-2xl border border-slate-200/90 shadow-sm overflow-hidden">
-                <div className="px-4 py-2.5 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs font-black text-slate-800 uppercase tracking-wide">Live 2D Field Tactics</span>
-                    <span className="text-[10px] text-slate-400 font-semibold">(Interactive)</span>
-                  </div>
-                  <span className="text-[10px] text-slate-500 font-medium">Drag fielders to reposition</span>
+        <div className={cn('grid grid-cols-1 lg:grid-cols-12 gap-4 items-start', activeTab !== 'Live' && 'hidden')}>
+          {/* ── LEFT COLUMN: 2D FIELD VISUALIZATION (~2/3) ── */}
+          <div className="lg:col-span-8 space-y-3">
+            <div className="bg-white rounded-2xl border border-slate-200/90 shadow-sm overflow-hidden">
+              <div className="px-4 py-2.5 bg-slate-50 border-b border-slate-200 flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-black text-slate-800 uppercase tracking-wide">Live 2D Field</span>
+                  <span className="text-[10px] text-slate-400 font-semibold">(Interactive)</span>
                 </div>
-
-                <div className="p-1 bg-[#060913] rounded-b-2xl overflow-hidden">
-                  <CricketActionVisualizer
-                    striker={striker || null}
-                    nonStriker={nonStriker || null}
-                    bowler={currentBowler || null}
-                    deliveryResult={currentDeliveryResult}
-                    lifecycle={deliveryLifecycle}
-                    onPlaybackComplete={handlePlaybackComplete}
-                    onContactReached={handleContactReached}
-                    format={(selectedFormat as ArenaFormat) || 'T20'}
-                    battingTeamName={battingTeam.name}
-                    bowlingTeamName={bowlingTeam.name}
-                    isFreeHit={Boolean(inning?.isFreeHitPending)}
-                    score={{
-                      runs: inning?.runs || 0,
-                      wickets: inning?.wickets || 0,
-                      overs: inning?.balls ? Math.floor(inning.balls / 6) : 0,
-                      balls: inning?.balls ? inning.balls % 6 : 0,
-                    }}
-                    target={inningNo === 2 ? (innings[0]?.runs || 0) + 1 : undefined}
-                    pitch={pitch}
-                    weather={weather}
-                    fieldingSquad={bowlingSquad}
-                    partnershipRuns={inning?.partnershipRuns}
-                    partnershipBalls={inning?.partnershipBalls}
-                    onFieldChangingChange={setIsFieldChanging}
-                    userTeamControlMode={userTeamControlMode}
-                    onUserTeamControlModeChange={setUserTeamControlMode}
-                    aiCaptainRecommendation={aiCaptainRecommendation}
-                    onApplyAIRecommendation={(rec) => {
-                      if (rec.selectedBowlerId) {
-                        setBowlerId(rec.selectedBowlerId);
-                        setPending(null);
-                      }
-                      if (rec.bowlingPlan) {
-                        setUserBowlingPlan(rec.bowlingPlan as DetailedBowlingPlan);
-                      }
-                      if (rec.battingIntent) {
-                        setUserBattingIntent(rec.battingIntent);
-                      }
-                      setAiCaptainRecommendation(null);
-                    }}
-                    onIgnoreAIRecommendation={() => setAiCaptainRecommendation(null)}
-                    userBattingIntent={userBattingIntent}
-                    onUserBattingIntentChange={setUserBattingIntent}
-                    userBowlingPlan={userBowlingPlan || undefined}
-                    onUserBowlingPlanChange={setUserBowlingPlan}
-                    isUserTeamBatting={isMyTeamBatting}
-                    isUserTeamBowling={isMyTeamBowling}
-                    opponentTacticalNotice={opponentTacticalNotice}
-                    eligibleBowlers={selectableBowlers}
-                    onSelectBowlerManual={handleConfirmBowler}
-                    batterState={striker ? batterStates[striker.id] || null : null}
-                    playbackSpeed={playbackSpeed}
-                    onPlaybackSpeedChange={setPlaybackSpeed}
-                    isPlaybackPaused={isPlaybackPaused}
-                    onTogglePause={() => {
-                      setIsPlaybackPaused(p => !p);
-                      setAutoPlay(p => !p);
-                    }}
-                    replayTrigger={replayTrigger}
-                    skipTrigger={skipTrigger}
-                    hideTopHeader={true}
-                    hideSideAndBottomPanels={true}
-                    displayMode={displayMode}
-                    onDisplayModeChange={setDisplayMode}
-                    replayDeliveryResult={replayDelivery}
-                  />
-                </div>
+                <span className="text-[10px] text-slate-500 font-medium hidden sm:inline">Toggle “Edit Field” on the map to drag fielders</span>
               </div>
 
-              {/* Partnership & Last Wicket Mini-Card */}
-              <div className="bg-white rounded-xl border border-slate-200/90 shadow-sm p-3 flex items-center justify-between gap-3 text-xs">
-                <div>
-                  <span className="text-[10px] uppercase font-bold text-slate-400 block">Current Partnership</span>
-                  <div className="font-bold text-slate-800">
-                    <span className="text-base font-black text-blue-600">{inning?.partnershipRuns || 0}</span> runs
-                    <span className="text-slate-500 font-semibold ml-1">({inning?.partnershipBalls || 0}b)</span>
-                  </div>
-                </div>
+              <div className="p-1 bg-[#060913] rounded-b-2xl overflow-hidden">
+                <CricketActionVisualizer
+                  striker={striker || null}
+                  nonStriker={nonStriker || null}
+                  bowler={currentBowler || null}
+                  deliveryResult={currentDeliveryResult}
+                  lifecycle={deliveryLifecycle}
+                  onPlaybackComplete={handlePlaybackComplete}
+                  onContactReached={handleContactReached}
+                  format={(selectedFormat as ArenaFormat) || 'T20'}
+                  battingTeamName={battingTeam.name}
+                  bowlingTeamName={bowlingTeam.name}
+                  isFreeHit={Boolean(inning?.isFreeHitPending)}
+                  score={{
+                    runs: inning?.runs || 0,
+                    wickets: inning?.wickets || 0,
+                    overs: inning?.balls ? Math.floor(inning.balls / 6) : 0,
+                    balls: inning?.balls ? inning.balls % 6 : 0,
+                  }}
+                  target={inningNo === 2 ? (innings[0]?.runs || 0) + 1 : undefined}
+                  pitch={pitch}
+                  weather={weather}
+                  fieldingSquad={bowlingSquad}
+                  partnershipRuns={inning?.partnershipRuns}
+                  partnershipBalls={inning?.partnershipBalls}
+                  onFieldChangingChange={setIsFieldChanging}
+                  userTeamControlMode={userTeamControlMode}
+                  onUserTeamControlModeChange={setUserTeamControlMode}
+                  aiCaptainRecommendation={aiCaptainRecommendation}
+                  onApplyAIRecommendation={(rec) => {
+                    if (rec.selectedBowlerId) {
+                      setBowlerId(rec.selectedBowlerId);
+                      setPending(null);
+                    }
+                    if (rec.bowlingPlan) {
+                      setUserBowlingPlan(rec.bowlingPlan as DetailedBowlingPlan);
+                    }
+                    if (rec.battingIntent) {
+                      setUserBattingIntent(rec.battingIntent);
+                    }
+                    setAiCaptainRecommendation(null);
+                  }}
+                  onIgnoreAIRecommendation={() => setAiCaptainRecommendation(null)}
+                  userBattingIntent={userBattingIntent}
+                  onUserBattingIntentChange={setUserBattingIntent}
+                  userBowlingPlan={userBowlingPlan || undefined}
+                  onUserBowlingPlanChange={setUserBowlingPlan}
+                  isUserTeamBatting={isMyTeamBatting}
+                  isUserTeamBowling={isMyTeamBowling}
+                  opponentTacticalNotice={opponentTacticalNotice}
+                  eligibleBowlers={selectableBowlers}
+                  onSelectBowlerManual={handleConfirmBowler}
+                  batterState={striker ? batterStates[striker.id] || null : null}
+                  playbackSpeed={playbackSpeed}
+                  onPlaybackSpeedChange={setPlaybackSpeed}
+                  isPlaybackPaused={isPlaybackPaused}
+                  onTogglePause={() => {
+                    setIsPlaybackPaused(p => !p);
+                    setAutoPlay(p => !p);
+                  }}
+                  replayTrigger={replayTrigger}
+                  skipTrigger={skipTrigger}
+                  hideTopHeader={true}
+                  hideSideAndBottomPanels={true}
+                  displayMode={displayMode}
+                  onDisplayModeChange={setDisplayMode}
+                  replayDeliveryResult={replayDelivery}
+                  fieldPresetKey={fieldPresetKey}
+                  onFieldPresetChange={setFieldPresetKey}
+                />
+              </div>
+            </div>
+          </div>
 
-                {lastWicket && (
-                  <div className="text-right border-l border-slate-100 pl-3">
-                    <span className="text-[10px] uppercase font-bold text-red-500 block">Last Wicket</span>
-                    <div className="font-bold text-slate-800">
-                      {lastWicketBatter?.name || 'Batter'} <span className="text-red-600 font-black">{lastWicket.score}/{lastWicket.wicket}</span>
-                    </div>
-                  </div>
+          {/* ── RIGHT COLUMN: BATTERS, BOWLER & NEXT ACTION (~1/3) ── */}
+          <div className="lg:col-span-4 space-y-3">
+            {/* Pending Selection Prompt (critical progression CTA) */}
+            {pending && (
+              <button
+                onClick={() => {
+                  if (pending === 'openers') setManualDrawerOpen('OPENERS');
+                  else if (pending === 'batter') setManualDrawerOpen('BATTER');
+                  else if (pending === 'bowler') setManualDrawerOpen('BOWLER');
+                }}
+                className="w-full py-2.5 rounded-2xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-black uppercase shadow-sm flex items-center justify-center gap-2 animate-pulse"
+              >
+                <Sparkles className="w-4 h-4" />
+                <span>{pending === 'openers' ? 'Select Openers' : pending === 'batter' ? 'Select New Batter' : 'Select Bowler'}</span>
+              </button>
+            )}
+
+            {/* Current Batters Card */}
+            <div className="bg-white rounded-2xl border border-slate-200/90 shadow-sm p-3.5 space-y-2">
+              <span className="text-xs font-black text-slate-800 uppercase tracking-wide block">Current Batters</span>
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="text-[9px] uppercase tracking-wider text-slate-400 border-b border-slate-100">
+                      <th className="pb-1 text-left font-bold">Batter</th>
+                      <th className="pb-1 text-center font-bold">R</th>
+                      <th className="pb-1 text-center font-bold">B</th>
+                      <th className="pb-1 text-center font-bold">4s</th>
+                      <th className="pb-1 text-center font-bold">6s</th>
+                      <th className="pb-1 text-right font-bold">SR</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {[
+                      { player: striker, line: strikerLine, isStriker: true },
+                      { player: nonStriker, line: nonStrikerLine, isStriker: false }
+                    ].map(({ player, line, isStriker }) => (
+                      <tr key={player?.id || (isStriker ? 's' : 'ns')} className={isStriker ? "bg-blue-50/40" : ""}>
+                        <td className="py-2">
+                          <div className="flex items-center gap-1.5">
+                            <span className="font-bold text-slate-900 truncate max-w-[90px]">{player?.name || '--'}</span>
+                            {isStriker && <span className="text-blue-600 font-black text-xs">*</span>}
+                          </div>
+                        </td>
+                        <td className="py-2 text-center font-black text-slate-900 tabular-nums">{line.runs}</td>
+                        <td className="py-2 text-center text-slate-500 tabular-nums">{line.balls}</td>
+                        <td className="py-2 text-center text-slate-600 tabular-nums">{line.fours}</td>
+                        <td className="py-2 text-center text-purple-600 font-bold tabular-nums">{line.sixes}</td>
+                        <td className="py-2 text-right font-bold text-slate-700 tabular-nums">{strikeRate(line.runs, line.balls)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* Current Bowler Card */}
+            <div className="bg-white rounded-2xl border border-slate-200/90 shadow-sm p-3.5 space-y-2.5">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-black text-slate-800 uppercase tracking-wide">Current Bowler</span>
+                {isMyTeamBowling && (
+                  <button
+                    onClick={() => setManualDrawerOpen('BOWLER')}
+                    className="text-[10px] font-bold text-blue-600 hover:underline flex items-center gap-1"
+                  >
+                    <UserCheck className="w-3 h-3" /> Change Bowler
+                  </button>
                 )}
               </div>
-            </div>
 
-            {/* ── CENTRE COLUMN: LIVE BALL-BY-BALL & COMMENTARY (lg:col-span-4 xl:col-span-4) ── */}
-            <div className="lg:col-span-4 xl:col-span-4 space-y-3">
-              {/* Current Over Outcome Chips */}
-              <div className="bg-white rounded-2xl border border-slate-200/90 shadow-sm p-3.5 space-y-2.5">
-                <div className="flex items-center justify-between text-xs">
-                  <span className="font-bold text-slate-800">
-                    Over {currentOverIdx + 1} ({currentOverBalls.length}/6)
-                  </span>
-                  <span className="text-slate-500 font-semibold">
-                    {currentOverTotalRuns} runs · {currentOverWickets} wkt
-                  </span>
+              <div className="flex items-center gap-3">
+                <div className="h-10 w-10 shrink-0 rounded-full bg-purple-100 text-purple-700 border border-purple-200 flex items-center justify-center text-xs font-black">
+                  {playerInitials(currentBowler?.name)}
                 </div>
-
-                {/* Outcome Chips */}
-                <div className="flex items-center gap-1.5 flex-wrap">
-                  {currentOverBalls.length === 0 ? (
-                    <span className="text-xs text-slate-400 italic">Over starting...</span>
-                  ) : (
-                    currentOverBalls.map((b, i) => {
-                      const isW = b === 'W';
-                      const isSix = b === '6';
-                      const isFour = b === '4';
-                      const isZero = b === '0';
-                      return (
-                        <span
-                          key={i}
-                          className={cn(
-                            "grid h-7 w-7 place-items-center rounded-full text-xs font-black tabular-nums transition-transform shadow-xs",
-                            isW
-                              ? "bg-red-600 text-white shadow-red-200"
-                              : isSix
-                              ? "bg-purple-600 text-white shadow-purple-200"
-                              : isFour
-                              ? "bg-blue-600 text-white shadow-blue-200"
-                              : isZero
-                              ? "bg-slate-100 text-slate-500 border border-slate-200"
-                              : "bg-emerald-100 text-emerald-800 border border-emerald-300"
-                          )}
-                        >
-                          {b}
-                        </span>
-                      );
-                    })
-                  )}
-                </div>
-              </div>
-
-              {/* Commentary Feed Card with Filter Bar */}
-              <div className="bg-white rounded-2xl border border-slate-200/90 shadow-sm p-3.5 space-y-3">
-                <div className="flex items-center justify-between border-b border-slate-100 pb-2">
-                  <span className="text-xs font-black text-slate-800 uppercase tracking-wide flex items-center gap-1.5">
-                    <Activity className="w-3.5 h-3.5 text-blue-600" />
-                    Ball-by-Ball Commentary
-                  </span>
-                  <span className="text-[10px] text-slate-400 font-semibold">Tap to replay</span>
-                </div>
-
-                {/* Filter Pills */}
-                <div className="flex items-center gap-1 overflow-x-auto no-scrollbar pb-1">
-                  {(['ALL', 'HIGHLIGHTS', 'OVERS', 'WICKETS', 'BOUNDARIES'] as const).map((flt) => (
-                    <button
-                      key={flt}
-                      onClick={() => setCommentaryFilter(flt)}
-                      className={cn(
-                        "px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase transition-all whitespace-nowrap",
-                        commentaryFilter === flt
-                          ? "bg-blue-600 text-white shadow-xs"
-                          : "bg-slate-100 text-slate-600 hover:bg-slate-200"
-                      )}
-                    >
-                      {flt}
-                    </button>
-                  ))}
-                </div>
-
-                {/* Delivery Rows */}
-                <div className="space-y-2 max-h-[540px] overflow-y-auto pr-1">
-                  {filteredCommentary.length === 0 ? (
-                    <div className="text-center py-8 text-xs text-slate-400">
-                      No commentary for selected filter.
-                    </div>
-                  ) : (
-                    filteredCommentary.map((item, idx) => {
-                      const isW = item.outcome === 'W';
-                      const isSix = item.outcome === '6';
-                      const isFour = item.outcome === '4';
-                      const isZero = item.outcome === '0';
-
-                      return (
-                        <div
-                          key={`${item.ball}-${idx}`}
-                          onClick={() => handleReplayBall(item)}
-                          className={cn(
-                            "group p-2.5 rounded-xl border transition-all cursor-pointer",
-                            isW
-                              ? "bg-red-50/70 border-red-200 hover:border-red-300"
-                              : isSix
-                              ? "bg-purple-50/70 border-purple-200 hover:border-purple-300"
-                              : isFour
-                              ? "bg-blue-50/70 border-blue-200 hover:border-blue-300"
-                              : "bg-white border-slate-200/80 hover:border-slate-300 hover:bg-slate-50"
-                          )}
-                          title="Click to replay ball trajectory on field map"
-                        >
-                          <div className="flex items-start gap-2.5">
-                            <div className="flex flex-col items-center gap-1 shrink-0">
-                              <span className="text-[10px] font-bold text-slate-400 tabular-nums">{item.ball}</span>
-                              <span
-                                className={cn(
-                                  "grid h-6 w-6 place-items-center rounded-full text-[10px] font-black shadow-xs",
-                                  isW
-                                    ? "bg-red-600 text-white"
-                                    : isSix
-                                    ? "bg-purple-600 text-white"
-                                    : isFour
-                                    ? "bg-blue-600 text-white"
-                                    : isZero
-                                    ? "bg-slate-100 text-slate-500 border border-slate-200"
-                                    : "bg-emerald-100 text-emerald-800"
-                                )}
-                              >
-                                {item.outcome}
-                              </span>
-                            </div>
-
-                            <div className="flex-1 min-w-0">
-                              <p className="text-xs text-slate-800 leading-relaxed font-medium">
-                                {item.text}
-                              </p>
-                              <div className="mt-1 flex items-center justify-between text-[10px] text-slate-400">
-                                <span>{item.badge}</span>
-                                <span className="opacity-0 group-hover:opacity-100 text-blue-600 font-bold transition-opacity flex items-center gap-1">
-                                  <RotateCcw className="w-2.5 h-2.5" /> Replay
-                                </span>
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })
-                  )}
-                </div>
-              </div>
-            </div>
-
-            {/* ── RIGHT COLUMN: MATCH STATUS & TACTICAL CONTROLS (lg:col-span-4 xl:col-span-3) ── */}
-            <div className="lg:col-span-4 xl:col-span-3 space-y-3">
-              {/* Current Batters Card */}
-              <div className="bg-white rounded-2xl border border-slate-200/90 shadow-sm p-3.5 space-y-2">
-                <span className="text-xs font-black text-slate-800 uppercase tracking-wide block">Current Batters</span>
-                <div className="overflow-x-auto">
-                  <table className="w-full text-xs">
-                    <thead>
-                      <tr className="text-[9px] uppercase tracking-wider text-slate-400 border-b border-slate-100">
-                        <th className="pb-1 text-left font-bold">Batter</th>
-                        <th className="pb-1 text-center font-bold">R</th>
-                        <th className="pb-1 text-center font-bold">B</th>
-                        <th className="pb-1 text-center font-bold">4s</th>
-                        <th className="pb-1 text-center font-bold">6s</th>
-                        <th className="pb-1 text-right font-bold">SR</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100">
-                      {[
-                        { player: striker, line: strikerLine, isStriker: true },
-                        { player: nonStriker, line: nonStrikerLine, isStriker: false }
-                      ].map(({ player, line, isStriker }) => (
-                        <tr key={player?.id || (isStriker ? 's' : 'ns')} className={isStriker ? "bg-blue-50/40" : ""}>
-                          <td className="py-2">
-                            <div className="flex items-center gap-1.5">
-                              <span className="font-bold text-slate-900 truncate max-w-[90px]">{player?.name || '--'}</span>
-                              {isStriker && <span className="text-blue-600 font-black text-xs">*</span>}
-                            </div>
-                          </td>
-                          <td className="py-2 text-center font-black text-slate-900 tabular-nums">{line.runs}</td>
-                          <td className="py-2 text-center text-slate-500 tabular-nums">{line.balls}</td>
-                          <td className="py-2 text-center text-slate-600 tabular-nums">{line.fours}</td>
-                          <td className="py-2 text-center text-purple-600 font-bold tabular-nums">{line.sixes}</td>
-                          <td className="py-2 text-right font-bold text-slate-700 tabular-nums">{strikeRate(line.runs, line.balls)}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-
-              {/* Current Bowler Card */}
-              <div className="bg-white rounded-2xl border border-slate-200/90 shadow-sm p-3.5 space-y-2">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-black text-slate-800 uppercase tracking-wide">Current Bowler</span>
-                  {isMyTeamBowling && (
-                    <button
-                      onClick={() => setManualDrawerOpen('BOWLER')}
-                      className="text-[10px] font-bold text-blue-600 hover:underline flex items-center gap-1"
-                    >
-                      <UserCheck className="w-3 h-3" /> Change
-                    </button>
-                  )}
-                </div>
-
-                <div className="flex items-center justify-between pt-1">
-                  <div>
-                    <div className="text-xs font-black text-slate-900">{currentBowler?.name || 'Bowler'}</div>
-                    <div className="text-[10px] text-slate-500">{currentBowler?.bowlingStyle || currentBowler?.role || 'Fast'}</div>
-                  </div>
-                  <div className="flex items-center gap-3 text-center text-xs">
-                    <div>
-                      <span className="text-[9px] uppercase font-bold text-slate-400 block">O-M-R-W</span>
-                      <span className="font-black text-slate-900 tabular-nums">
-                        {formatOvers(bowlerLine.balls)}-{bowlerMaidens(inning, currentBowler?.id || '')}-{bowlerLine.runs}-{bowlerLine.wickets}
-                      </span>
-                    </div>
-                    <div>
-                      <span className="text-[9px] uppercase font-bold text-slate-400 block">ECO</span>
-                      <span className="font-bold text-slate-700 tabular-nums">{economy(bowlerLine.runs, bowlerLine.balls)}</span>
-                    </div>
+                <div className="flex-1 min-w-0">
+                  <div className="text-xs font-black text-slate-900 truncate">{currentBowler?.name || 'Bowler'}</div>
+                  <div className="text-[10px] text-slate-500 truncate">
+                    {currentBowler?.bowlingStyle || currentBowler?.role || 'Fast'}
                   </div>
                 </div>
               </div>
 
-              {/* AI Captain Recommendation Card */}
+              <div className="grid grid-cols-4 gap-1.5 pt-2 border-t border-slate-100 text-center">
+                <div>
+                  <span className="text-[9px] uppercase font-bold text-slate-400 block">O</span>
+                  <span className="text-xs font-black text-slate-900 tabular-nums">{formatOvers(bowlerLine.balls)}</span>
+                </div>
+                <div>
+                  <span className="text-[9px] uppercase font-bold text-slate-400 block">R</span>
+                  <span className="text-xs font-black text-slate-900 tabular-nums">{bowlerLine.runs}</span>
+                </div>
+                <div>
+                  <span className="text-[9px] uppercase font-bold text-slate-400 block">W</span>
+                  <span className="text-xs font-black text-slate-900 tabular-nums">{bowlerLine.wickets}</span>
+                </div>
+                <div>
+                  <span className="text-[9px] uppercase font-bold text-slate-400 block">Eco</span>
+                  <span className="text-xs font-black text-slate-900 tabular-nums">{economy(bowlerLine.runs, bowlerLine.balls)}</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Next Action Card */}
+            <div className="bg-white rounded-2xl border border-slate-200/90 shadow-sm p-3.5 space-y-2.5">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-black text-slate-800 uppercase tracking-wide flex items-center gap-1.5">
+                  <Target className="w-3.5 h-3.5 text-blue-600" /> Next Action
+                </span>
+                <span className="text-[9px] font-black uppercase px-2 py-0.5 rounded-full bg-slate-100 text-slate-500 border border-slate-200">
+                  {autoPlay && !isPlaybackPaused ? 'Auto Play' : userTeamControlMode === 'FULL_AUTO' ? 'Full Auto' : userTeamControlMode === 'AI_RECOMMENDATIONS' ? 'AI Rec' : 'Manual'}
+                </span>
+              </div>
+
+              <div className="rounded-xl bg-blue-50/70 border border-blue-100 px-3 py-2">
+                <span className="text-[9px] font-black uppercase text-blue-500 block">
+                  {isMyTeamBatting ? 'Batting Shot' : 'Bowl Plan'}
+                </span>
+                <span className="text-xs font-black text-slate-900">{nextActionLabel}</span>
+              </div>
+
+              <button
+                onClick={() => {
+                  if (isBallAnimating) {
+                    setSkipTrigger(n => n + 1);
+                  } else if (!autoPlay && canPlayManualBall) {
+                    setManualBallRequests(n => n + 1);
+                  }
+                }}
+                disabled={!isBallAnimating && (!canPlayManualBall || autoPlay)}
+                className={cn(
+                  "w-full py-2.5 rounded-xl text-xs font-black uppercase transition-all border",
+                  isBallAnimating
+                    ? "bg-slate-800 text-white border-slate-900 hover:bg-slate-700"
+                    : canPlayManualBall && !autoPlay
+                      ? "bg-blue-600 text-white border-blue-700 shadow-sm hover:bg-blue-700"
+                      : "opacity-40 bg-slate-100 border-slate-200 text-slate-400 cursor-not-allowed"
+                )}
+              >
+                {isBallAnimating ? 'Skip Delivery' : 'Bowl Next Ball →'}
+              </button>
+
+              {/* Compact tactical menus */}
+              <div className="space-y-1.5">
+                <TacticalMenu
+                  label="Batting Intent"
+                  hint={userBattingIntent.replace(/_/g, ' ')}
+                  open={openTacticalMenu === 'BATTING'}
+                  onToggle={() => setOpenTacticalMenu(openTacticalMenu === 'BATTING' ? null : 'BATTING')}
+                >
+                  <div className="grid grid-cols-2 gap-1.5">
+                    {(['SURVIVAL', 'DEFENSIVE', 'SETTLING', 'ROTATE_STRIKE', 'NORMAL', 'CONTROLLED_ATTACK', 'ACCELERATE'] as const).map((intent) => (
+                      <button
+                        key={intent}
+                        onClick={() => setUserBattingIntent(intent)}
+                        className={cn(
+                          "py-1.5 px-2 rounded-lg text-[9px] font-bold uppercase transition-all border text-left truncate",
+                          userBattingIntent === intent
+                            ? "bg-blue-600 text-white border-blue-700 shadow-xs"
+                            : "bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100"
+                        )}
+                      >
+                        {intent === 'ROTATE_STRIKE' ? 'Rotate' : intent === 'CONTROLLED_ATTACK' ? 'Attack' : intent}
+                      </button>
+                    ))}
+                  </div>
+                </TacticalMenu>
+
+                <TacticalMenu
+                  label="Bowling Plan"
+                  hint={(userBowlingPlan?.intent || 'WICKET_TAKING').replace(/_/g, ' ')}
+                  open={openTacticalMenu === 'BOWLING'}
+                  onToggle={() => setOpenTacticalMenu(openTacticalMenu === 'BOWLING' ? null : 'BOWLING')}
+                >
+                  <div className="grid grid-cols-2 gap-1.5">
+                    {(['WICKET_TAKING', 'CONTAINING', 'DEFENSIVE', 'ATTACKING', 'SHORT_BALL_TRAP'] as const).map((intent) => (
+                      <button
+                        key={intent}
+                        onClick={() => setUserBowlingPlan(prev => ({ ...(prev || DEFAULT_BOWLING_PLAN), intent }))}
+                        className={cn(
+                          "py-1.5 px-2 rounded-lg text-[9px] font-bold uppercase transition-all border text-left truncate",
+                          userBowlingPlan?.intent === intent
+                            ? "bg-purple-600 text-white border-purple-700 shadow-xs"
+                            : "bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100"
+                        )}
+                      >
+                        {intent.replace(/_/g, ' ')}
+                      </button>
+                    ))}
+                  </div>
+                  <button
+                    onClick={() => setManualDrawerOpen('BOWLER')}
+                    className="w-full py-2 rounded-xl bg-purple-100 hover:bg-purple-200 text-purple-800 text-[10px] font-bold transition-colors flex items-center justify-center gap-1.5 border border-purple-200"
+                  >
+                    <UserCheck className="w-3.5 h-3.5" />
+                    Change Bowler
+                  </button>
+                </TacticalMenu>
+
+                <TacticalMenu
+                  label="Field Setup"
+                  hint={fieldPresetKey ? (BowlerFieldStrategyEngine.PRESET_OVERLAYS[fieldPresetKey]?.name.split('(')[0].trim() || 'Preset') : 'Default'}
+                  open={openTacticalMenu === 'FIELD'}
+                  onToggle={() => setOpenTacticalMenu(openTacticalMenu === 'FIELD' ? null : 'FIELD')}
+                >
+                  <div className="grid grid-cols-2 gap-1.5">
+                    {Object.entries(BowlerFieldStrategyEngine.PRESET_OVERLAYS).map(([pKey, pDef]) => (
+                      <button
+                        key={pKey}
+                        onClick={() => setFieldPresetKey(pKey)}
+                        className={cn(
+                          "py-1.5 px-2 rounded-lg text-[9px] font-bold transition-all border text-left truncate",
+                          fieldPresetKey === pKey
+                            ? "bg-cyan-600 text-white border-cyan-700 shadow-xs"
+                            : "bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100"
+                        )}
+                      >
+                        {pDef.name.split('(')[0].trim()}
+                      </button>
+                    ))}
+                  </div>
+                  <button
+                    onClick={() => setFieldPresetKey(null)}
+                    className="w-full py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-[10px] font-bold transition-colors border border-slate-200"
+                  >
+                    Auto Field
+                  </button>
+                  <p className="text-[9px] text-slate-400 leading-snug">Tip: turn on “Edit Field” on the map to drag fielders into position.</p>
+                </TacticalMenu>
+              </div>
+
+              {/* AI Captain suggestion (lightbulb) */}
               {aiCaptainRecommendation && (
-                <div className="p-3.5 rounded-2xl bg-gradient-to-br from-indigo-50 to-blue-50 border border-indigo-200 shadow-sm space-y-2">
+                <div className="rounded-xl bg-indigo-50 border border-indigo-200 p-2.5 space-y-1.5">
                   <div className="flex items-center justify-between">
-                    <span className="text-xs font-black text-indigo-900 uppercase flex items-center gap-1.5">
-                      <Sparkles className="w-3.5 h-3.5 text-indigo-600" />
-                      AI Captain Rec
+                    <span className="text-[10px] font-black uppercase text-indigo-800 flex items-center gap-1.5">
+                      <Lightbulb className="w-3.5 h-3.5 text-indigo-600" />
+                      Captain Suggestion
                     </span>
-                    <span className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase bg-indigo-200/60 text-indigo-800">
-                      {aiCaptainRecommendation.confidence}% Conf
+                    <span className="px-1.5 py-0.5 rounded-full text-[9px] font-black uppercase bg-indigo-200/70 text-indigo-800">
+                      {aiCaptainRecommendation.confidence}%
                     </span>
                   </div>
-
-                  <p className="text-xs font-bold text-indigo-950">{aiCaptainRecommendation.observation}</p>
-                  <p className="text-[10px] text-slate-600">{aiCaptainRecommendation.reasoning}</p>
-
-                  <div className="flex items-center gap-2 pt-1">
+                  <p className="text-[11px] font-bold text-indigo-950 leading-snug">{aiCaptainRecommendation.observation}</p>
+                  <p className="text-[10px] text-slate-600 leading-snug">{aiCaptainRecommendation.reasoning}</p>
+                  <div className="flex items-center gap-2 pt-0.5">
                     <button
                       onClick={() => {
                         if (aiCaptainRecommendation.selectedBowlerId) {
@@ -1922,189 +1985,93 @@ export default function LiveMatchCenter() {
                         }
                         setAiCaptainRecommendation(null);
                       }}
-                      className="flex-1 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold transition-colors"
+                      className="flex-1 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-[11px] font-bold transition-colors"
                     >
                       Apply
                     </button>
                     <button
                       onClick={() => setAiCaptainRecommendation(null)}
-                      className="px-3 py-1.5 bg-white border border-slate-200 text-slate-600 rounded-lg text-xs font-bold hover:bg-slate-50 transition-colors"
+                      className="px-3 py-1.5 bg-white border border-slate-200 text-slate-600 rounded-lg text-[11px] font-bold hover:bg-slate-50 transition-colors"
                     >
-                      Ignore
+                      Dismiss
                     </button>
                   </div>
                 </div>
               )}
-
-              {/* My Team Manual Tactical Controls Panel */}
-              <div className="bg-white rounded-2xl border border-slate-200/90 shadow-sm p-3.5 space-y-3">
-                <div className="flex items-center justify-between border-b border-slate-100 pb-2">
-                  <span className="text-xs font-black text-slate-800 uppercase tracking-wide flex items-center gap-1.5">
-                    <Target className="w-3.5 h-3.5 text-blue-600" />
-                    My Team Tactical Control
-                  </span>
-                  <span className="text-[10px] font-bold text-blue-600">
-                    {isMyTeamBatting ? 'Batting Side' : isMyTeamBowling ? 'Bowling Side' : 'Opponent'}
-                  </span>
-                </div>
-
-                {/* Sub-tabs: BATTING | BOWLING | FIELD */}
-                <div className="grid grid-cols-3 gap-1 bg-slate-100 p-1 rounded-xl text-[10px] font-bold">
-                  {(['BATTING', 'BOWLING', 'FIELD'] as const).map((tab) => (
-                    <button
-                      key={tab}
-                      onClick={() => setTacticalSubTab(tab)}
-                      className={cn(
-                        "py-1 rounded-lg uppercase transition-all",
-                        tacticalSubTab === tab
-                          ? "bg-white text-slate-900 shadow-xs font-black"
-                          : "text-slate-500 hover:text-slate-900"
-                      )}
-                    >
-                      {tab}
-                    </button>
-                  ))}
-                </div>
-
-                {/* Tactical Sub-tab 1: Batting Intent */}
-                {tacticalSubTab === 'BATTING' && (
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between text-[10px]">
-                      <span className="font-bold text-slate-500 uppercase">Batting Intent</span>
-                      <span className="font-black text-blue-600">{userBattingIntent}</span>
-                    </div>
-                    <div className="grid grid-cols-2 gap-1.5">
-                      {(['SURVIVAL', 'DEFENSIVE', 'SETTLING', 'ROTATE_STRIKE', 'NORMAL', 'CONTROLLED_ATTACK', 'ACCELERATE'] as const).map((intent) => (
-                        <button
-                          key={intent}
-                          onClick={() => setUserBattingIntent(intent)}
-                          className={cn(
-                            "py-1.5 px-2 rounded-lg text-[9px] font-bold uppercase transition-all border text-left truncate",
-                            userBattingIntent === intent
-                              ? "bg-blue-600 text-white border-blue-700 shadow-xs"
-                              : "bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100"
-                          )}
-                        >
-                          {intent === 'ROTATE_STRIKE' ? 'Rotate' : intent === 'CONTROLLED_ATTACK' ? 'Attack' : intent}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {/* Tactical Sub-tab 2: Bowling Plan */}
-                {tacticalSubTab === 'BOWLING' && (
-                  <div className="space-y-2 text-[10px]">
-                    <div className="flex items-center justify-between">
-                      <span className="font-bold text-slate-500 uppercase">Bowling Intent</span>
-                      <span className="font-black text-purple-600">{userBowlingPlan?.intent || 'WICKET_TAKING'}</span>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-1.5">
-                      {(['WICKET_TAKING', 'CONTAINMENT', 'DOT_PRESSURE', 'ATTACK_STUMPS'] as const).map((intent) => (
-                        <button
-                          key={intent}
-                          onClick={() => {
-                            setUserBowlingPlan(prev => ({
-                              line: prev?.line || 'OFF_STUMP',
-                              length: prev?.length || 'GOOD_LENGTH',
-                              intent,
-                            }));
-                          }}
-                          className={cn(
-                            "py-1.5 px-2 rounded-lg text-[9px] font-bold uppercase transition-all border text-left truncate",
-                            userBowlingPlan?.intent === intent
-                              ? "bg-purple-600 text-white border-purple-700 shadow-xs"
-                              : "bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100"
-                          )}
-                        >
-                          {intent.replace('_', ' ')}
-                        </button>
-                      ))}
-                    </div>
-
-                    {/* Change Bowler Drawer Button */}
-                    <button
-                      onClick={() => setManualDrawerOpen('BOWLER')}
-                      className="w-full mt-2 py-2 rounded-xl bg-purple-100 hover:bg-purple-200 text-purple-800 text-xs font-bold transition-colors flex items-center justify-center gap-1.5 border border-purple-200"
-                    >
-                      <UserCheck className="w-3.5 h-3.5" />
-                      Select Next Bowler
-                    </button>
-                  </div>
-                )}
-
-                {/* Tactical Sub-tab 3: Field Strategy */}
-                {tacticalSubTab === 'FIELD' && (
-                  <div className="space-y-2 text-[10px]">
-                    <span className="font-bold text-slate-500 uppercase block">Quick Presets</span>
-                    <div className="grid grid-cols-2 gap-1.5">
-                      {['Attacking Slips', 'Balanced Ring', 'Death Defensive', 'Spin Trap'].map((pName) => (
-                        <button
-                          key={pName}
-                          onClick={() => {
-                            // Quick feedback
-                          }}
-                          className="py-1.5 px-2 rounded-lg text-[9px] font-bold bg-slate-50 text-slate-700 border border-slate-200 hover:bg-slate-100 text-left truncate"
-                        >
-                          {pName}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {/* Pending Drawer Prompt if active */}
-                {pending && (
-                  <button
-                    onClick={() => {
-                      if (pending === 'openers') setManualDrawerOpen('OPENERS');
-                      else if (pending === 'batter') setManualDrawerOpen('BATTER');
-                      else if (pending === 'bowler') setManualDrawerOpen('BOWLER');
-                    }}
-                    className="w-full py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-black uppercase shadow-sm flex items-center justify-center gap-2 animate-pulse"
-                  >
-                    <Sparkles className="w-4 h-4" />
-                    <span>{pending === 'openers' ? 'Select Openers' : pending === 'batter' ? 'Select New Batter' : 'Select Bowler'}</span>
-                  </button>
-                )}
-              </div>
-
-              {/* Match Analytics Card */}
-              <div className="bg-white rounded-2xl border border-slate-200/90 shadow-sm p-3.5 space-y-3">
-                <span className="text-xs font-black text-slate-800 uppercase tracking-wide flex items-center gap-1.5">
-                  <TrendingUp className="w-3.5 h-3.5 text-blue-600" />
-                  Match Analytics
-                </span>
-
-                {/* Win Probability Bar */}
-                <div className="space-y-1.5 text-xs">
-                  <div className="flex items-center justify-between font-bold">
-                    <span className="text-blue-700">{battingTeam.shortName} {winProbability.batting}%</span>
-                    <span className="text-purple-700">{bowlingTeam.shortName} {winProbability.bowling}%</span>
-                  </div>
-                  <div className="h-2 w-full rounded-full bg-slate-100 overflow-hidden flex">
-                    <div className="bg-blue-600 h-full transition-all duration-500" style={{ width: `${winProbability.batting}%` }} />
-                    <div className="bg-purple-600 h-full transition-all duration-500" style={{ width: `${winProbability.bowling}%` }} />
-                  </div>
-                  <span className="text-[10px] text-slate-400 block text-center font-medium">Win Probability Metric</span>
-                </div>
-
-                {/* Projected Score */}
-                <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-xs">
-                  <span className="text-slate-500 font-medium">Projected Total</span>
-                  <span className="font-black text-slate-900 tabular-nums">~{projectedScore} runs</span>
-                </div>
-              </div>
             </div>
           </div>
-        )}
+
+          {/* ── BOTTOM STRIP: LAST 6 BALLS + RECENT COMMENTARY ── */}
+          <div className="lg:col-span-12 bg-white rounded-2xl border border-slate-200/90 shadow-sm p-3.5 flex flex-col lg:flex-row lg:items-center gap-4">
+            <div className="flex items-center gap-3 shrink-0">
+              <span className="text-[10px] font-black uppercase text-slate-400 tracking-wider">Last 6 Balls</span>
+              <div className="flex items-center gap-1.5">
+                {Array.from({ length: 6 }).map((_, i) => {
+                  const filledFrom = 6 - last6.length;
+                  const outcome = i >= filledFrom ? last6[i - filledFrom] : '';
+                  return (
+                    <button
+                      key={i}
+                      disabled={!outcome}
+                      onClick={() => {
+                        const md = historyDeliveryResults[5 - i];
+                        if (md) {
+                          setReplayDelivery(md);
+                          setReplayTrigger(n => n + 1);
+                        }
+                      }}
+                      title={outcome ? `Ball: ${outcome} — click to replay` : ''}
+                      className={cn(
+                        'h-7 w-7 rounded-full grid place-items-center text-[10px] font-black shrink-0 transition-transform',
+                        outcome ? 'hover:scale-110 cursor-pointer' : 'cursor-default',
+                        ballChipClass(outcome)
+                      )}
+                    >
+                      {outcome || ''}
+                    </button>
+                  );
+                })}
+              </div>
+              <span className="text-[10px] font-bold text-slate-400 tabular-nums">{formatOvers(inning?.balls || 0)} ov</span>
+            </div>
+
+            <div className="hidden lg:block w-px self-stretch bg-slate-100" />
+
+            <div className="flex-1 min-w-0 space-y-1">
+              {recentCommentaryLines.length === 0 ? (
+                <span className="text-[11px] text-slate-400 italic">Commentary will appear here...</span>
+              ) : (
+                recentCommentaryLines.map((line, i) => (
+                  <button
+                    key={`${line.ball}-${i}`}
+                    onClick={() => handleReplayBall(line)}
+                    className="w-full text-left flex items-start gap-2 group"
+                    title="Click to replay on the field map"
+                  >
+                    <span className={cn('mt-0.5 h-5 w-5 shrink-0 grid place-items-center rounded-full text-[9px] font-black', ballChipClass(line.outcome))}>
+                      {line.outcome}
+                    </span>
+                    <span className="text-[11px] text-slate-700 leading-snug truncate group-hover:text-blue-700 transition-colors">
+                      {line.text}
+                    </span>
+                  </button>
+                ))
+              )}
+            </div>
+
+            <button
+              onClick={() => setActiveTab('Commentary')}
+              className="shrink-0 text-xs font-black text-blue-600 hover:text-blue-700 flex items-center gap-1"
+            >
+              View Full Commentary <ChevronRight className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </div>
 
         {/* ─────────────────────────────────────────────────────────────────
             TAB 2: FULL SCORECARD (BOTH INNINGS)
         ───────────────────────────────────────────────────────────────── */}
-        {activeTab === 'Scorecard' && (
-          <div className="space-y-6">
+          <div className={cn('space-y-6', activeTab !== 'Scorecard' && 'hidden')}>
             {[0, 1].map((idx) => {
               const score = innings[idx];
               const batTeam = franchises.find((f) => f.id === score?.battingTeamId) || (idx === 0 ? battingTeam : bowlingTeam);
@@ -2213,13 +2180,11 @@ export default function LiveMatchCenter() {
               );
             })}
           </div>
-        )}
 
         {/* ─────────────────────────────────────────────────────────────────
             TAB 3: COMPREHENSIVE COMMENTARY (FULL BALL-BY-BALL)
         ───────────────────────────────────────────────────────────────── */}
-        {activeTab === 'Commentary' && (
-          <div className="bg-white rounded-2xl border border-slate-200/90 shadow-sm p-4 space-y-4">
+          <div className={cn('bg-white rounded-2xl border border-slate-200/90 shadow-sm p-4 space-y-4', activeTab !== 'Commentary' && 'hidden')}>
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
               <div>
                 <h3 className="text-sm font-black text-slate-900 uppercase">Ball-by-Ball Match Feed</h3>
@@ -2278,12 +2243,243 @@ export default function LiveMatchCenter() {
               ))}
             </div>
           </div>
-        )}
 
         {/* ─────────────────────────────────────────────────────────────────
-            TAB 4: POINTS TABLE (STANDINGS)
+            TAB 4: TACTICS — BATTING INTENT / BOWLING PLAN / FIELD SETUP
         ───────────────────────────────────────────────────────────────── */}
-        {activeTab === 'Points Table' && (
+        <div className={cn('space-y-4', activeTab !== 'Tactics' && 'hidden')}>
+          <div className="bg-white rounded-2xl border border-slate-200/90 shadow-sm p-4 flex items-center justify-between gap-3">
+            <div>
+              <h3 className="text-sm font-black text-slate-900 uppercase flex items-center gap-1.5">
+                <Target className="w-4 h-4 text-blue-600" /> Tactical Command Centre
+              </h3>
+              <p className="text-xs text-slate-500">Set your team’s approach for the next phase of the match.</p>
+            </div>
+            <span className="shrink-0 px-3 py-1 rounded-full text-[10px] font-black uppercase bg-slate-100 text-slate-600 border border-slate-200">
+              {isMyTeamBatting ? 'Batting Side' : isMyTeamBowling ? 'Bowling Side' : 'Opponent'}
+            </span>
+          </div>
+
+          {pending && (
+            <button
+              onClick={() => {
+                if (pending === 'openers') setManualDrawerOpen('OPENERS');
+                else if (pending === 'batter') setManualDrawerOpen('BATTER');
+                else if (pending === 'bowler') setManualDrawerOpen('BOWLER');
+              }}
+              className="w-full py-3 rounded-2xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-black uppercase shadow-sm flex items-center justify-center gap-2 animate-pulse"
+            >
+              <Sparkles className="w-4 h-4" />
+              <span>{pending === 'openers' ? 'Select Openers' : pending === 'batter' ? 'Select New Batter' : 'Select Bowler'}</span>
+            </button>
+          )}
+
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 items-start">
+            {/* Batting Intent */}
+            <div className="bg-white rounded-2xl border border-slate-200/90 shadow-sm p-3.5 space-y-3">
+              <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+                <span className="text-xs font-black text-slate-800 uppercase tracking-wide">Batting Intent</span>
+                <span className="text-[10px] font-black text-blue-600">{userBattingIntent.replace(/_/g, ' ')}</span>
+              </div>
+              <div className="grid grid-cols-2 gap-1.5">
+                {(['SURVIVAL', 'DEFENSIVE', 'SETTLING', 'ROTATE_STRIKE', 'NORMAL', 'CONTROLLED_ATTACK', 'ACCELERATE'] as const).map((intent) => (
+                  <button
+                    key={intent}
+                    onClick={() => setUserBattingIntent(intent)}
+                    className={cn(
+                      "py-1.5 px-2 rounded-lg text-[9px] font-bold uppercase transition-all border text-left truncate",
+                      userBattingIntent === intent
+                        ? "bg-blue-600 text-white border-blue-700 shadow-xs"
+                        : "bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100"
+                    )}
+                  >
+                    {intent === 'ROTATE_STRIKE' ? 'Rotate' : intent === 'CONTROLLED_ATTACK' ? 'Attack' : intent}
+                  </button>
+                ))}
+              </div>
+              <div className="text-[10px] text-slate-500 bg-slate-50 border border-slate-100 rounded-lg px-2.5 py-2">
+                <span className="font-black uppercase text-slate-400 block text-[9px]">Next Action</span>
+                {BATTING_INTENT_SHOT[userBattingIntent] || 'Balanced Stroke'}
+              </div>
+            </div>
+
+            {/* Bowling Plan */}
+            <div className="bg-white rounded-2xl border border-slate-200/90 shadow-sm p-3.5 space-y-3">
+              <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+                <span className="text-xs font-black text-slate-800 uppercase tracking-wide">Bowling Plan</span>
+                <span className="text-[10px] font-black text-purple-600">{(userBowlingPlan?.intent || 'WICKET_TAKING').replace(/_/g, ' ')}</span>
+              </div>
+              <div className="grid grid-cols-2 gap-1.5">
+                {(['WICKET_TAKING', 'CONTAINING', 'DEFENSIVE', 'ATTACKING', 'SHORT_BALL_TRAP'] as const).map((intent) => (
+                  <button
+                    key={intent}
+                    onClick={() => setUserBowlingPlan(prev => ({ ...(prev || DEFAULT_BOWLING_PLAN), intent }))}
+                    className={cn(
+                      "py-1.5 px-2 rounded-lg text-[9px] font-bold uppercase transition-all border text-left truncate",
+                      userBowlingPlan?.intent === intent
+                        ? "bg-purple-600 text-white border-purple-700 shadow-xs"
+                        : "bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100"
+                    )}
+                  >
+                    {intent.replace(/_/g, ' ')}
+                  </button>
+                ))}
+              </div>
+              <button
+                onClick={() => setManualDrawerOpen('BOWLER')}
+                className="w-full py-2 rounded-xl bg-purple-100 hover:bg-purple-200 text-purple-800 text-[10px] font-bold transition-colors flex items-center justify-center gap-1.5 border border-purple-200"
+              >
+                <UserCheck className="w-3.5 h-3.5" />
+                Select Next Bowler
+              </button>
+              <div className="text-[10px] text-slate-500 bg-slate-50 border border-slate-100 rounded-lg px-2.5 py-2">
+                <span className="font-black uppercase text-slate-400 block text-[9px]">Next Ball</span>
+                {BOWLING_INTENT_ACTION[userBowlingPlan?.intent || 'WICKET_TAKING'] || 'Attack the Stumps'}
+              </div>
+            </div>
+
+            {/* Field Setup */}
+            <div className="bg-white rounded-2xl border border-slate-200/90 shadow-sm p-3.5 space-y-3">
+              <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+                <span className="text-xs font-black text-slate-800 uppercase tracking-wide">Field Setup</span>
+                <span className="text-[10px] font-black text-cyan-600">
+                  {fieldPresetKey ? (BowlerFieldStrategyEngine.PRESET_OVERLAYS[fieldPresetKey]?.name.split('(')[0].trim() || 'Preset') : 'Default'}
+                </span>
+              </div>
+              <div className="grid grid-cols-1 gap-1.5">
+                {Object.entries(BowlerFieldStrategyEngine.PRESET_OVERLAYS).map(([pKey, pDef]) => (
+                  <button
+                    key={pKey}
+                    onClick={() => setFieldPresetKey(pKey)}
+                    title={pDef.intent}
+                    className={cn(
+                      "py-1.5 px-2 rounded-lg text-[9px] font-bold transition-all border text-left truncate",
+                      fieldPresetKey === pKey
+                        ? "bg-cyan-600 text-white border-cyan-700 shadow-xs"
+                        : "bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100"
+                    )}
+                  >
+                    {pDef.name}
+                  </button>
+                ))}
+                <button
+                  onClick={() => setFieldPresetKey(null)}
+                  className="py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-[10px] font-bold transition-colors border border-slate-200 flex items-center justify-center gap-1.5"
+                >
+                  <RefreshCw className="w-3 h-3" /> Auto Field
+                </button>
+              </div>
+              <p className="text-[9px] text-slate-400 leading-snug">Turn on “Edit Field” on the 2D map to drag fielders manually.</p>
+            </div>
+          </div>
+
+          {/* AI Captain Recommendation (full) */}
+          {aiCaptainRecommendation && (
+            <div className="p-3.5 rounded-2xl bg-gradient-to-br from-indigo-50 to-blue-50 border border-indigo-200 shadow-sm space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-black text-indigo-900 uppercase flex items-center gap-1.5">
+                  <Lightbulb className="w-3.5 h-3.5 text-indigo-600" />
+                  AI Captain Recommendation
+                </span>
+                <span className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase bg-indigo-200/60 text-indigo-800">
+                  {aiCaptainRecommendation.confidence}% Confidence
+                </span>
+              </div>
+              <p className="text-xs font-bold text-indigo-950">{aiCaptainRecommendation.observation}</p>
+              <p className="text-[10px] text-slate-600">{aiCaptainRecommendation.reasoning}</p>
+              <div className="flex items-center gap-2 pt-1">
+                <button
+                  onClick={() => {
+                    if (aiCaptainRecommendation.selectedBowlerId) {
+                      setBowlerId(aiCaptainRecommendation.selectedBowlerId);
+                      setPending(null);
+                    }
+                    if (aiCaptainRecommendation.bowlingPlan) {
+                      setUserBowlingPlan(aiCaptainRecommendation.bowlingPlan as DetailedBowlingPlan);
+                    }
+                    if (aiCaptainRecommendation.battingIntent) {
+                      setUserBattingIntent(aiCaptainRecommendation.battingIntent);
+                    }
+                    setAiCaptainRecommendation(null);
+                  }}
+                  className="flex-1 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold transition-colors"
+                >
+                  Apply
+                </button>
+                <button
+                  onClick={() => setAiCaptainRecommendation(null)}
+                  className="px-3 py-1.5 bg-white border border-slate-200 text-slate-600 rounded-lg text-xs font-bold hover:bg-slate-50 transition-colors"
+                >
+                  Dismiss
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+        {/* ─────────────────────────────────────────────────────────────────
+            TAB 5: STATS — MATCH ANALYTICS + LEAGUE STANDINGS
+        ───────────────────────────────────────────────────────────────── */}
+        <div className={cn('space-y-4', activeTab !== 'Stats' && 'hidden')}>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            {/* Win Probability */}
+            <div className="bg-white rounded-2xl border border-slate-200/90 shadow-sm p-4 space-y-2.5">
+              <span className="text-xs font-black text-slate-800 uppercase tracking-wide flex items-center gap-1.5">
+                <BarChart3 className="w-3.5 h-3.5 text-blue-600" />
+                Win Probability
+              </span>
+              <div className="space-y-1.5 text-xs">
+                <div className="flex items-center justify-between font-bold">
+                  <span className="text-blue-700">{battingTeam.shortName} {winProbability.batting}%</span>
+                  <span className="text-purple-700">{bowlingTeam.shortName} {winProbability.bowling}%</span>
+                </div>
+                <div className="h-2.5 w-full rounded-full bg-slate-100 overflow-hidden flex">
+                  <div className="bg-blue-600 h-full transition-all duration-500" style={{ width: `${winProbability.batting}%` }} />
+                  <div className="bg-purple-600 h-full transition-all duration-500" style={{ width: `${winProbability.bowling}%` }} />
+                </div>
+                <span className="text-[10px] text-slate-400 block text-center font-medium">Live win probability metric</span>
+              </div>
+            </div>
+
+            {/* Projected Total */}
+            <div className="bg-white rounded-2xl border border-slate-200/90 shadow-sm p-4 space-y-2.5">
+              <span className="text-xs font-black text-slate-800 uppercase tracking-wide flex items-center gap-1.5">
+                <TrendingUp className="w-3.5 h-3.5 text-blue-600" />
+                Projected Total
+              </span>
+              <div className="text-2xl font-black text-slate-950 tabular-nums">~{projectedScore}</div>
+              <span className="text-[10px] text-slate-400 font-medium">
+                Projected at current rate ({currentRunRate} rpo) for {formatOvers(maxBalls || 120)} overs
+              </span>
+            </div>
+
+            {/* Match Situation */}
+            <div className="bg-white rounded-2xl border border-slate-200/90 shadow-sm p-4 space-y-2.5">
+              <span className="text-xs font-black text-slate-800 uppercase tracking-wide flex items-center gap-1.5">
+                <Activity className="w-3.5 h-3.5 text-blue-600" />
+                Match Situation
+              </span>
+              <div className="grid grid-cols-2 gap-2 text-xs">
+                <div className="bg-slate-50 border border-slate-100 rounded-lg px-2.5 py-1.5">
+                  <span className="text-[9px] uppercase font-bold text-slate-400 block">CRR</span>
+                  <span className="font-black text-slate-900 tabular-nums">{currentRunRate}</span>
+                </div>
+                <div className="bg-slate-50 border border-slate-100 rounded-lg px-2.5 py-1.5">
+                  <span className="text-[9px] uppercase font-bold text-slate-400 block">{inningNo === 2 ? 'RRR' : 'Projected'}</span>
+                  <span className="font-black text-slate-900 tabular-nums">{inningNo === 2 ? requiredRunRate : `~${projectedScore}`}</span>
+                </div>
+                <div className="bg-slate-50 border border-slate-100 rounded-lg px-2.5 py-1.5">
+                  <span className="text-[9px] uppercase font-bold text-slate-400 block">Balls Left</span>
+                  <span className="font-black text-slate-900 tabular-nums">{ballsRemaining}</span>
+                </div>
+                <div className="bg-slate-50 border border-slate-100 rounded-lg px-2.5 py-1.5">
+                  <span className="text-[9px] uppercase font-bold text-slate-400 block">{inningNo === 2 ? 'Runs Needed' : 'Partnership'}</span>
+                  <span className="font-black text-slate-900 tabular-nums">{inningNo === 2 ? runsNeeded : `${inning?.partnershipRuns || 0} (${inning?.partnershipBalls || 0}b)`}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* League Standings */}
           <div className="bg-white rounded-2xl border border-slate-200/90 shadow-sm overflow-hidden">
             <div className="px-5 py-3.5 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
               <div>
@@ -2342,38 +2538,8 @@ export default function LiveMatchCenter() {
               </table>
             </div>
           </div>
-        )}
+        </div>
 
-        {/* ─────────────────────────────────────────────────────────────────
-            TAB 5: NEWS & POST-MATCH REPORTS
-        ───────────────────────────────────────────────────────────────── */}
-        {activeTab === 'News' && (
-          <div className="space-y-4">
-            <div className="bg-white rounded-2xl border border-slate-200/90 shadow-sm p-4">
-              <h3 className="text-sm font-black text-slate-900 uppercase">Match Intelligence & Sports Bureau</h3>
-              <p className="text-xs text-slate-500">Live reports, strategic insights and tournament dispatches</p>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {newsArticles.map((article) => (
-                <div key={article.id} className="bg-white rounded-2xl border border-slate-200/90 shadow-sm p-4 space-y-2.5 hover:shadow-md transition-shadow">
-                  <div className="flex items-center justify-between text-[10px] text-slate-400 font-bold">
-                    <span className="text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full border border-blue-100">{article.tag}</span>
-                    <span>{article.time} · {article.readTime}</span>
-                  </div>
-
-                  <h4 className="text-sm font-black text-slate-900 leading-snug">{article.title}</h4>
-                  <p className="text-xs text-slate-600 leading-relaxed">{article.snippet}</p>
-
-                  <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-[10px] text-slate-400">
-                    <span>Source: {article.source}</span>
-                    <button className="text-blue-600 font-bold hover:underline">Read Story →</button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
       </main>
 
       {/* ═══════════════════════════════════════════════════════════════════════
