@@ -8,6 +8,7 @@ import {
   CANONICAL_POSITIONS,
 } from '../strategy/BowlerFieldStrategyEngine';
 import { getFieldingPhase, validateField } from '../fielding/FieldingRestrictionEngine';
+import { recommendFieldPreset, type ScoringZoneName } from './AdaptiveCaptainEngine';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // AUTONOMOUS BOWLING AI — the bowling team's captain.
@@ -53,6 +54,8 @@ export interface BowlingAIInput {
   eligibleBowlerIds?: string[];
   previousFieldPresetKey?: string | null;
   trigger: BowlingChangeTrigger;
+  /** Recent boundary arcs punished by the striker (Section 12-A). */
+  recentBoundaryZones?: ScoringZoneName[];
   /** Injectable RNG (0..1) for deterministic tests. Omit for deterministic picks. */
   random?: () => number;
 }
@@ -131,6 +134,47 @@ export function chooseLegalFieldPresetKey(
     .sort((a, b) => presetOutsideCount(b) - presetOutsideCount(a));
 
   return ranked[0] ?? 'ATTACKING_SLIP_CORDON';
+}
+
+/**
+ * Boundary-prevention field pick (Section 12-A): among the presets that are
+ * legal for the current phase, choose the one that best protects the striker's
+ * scoring arcs. When `biasSweepers` is set (used right after a boundary cluster)
+ * the score is nudged toward formations that keep more fielders on the rope.
+ * Returns the fallback preset when no striker is known.
+ */
+export function chooseBatterAdaptivePresetKey(
+  input: BowlingAIInput,
+  fallback: string,
+  biasSweepers: boolean,
+): string {
+  const striker = input.striker;
+  if (!striker) return fallback;
+
+  const phase = getFieldingPhase(input.format, input.over);
+  const max = phase.restricted ? phase.maxOutsideCircle : Number.POSITIVE_INFINITY;
+  const legalKeys = Object.keys(BowlerFieldStrategyEngine.PRESET_OVERLAYS).filter(
+    (k) => presetOutsideCount(k) <= max,
+  );
+  if (legalKeys.length === 0) return fallback;
+
+  let bestKey = fallback;
+  let bestScore = Number.NEGATIVE_INFINITY;
+  for (const key of legalKeys) {
+    const rec = recommendFieldPreset({
+      format: input.format,
+      striker,
+      overs: Math.floor(input.balls / 6),
+      recentBoundaryZones: input.recentBoundaryZones,
+      legalPresets: [key],
+    });
+    const score = rec.score + (biasSweepers ? presetOutsideCount(key) * 0.2 : 0);
+    if (score > bestScore) {
+      bestScore = score;
+      bestKey = key;
+    }
+  }
+  return bestKey;
 }
 
 /** Eligible bowling candidates honouring quota, consecutive-over and role rules. */
@@ -265,7 +309,20 @@ export function decideBowlingChange(input: BowlingAIInput): BowlingAIDecision {
     : null;
 
   const preferredPreset = plan?.recommendedFieldPreset ?? null;
-  const presetKey = chooseLegalFieldPresetKey(preferredPreset, input.format, input.over);
+  let presetKey = chooseLegalFieldPresetKey(preferredPreset, input.format, input.over);
+
+  // Boundary-prevention refinement (Section 12-A): when the batter has just
+  // hurt us or a new batter is in, look at *their* scoring zones and move the
+  // field there instead of relying on the phase plan alone.
+  if (input.trigger === 'BOUNDARY_CLUSTER' || input.trigger === 'WICKET_FALL') {
+    const adaptiveKey = chooseBatterAdaptivePresetKey(
+      input,
+      presetKey,
+      input.trigger === 'BOUNDARY_CLUSTER',
+    );
+    presetKey = chooseLegalFieldPresetKey(adaptiveKey, input.format, input.over);
+  }
+
   const fieldConfiguration = buildFieldConfiguration(input, bowler, presetKey);
   const fieldValid = Boolean(fieldConfiguration);
   const fieldChanged = Boolean(presetKey && presetKey !== input.previousFieldPresetKey);

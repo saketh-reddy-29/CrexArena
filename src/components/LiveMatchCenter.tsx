@@ -1145,6 +1145,25 @@ export default function LiveMatchCenter() {
         bouncersThisOver: currentBowlerLine.bouncersThisOver || 0,
       });
 
+      // Resolve the authoritative field layout for this delivery so the
+      // adaptive model can measure how well the batter's scoring arcs are
+      // protected (boundary prevention) and supply a single coordinated model.
+      const activeFieldConfiguration = BowlerFieldStrategyEngine.generateFieldConfiguration({
+        format: (selectedFormat as ArenaFormat) || 'T20',
+        bowler: currentBowler,
+        striker,
+        nonStriker: nonStriker || null,
+        overs: Math.floor(current.balls / 6),
+        balls: current.balls,
+        wickets: current.wickets,
+        runs: current.runs,
+        target,
+        pitch,
+        weather,
+        manualPresetKey: fieldPresetKey || undefined,
+        fieldingSquad: bowlingSquad,
+      });
+
       const deliveryRes = DeliveryResultFactory.createDeliveryResult({
         striker,
         nonStriker,
@@ -1198,6 +1217,7 @@ export default function LiveMatchCenter() {
         battingTeamId: battingTeam.id,
         bowlingTeamId: bowlingTeam.id,
         drsReviewsRemaining: current.drsReviewsRemaining,
+        fieldConfiguration: activeFieldConfiguration,
       });
 
       setCurrentDeliveryResult(deliveryRes);

@@ -1,13 +1,15 @@
 import { Player } from '../../types/common';
 import { PitchType, WeatherCondition, PlayerMatchStats } from '../../types/match';
 import { ArenaFormat } from '../models/ArenaState';
-import { Point } from '../strategy/BowlerFieldStrategyEngine';
+import { Point, FieldConfiguration } from '../strategy/BowlerFieldStrategyEngine';
 import { MatchEngine } from '../../lib/matchEngine';
-import { 
+import {
   DeliveryResult, 
   DeliveryResultType, 
   BallTrajectoryPath 
 } from '../../types/delivery';
+import type { TacticalDeliveryModel } from '../ai/AdaptiveCaptainEngine';
+import { buildDeliveryModel } from '../ai/AdaptiveCaptainEngine';
 
 export interface DeliverySimulationInput {
   striker: Player;
@@ -30,6 +32,10 @@ export interface DeliverySimulationInput {
   battingIntent?: string;
   bowlingPlan?: any;
   batterInningsState?: any;
+  /** Authoritative field layout active for this delivery (for zone influence). */
+  fieldConfiguration?: FieldConfiguration | null;
+  /** Pre-resolved adaptive tactical model (field + reversible pressure). */
+  tacticalModel?: TacticalDeliveryModel;
 }
 
 export class DeliveryResultFactory {
@@ -104,6 +110,25 @@ export class DeliveryResultFactory {
     const ballInOver = (currentBalls % 6) + 1;
     const overProgress = currentBalls / 6;
 
+    // 0. Resolve the single coordinated tactical model for this delivery.
+    //    Callers may pass a pre-built model, or just the active field layout.
+    const tacticalModel = input.tacticalModel ?? (input.fieldConfiguration
+      ? buildDeliveryModel({
+          format,
+          field: input.fieldConfiguration,
+          fieldPresetKey: input.fieldConfiguration.name,
+          bowler,
+          striker,
+          overs: overProgress,
+          wickets: currentWickets,
+          requiredRate,
+          recentOutcomes,
+          line: input.bowlingPlan?.line,
+          length: input.bowlingPlan?.length,
+          variation: input.bowlingPlan?.variation,
+        })
+      : undefined);
+
     // 1. Simulate ball outcome ONCE through MatchEngine (Authoritative single roll)
     const rawOutcome = MatchEngine.simulateBall(
       striker,
@@ -121,7 +146,8 @@ export class DeliveryResultFactory {
       format,
       input.battingIntent,
       input.bowlingPlan,
-      input.batterInningsState
+      input.batterInningsState,
+      tacticalModel
     );
 
     let isWicket = rawOutcome.isWicket && currentWickets < 10;

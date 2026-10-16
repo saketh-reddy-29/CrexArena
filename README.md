@@ -44,6 +44,7 @@ CrexArena/
 │   │   ├── scheduling/
 │   │   │   └── FixtureScheduler.ts     # Realistic durations, overlap conflict detection, rest days & Test reservations
 │   │   ├── ai/
+│   │   │   ├── AdaptiveCaptainEngine.ts # Dynamic tactical adjustments, pressure-cooker & collapse arrest
 │   │   │   ├── BattingAIController.ts  # Opponent batting intent adaptation & chase intelligence
 │   │   │   ├── BowlingAIController.ts  # Opponent bowler rotation, plan crafting & death bowling
 │   │   │   ├── WorkloadRotationEngine.ts # Fatigue tracking, rest recovery, pitch adaptation & smart Playing XI rotation
@@ -75,7 +76,9 @@ CrexArena/
 │   │   ├── match.ts                # PitchType, WeatherCondition, Fixture, Standing, DRSReview
 │   │   └── common.ts               # Player, Franchise, SkillStats interfaces
 │   │
-│   └── tests/                      # Automated Vitest Suite (163 tests across 22 suites)
+│   └── tests/                      # Automated Vitest Suite (190 tests across 24 suites)
+│       ├── adaptiveCaptainEngine.test.ts # Pressure cooker, collapse containment & dynamic fields
+│       ├── adaptiveSimulationCalibration.test.ts # T20/ODI/Test statistical distributions & no-forced-wickets
 │       ├── battingAIController.test.ts   # Opponent batting intent adaptation & collapse recovery
 │       ├── bowlingAIController.test.ts   # Opponent bowler selection & tactical planning
 │       ├── matchControlPermissions.test.ts # Authority matrix & user/AI role restrictions

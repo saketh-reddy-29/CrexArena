@@ -17,6 +17,7 @@ import {
 import { calculateEffectiveRating } from './ratingEngine';
 import { ArenaFormat } from '../stores/useGameStore';
 import { getMatchFormatConfig } from '../engine/config/MatchFormatConfig';
+import type { TacticalDeliveryModel } from '../engine/ai/AdaptiveCaptainEngine';
 
 // ═══════════════════════════════════════════════════════════════════════
 //  IPL Match Engine — Real IPL Rules
@@ -245,6 +246,7 @@ export class MatchEngine {
     extraIntent?: string,
     extraPlan?: any,
     extraContext?: any,
+    tacticalModel?: TacticalDeliveryModel,
   ): BallOutcome {
     if (!batsman || !bowler) {
       return { runs: 0, isWicket: false, isExtra: false, batsmanId: batsman?.id || 'unknown', bowlerId: bowler?.id || 'unknown', commentary: "Match interruption: Missing player data." };
@@ -313,6 +315,14 @@ export class MatchEngine {
     const scoreboardPressure = wickets >= 7 ? 0.24 : wickets >= 5 ? 0.14 : wickets >= 3 && overs < 10 ? 0.07 : 0;
     const dotPressure = this.clamp(consecutiveDots * 0.055 + Math.max(0, bowlerDotRate - 0.42) * 0.25, 0, 0.32);
     const pressure = this.clamp(chasePressure + scoreboardPressure + dotPressure - batterMomentum * 0.01, 0, 0.7);
+
+    // Reversible, format-scaled pressure effects. Pressure raises the batter's
+    // risk appetite (more boundary attempts) and, only marginally, the chance of
+    // a mistake. It never forces a wicket, and decays the moment it is relieved
+    // (runs scored, dot streak broken, required rate eased).
+    const pressureAmp = arenaFormat === 'TEST' ? 0.5 : arenaFormat === 'ODI' ? 0.8 : 1.0;
+    const pressureBoundary = 1 + pressure * 0.18 * pressureAmp;
+    const pressureWicket = 1 + pressure * 0.06 * pressureAmp;
 
     // ── Attack intent & Batting Intent Resolution ──
     const effectiveIntent = (extraIntent as string) || (
@@ -407,6 +417,10 @@ export class MatchEngine {
     let rawWicketProb = baseWicketProb * mBat * mBowl * mMatchup * mPitch * mPlan * mIntent * mContext;
     if (isFreeHit) {
       rawWicketProb = 0.002; // Free Hit: only rare run out
+    } else {
+      // Field catch threat (bounded 0.90-1.12) and reversible pressure risk.
+      rawWicketProb *= tacticalModel?.wicketOpportunity ?? 1;
+      rawWicketProb *= pressureWicket;
     }
 
     const minWicket = isFreeHit ? 0.001 : formatConfig.minWicketProbability;
@@ -513,6 +527,15 @@ export class MatchEngine {
       six += 6;
       dot = Math.max(8, dot - 12);
     }
+
+    // ── Coordinated tactical model: field placement influence & battery risk ──
+    // A field that covers this batter's scoring arcs suppresses boundaries and
+    // chokes rotation; an open field invites them. Symmetric and bounded.
+    const tBoundary = (tacticalModel?.boundarySuppression ?? 1) * pressureBoundary;
+    const tRotation = tacticalModel?.rotationSuppression ?? 1;
+    four = Math.max(0.5, four * tBoundary);
+    six = Math.max(0.2, six * tBoundary);
+    one = Math.max(5, one * tRotation);
 
     const outcome = this.chooseWeighted<number>([
       [0, Math.max(10, dot)],

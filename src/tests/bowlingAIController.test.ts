@@ -6,6 +6,7 @@ import { validateField } from '../engine/fielding/FieldingRestrictionEngine';
 import {
   decideBowlingChange,
   chooseLegalFieldPresetKey,
+  chooseBatterAdaptivePresetKey,
   selectAIBowler,
   presetOutsideCount,
   getEligibleBowlers,
@@ -139,5 +140,38 @@ describe('BowlingAIController — autonomous bowling & fielding', () => {
     expect(decision.fieldPresetKey).not.toBe('BALANCED_RING');
     expect(decision.fieldChanged).toBe(true);
     expect(decision.notification).toMatch(/Field adjusted/i);
+  });
+
+  it('reacts to a boundary cluster by pulling sweepers back (Section 12-A)', () => {
+    const decision = decideBowlingChange(
+      baseInput(17, 'BOUNDARY_CLUSTER', {
+        currentBowler: squad.find((p) => p.id === 'pac1')!,
+        striker: makePlayer('finisher', 'Batsman', { batting: 90, aggression: 94, temperament: 58 }),
+      }),
+    );
+    expect(decision.fieldValid).toBe(true);
+    // The most aggressive *legal* formation keeps the most fielders on the rope.
+    expect(presetOutsideCount(decision.fieldPresetKey)).toBeGreaterThanOrEqual(3);
+  });
+
+  it('never returns an illegal field for a phase even when batter-aware', () => {
+    // Powerplay: at most 2 outside the circle, whatever the batter prefers.
+    const key = chooseBatterAdaptivePresetKey(
+      baseInput(2, 'BOUNDARY_CLUSTER', {
+        striker: makePlayer('finisher', 'Batsman', { batting: 90, aggression: 94 }),
+      }),
+      'ATTACKING_SLIP_CORDON',
+      true,
+    );
+    expect(presetOutsideCount(key)).toBeLessThanOrEqual(2);
+    expect(Object.keys(BowlerFieldStrategyEngine.PRESET_OVERLAYS)).toContain(key);
+  });
+
+  it('is deterministic and falls back to the phase field when the striker is unknown', () => {
+    const input = baseInput(12, 'BOUNDARY_CLUSTER', { striker: null });
+    const a = chooseBatterAdaptivePresetKey(input, 'BALANCED_RING', true);
+    const b = chooseBatterAdaptivePresetKey(input, 'BALANCED_RING', true);
+    expect(a).toBe(b);
+    expect(a).toBe('BALANCED_RING');
   });
 });

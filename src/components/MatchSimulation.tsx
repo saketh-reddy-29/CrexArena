@@ -14,6 +14,8 @@ import { ArrowLeft, Target, Layout, ListOrdered, Radio, History } from 'lucide-r
 import { cn } from '../lib/utils';
 import CricketActionVisualizer from './CricketActionVisualizer';
 import { ArenaFormat } from '../engine/models/ArenaState';
+import { BowlerFieldStrategyEngine } from '../engine/strategy/BowlerFieldStrategyEngine';
+import { buildDeliveryModel } from '../engine/ai/AdaptiveCaptainEngine';
 
 function formatOvers(overs: number, balls: number) {
   return `${overs}.${balls}`;
@@ -263,7 +265,37 @@ export default function MatchSimulation() {
     // Simulate ball using the updated stats
     const currentOverProgress = innings.overs + innings.balls / 6;
     const { selectedFormat } = useGameStore.getState();
-    const ball = MatchEngine.simulateBall(currentBatsman, currentBowler, currentOverProgress, innings.wickets, requiredRate, pitch, weather, strikerStats, bowlerStats, recentOutcomes, false, 0, selectedFormat || 'T20');
+    const matchFormat = (selectedFormat as ArenaFormat) || 'T20';
+
+    // Build the authoritative field layout + single coordinated tactical model
+    // so simulated overs obey the same adaptive AI as the live match centre.
+    const fieldConfiguration = BowlerFieldStrategyEngine.generateFieldConfiguration({
+      format: matchFormat,
+      bowler: currentBowler,
+      striker: currentBatsman,
+      nonStriker: players.find(p => p.id === nonStrikerId) || null,
+      overs: Math.floor(currentOverProgress),
+      balls: innings.overs * 6 + innings.balls,
+      wickets: innings.wickets,
+      runs: innings.runs,
+      target: currentInnings === 2 ? innings1!.runs + 1 : undefined,
+      pitch,
+      weather,
+      fieldingSquad: bowlingSquad,
+    });
+    const tacticalModel = buildDeliveryModel({
+      format: matchFormat,
+      field: fieldConfiguration,
+      fieldPresetKey: fieldConfiguration.name,
+      bowler: currentBowler,
+      striker: currentBatsman,
+      overs: currentOverProgress,
+      wickets: innings.wickets,
+      requiredRate,
+      recentOutcomes,
+    });
+
+    const ball = MatchEngine.simulateBall(currentBatsman, currentBowler, currentOverProgress, innings.wickets, requiredRate, pitch, weather, strikerStats, bowlerStats, recentOutcomes, false, 0, matchFormat, undefined, undefined, undefined, tacticalModel);
     const isLegalDelivery = ball.extraType !== 'Wide' && ball.extraType !== 'No Ball';
     const batterRuns = ball.isExtra ? 0 : ball.runs;
 

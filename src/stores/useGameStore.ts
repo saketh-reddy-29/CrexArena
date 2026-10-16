@@ -12,6 +12,8 @@ import { ArenaPlayerState, ArenaFormat } from '../engine/models/ArenaState';
 import { db } from '../engine/storage/Database';
 import { FixtureScheduler } from '../engine/scheduling/FixtureScheduler';
 import { WorkloadRotationEngine } from '../engine/ai/WorkloadRotationEngine';
+import { BowlerFieldStrategyEngine } from '../engine/strategy/BowlerFieldStrategyEngine';
+import { buildDeliveryModel } from '../engine/ai/AdaptiveCaptainEngine';
 
 // Pre-flight cleanup: if localStorage contains bloated old store payload, strip heavy keys immediately
 try {
@@ -802,10 +804,40 @@ export const useGameStore = create<GameStore>()(
             const bowlerStats = MatchEngine.getPlayerStats(p2.id, inn.bowlers);
 
             const currentOverProgress = inn.overs + inn.balls / 6;
+            const reqRate = target ? ((target - inn.runs) / (Math.max(1, (maxOvers * 6) - ballCount) / 6)) : 8;
+            const nonStrikerPlayer = state.players.find(p => p.id === batSquad[nonStrikerIdx]) || null;
+            const bowlingSquadPlayers = bowlSquad
+              .map(id => state.players.find(p => p.id === id))
+              .filter(Boolean) as Player[];
+            const fieldConfiguration = BowlerFieldStrategyEngine.generateFieldConfiguration({
+              format: fixture.format,
+              bowler: p2,
+              striker: p1,
+              nonStriker: nonStrikerPlayer,
+              overs: Math.floor(currentOverProgress),
+              balls: ballCount,
+              wickets: inn.wickets,
+              runs: inn.runs,
+              target: target || undefined,
+              pitch,
+              weather,
+              fieldingSquad: bowlingSquadPlayers,
+            });
+            const tacticalModel = buildDeliveryModel({
+              format: fixture.format,
+              field: fieldConfiguration,
+              fieldPresetKey: fieldConfiguration.name,
+              bowler: p2,
+              striker: p1,
+              overs: currentOverProgress,
+              wickets: inn.wickets,
+              requiredRate: reqRate,
+            });
             const ball = MatchEngine.simulateBall(
               p1, p2, currentOverProgress, inn.wickets, 
-              target ? ((target - inn.runs) / (Math.max(1, (maxOvers * 6) - ballCount) / 6)) : 8, 
-              pitch, weather, strikerStats, bowlerStats, [], false, 0, fixture.format
+              reqRate, 
+              pitch, weather, strikerStats, bowlerStats, [], false, 0, fixture.format,
+              undefined, undefined, undefined, tacticalModel
             );
             const isLegalDelivery = ball.extraType !== 'Wide' && ball.extraType !== 'No Ball';
             const batterRuns = ball.isExtra ? 0 : ball.runs;
