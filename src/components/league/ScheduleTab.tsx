@@ -1,7 +1,7 @@
 import React from 'react';
 import { Franchise, useGameStore, GameState } from '../../stores/useGameStore';
 import { MatchStatus, Fixture } from '../../types/match';
-import { Play, CheckCircle2, FastForward, Lock, Calendar, MapPin, Eye, Trophy } from 'lucide-react';
+import { Play, CheckCircle2, FastForward, Lock, Calendar, MapPin, Eye, Trophy, Radio } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { getIntlTeamLogoUrl } from '../../data/crexIntlTeams';
 
@@ -33,6 +33,7 @@ export default function ScheduleTab({ franchises }: ScheduleTabProps) {
     setCurrentMatch,
     setGameState,
     selectedFranchiseId,
+    startMatch,
     autoSimulateMatch,
     generatePlayoffFixtures,
     generateSeasonFixtures,
@@ -45,8 +46,13 @@ export default function ScheduleTab({ franchises }: ScheduleTabProps) {
   }, [fixtures.length, generateSeasonFixtures]);
 
   const handleStartMatch = (matchId: string) => {
-    setCurrentMatch(matchId);
+    if (!startMatch(matchId)) return;
     setGameState(GameState.PRE_MATCH);
+  };
+
+  const handleWatchMatch = (matchId: string) => {
+    if (!startMatch(matchId)) return;
+    setGameState(GameState.MATCH_SIMULATION);
   };
 
   const handleViewMatch = (matchId: string) => {
@@ -61,15 +67,23 @@ export default function ScheduleTab({ franchises }: ScheduleTabProps) {
   const totalLeague = fixtures.filter((f) => !f.isPlayoff).length;
   const isLeagueComplete =
     totalLeague > 0 &&
-    fixtures.filter((f) => !f.isPlayoff && f.status === MatchStatus.COMPLETED).length === totalLeague;
+    fixtures.filter(
+      (f) =>
+        !f.isPlayoff &&
+        (f.status === MatchStatus.COMPLETED || f.status === MatchStatus.ABANDONED),
+    ).length === totalLeague;
   const hasPlayoffs = fixtures.some((f) => f.isPlayoff);
 
-  const upcomingFixtures = fixtures.filter((f) => f.status === MatchStatus.UPCOMING);
+  const upcomingFixtures = fixtures.filter(
+    (f) => f.status === MatchStatus.UPCOMING || f.status === MatchStatus.LIVE,
+  );
   const currentDay =
     upcomingFixtures.length > 0 ? Math.min(...upcomingFixtures.map((f) => f.day)) : -1;
 
   const isMatchPlayable = (fixture: Fixture) => {
-    return fixture.status === MatchStatus.UPCOMING && fixture.day === currentDay;
+    const isActive =
+      fixture.status === MatchStatus.UPCOMING || fixture.status === MatchStatus.LIVE;
+    return isActive && fixture.day === currentDay;
   };
 
   const fixturesByDay = fixtures.reduce<Record<number, Fixture[]>>((acc, fixture) => {
@@ -104,7 +118,9 @@ export default function ScheduleTab({ franchises }: ScheduleTabProps) {
 
       {sortedDays.map((day) => {
         const dayFixtures = fixturesByDay[day];
-        const allCompleted = dayFixtures.every((f) => f.status === MatchStatus.COMPLETED);
+        const allCompleted = dayFixtures.every(
+          (f) => f.status === MatchStatus.COMPLETED || f.status === MatchStatus.ABANDONED,
+        );
         const isCurrentDay = day === currentDay;
         const isLockedDay = !allCompleted && !isCurrentDay;
 
@@ -148,7 +164,12 @@ export default function ScheduleTab({ franchises }: ScheduleTabProps) {
                 const isMyMatch =
                   fixture.team1Id === selectedFranchiseId ||
                   fixture.team2Id === selectedFranchiseId;
-                const isCompleted = fixture.status === MatchStatus.COMPLETED;
+                const isCompleted =
+                  fixture.status === MatchStatus.COMPLETED ||
+                  fixture.status === MatchStatus.ABANDONED;
+                const isLive =
+                  fixture.fixtureStatus === 'LIVE' || fixture.status === MatchStatus.LIVE;
+                const isNoResult = fixture.scorecard?.result === 'NO_RESULT';
 
                 const team1Logo = resolveLogo(team1.shortName, team1.logo);
                 const team2Logo = resolveLogo(team2.shortName, team2.logo);
@@ -183,7 +204,11 @@ export default function ScheduleTab({ franchises }: ScheduleTabProps) {
 
                       {isCompleted ? (
                         <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md flex items-center gap-1">
-                          <CheckCircle2 className="w-3 h-3" /> Done
+                          <CheckCircle2 className="w-3 h-3" /> {isNoResult ? 'No Result' : 'Done'}
+                        </span>
+                      ) : isLive ? (
+                        <span className="text-[10px] font-black text-rose-700 bg-rose-50 px-2 py-0.5 rounded-md flex items-center gap-1 animate-pulse">
+                          <Radio className="w-3 h-3" /> Live
                         </span>
                       ) : playable ? (
                         <span className="text-[10px] font-black text-blue-700 bg-blue-50 px-2 py-0.5 rounded-md flex items-center gap-1 animate-pulse">
@@ -262,10 +287,12 @@ export default function ScheduleTab({ franchises }: ScheduleTabProps) {
                     {/* Venue & Result Footer */}
                     <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-xs">
                       <div className="flex items-center gap-1 text-[10px] text-slate-400 truncate max-w-[200px]">
-                        {isCompleted && fixture.scorecard?.winnerId ? (
+                        {isCompleted ? (
                           <span className="font-bold text-emerald-700 truncate">
-                            {fixture.scorecard.margin ||
-                              `${franchises.find((f) => f.id === fixture.scorecard?.winnerId)?.shortName} won`}
+                            {isNoResult
+                              ? 'No Result'
+                              : fixture.scorecard?.margin ||
+                                `${franchises.find((f) => f.id === fixture.scorecard?.winnerId)?.shortName} won`}
                           </span>
                         ) : (
                           <>
@@ -285,7 +312,14 @@ export default function ScheduleTab({ franchises }: ScheduleTabProps) {
                             <Eye className="w-3.5 h-3.5" /> Scorecard
                           </button>
                         ) : playable ? (
-                          isMyMatch ? (
+                          isLive ? (
+                            <button
+                              onClick={() => handleWatchMatch(fixture.id)}
+                              className="px-4 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-[11px] font-black uppercase tracking-wider transition-all shadow-xs flex items-center gap-1.5 cursor-pointer active:scale-95"
+                            >
+                              <Radio className="w-3 h-3" /> Resume
+                            </button>
+                          ) : isMyMatch ? (
                             <button
                               onClick={() => handleStartMatch(fixture.id)}
                               className="px-4 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-[11px] font-black uppercase tracking-wider transition-all shadow-xs flex items-center gap-1.5 cursor-pointer active:scale-95"
@@ -293,12 +327,22 @@ export default function ScheduleTab({ franchises }: ScheduleTabProps) {
                               <Play className="w-3 h-3 fill-current" /> Play Match
                             </button>
                           ) : (
-                            <button
-                              onClick={() => handleAutoSimulate(fixture.id)}
-                              className="px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-[11px] font-bold transition-all flex items-center gap-1.5 cursor-pointer active:scale-95"
-                            >
-                              <FastForward className="w-3.5 h-3.5" /> Auto Sim
-                            </button>
+                            <div className="flex items-center gap-1.5">
+                              <button
+                                onClick={() => handleWatchMatch(fixture.id)}
+                                title="Watch this AI match play out ball by ball"
+                                className="px-3 py-1.5 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 text-[11px] font-bold transition-all flex items-center gap-1.5 cursor-pointer active:scale-95"
+                              >
+                                <Eye className="w-3.5 h-3.5" /> Watch
+                              </button>
+                              <button
+                                onClick={() => handleAutoSimulate(fixture.id)}
+                                title="Instantly simulate this AI match"
+                                className="px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-[11px] font-bold transition-all flex items-center gap-1.5 cursor-pointer active:scale-95"
+                              >
+                                <FastForward className="w-3.5 h-3.5" /> Skip
+                              </button>
+                            </div>
                           )
                         ) : (
                           <span className="text-[10px] text-slate-400 font-semibold">Scheduled</span>

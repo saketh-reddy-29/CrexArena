@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import { Fixture, Standing, MatchStatus, MatchScorecard, InningsData, TossDecision, MatchFormat, SeriesConfig } from '../types/match';
+import { Fixture, Standing, MatchStatus, MatchScorecard, InningsData, TossDecision, MatchFormat, SeriesConfig, FixtureStatus } from '../types/match';
 import { Player } from '../types/common';
 import { INITIAL_PLAYER_POOL } from '../data/players';
 import { INTL_PLAYER_POOL, INTL_TEAMS_DATA } from '../data/intlPlayers';
@@ -215,6 +215,18 @@ interface GameStore {
   updateMatchResult: (matchId: string, scorecard: MatchScorecard) => void;
   setCurrentMatch: (matchId: string | null) => void;
   setCurrentMatchToss: (toss: { winnerId: string; decision: TossDecision } | null) => void;
+  /**
+   * Transitions a scheduled fixture into the in-progress (LIVE) lifecycle
+   * state and focuses it as the current match. Refuses to (re)start a match
+   * that is already COMPLETED or ABANDONED, so finished games cannot be
+   * replayed. Returns false when the transition is rejected.
+   */
+  startMatch: (matchId: string) => boolean;
+  /**
+   * Marks a fixture as ABANDONED with a NO_RESULT outcome (a shared point for
+   * both sides in the standings) and locks it against replay/resimulation.
+   */
+  abandonMatch: (matchId: string) => void;
   autoSimulateMatch: (matchId: string) => void;
   generatePlayoffFixtures: () => void;
   setCaptain: (franchiseId: string, captainId: string) => void;
@@ -297,6 +309,60 @@ export const useGameStore = create<GameStore>()(
       }),
       setCurrentMatch: (matchId) => set({ currentMatchId: matchId }),
       setCurrentMatchToss: (toss) => set({ currentMatchToss: toss }),
+      startMatch: (matchId) => {
+        const state = get();
+        const fixture = state.fixtures.find(f => f.id === matchId);
+        if (!fixture) return false;
+        if (fixture.status === MatchStatus.COMPLETED || fixture.status === MatchStatus.ABANDONED) {
+          return false;
+        }
+        set({
+          currentMatchId: matchId,
+          fixtures: state.fixtures.map(f =>
+            f.id === matchId
+              ? { ...f, fixtureStatus: 'LIVE' as FixtureStatus, startTime: f.startTime ?? Date.now() }
+              : f
+          ),
+        });
+        return true;
+      },
+      abandonMatch: (matchId) => {
+        const state = get();
+        const fixture = state.fixtures.find(f => f.id === matchId);
+        if (!fixture) return;
+        if (fixture.status === MatchStatus.COMPLETED || fixture.status === MatchStatus.ABANDONED) return;
+
+        const emptyInnings = (battingTeamId: string, bowlingTeamId: string): InningsData => ({
+          battingTeamId,
+          bowlingTeamId,
+          runs: 0,
+          wickets: 0,
+          overs: 0,
+          balls: 0,
+          batsmen: {},
+          bowlers: {},
+          extras: { wides: 0, noBalls: 0, byes: 0, legByes: 0 },
+          fallOfWickets: [],
+          isFreeHitPending: false,
+          drsReviews: [],
+          drsReviewsRemaining: 2,
+          strategicTimeouts: [],
+          currentPhase: 'Middle' as any,
+        });
+
+        const noResult: MatchScorecard = {
+          team1Id: fixture.team1Id,
+          team2Id: fixture.team2Id,
+          innings: [
+            emptyInnings(fixture.team1Id, fixture.team2Id),
+            emptyInnings(fixture.team2Id, fixture.team1Id),
+          ],
+          result: 'NO_RESULT',
+          margin: 'No Result',
+        };
+
+        get().updateMatchResult(matchId, noResult);
+      },
       saveLiveMatchState: (matchState) => set({ liveMatchState: matchState }),
       setSelectedSquadIds: (ids) => set({ selectedSquadIds: ids }),
       setPlayingXIIds: (ids) => set({ playingXIIds: ids }),
@@ -441,8 +507,8 @@ export const useGameStore = create<GameStore>()(
         const top4 = rankedStandings.slice(0, 4).map(s => s.teamId);
 
         const playoffFixtures: Fixture[] = [
-          { id: 'q1', matchNumber: 71, day: 999, team1Id: top4[0], team2Id: top4[1], status: MatchStatus.UPCOMING, isPlayoff: true, playoffType: 'Qualifier 1' },
-          { id: 'e1', matchNumber: 72, day: 999, team1Id: top4[2], team2Id: top4[3], status: MatchStatus.UPCOMING, isPlayoff: true, playoffType: 'Eliminator' },
+          { id: 'q1', matchNumber: 71, day: 999, team1Id: top4[0], team2Id: top4[1], status: MatchStatus.UPCOMING, fixtureStatus: 'SCHEDULED', isPlayoff: true, playoffType: 'Qualifier 1' },
+          { id: 'e1', matchNumber: 72, day: 999, team1Id: top4[2], team2Id: top4[3], status: MatchStatus.UPCOMING, fixtureStatus: 'SCHEDULED', isPlayoff: true, playoffType: 'Eliminator' },
         ];
 
         return { fixtures: [...state.fixtures, ...playoffFixtures] };
@@ -534,12 +600,33 @@ export const useGameStore = create<GameStore>()(
 
       updateMatchResult: (matchId, scorecard) => set((state) => {
         const existingFixture = state.fixtures.find(f => f.id === matchId);
-        if (existingFixture && existingFixture.status === MatchStatus.COMPLETED && existingFixture.scorecard) {
+        // Validate the fixture exists — a result can never be applied to an
+        // unknown/phantom match (guards against forged match IDs).
+        if (!existingFixture) return state;
+        // Immutability: once a match is finalised its result is locked. A
+        // second (or duplicate) submission is a no-op — this is the
+        // idempotency guarantee that prevents double-counted statistics.
+        if (
+          (existingFixture.status === MatchStatus.COMPLETED || existingFixture.status === MatchStatus.ABANDONED) &&
+          existingFixture.scorecard
+        ) {
           return state;
         }
 
-        const updatedFixtures = state.fixtures.map(f => 
-          f.id === matchId ? { ...f, status: MatchStatus.COMPLETED, fixtureStatus: 'COMPLETED' as const, scorecard } : f
+        const isNoResult = scorecard.result === 'NO_RESULT';
+        const finalStatus = isNoResult ? MatchStatus.ABANDONED : MatchStatus.COMPLETED;
+        const finalFixtureStatus: FixtureStatus = isNoResult ? 'ABANDONED' : 'COMPLETED';
+
+        const updatedFixtures = state.fixtures.map(f =>
+          f.id === matchId
+            ? {
+                ...f,
+                status: finalStatus,
+                fixtureStatus: finalFixtureStatus,
+                scorecard,
+                endTime: f.endTime ?? Date.now(),
+              }
+            : f
         );
 
         const { team1Id, team2Id, winnerId } = scorecard;
@@ -567,7 +654,12 @@ export const useGameStore = create<GameStore>()(
             let drawnAdd = 0;
             let tiedAdd = 0;
 
-            if (isTest) {
+            if (isNoResult) {
+              // Abandoned / no-result: a single shared point for each side.
+              pointsGained = 1;
+              resultForm = 'T';
+              tiedAdd = 1;
+            } else if (isTest) {
               if (isWinner) {
                 pointsGained = 12;
                 resultForm = 'W';
@@ -757,7 +849,7 @@ export const useGameStore = create<GameStore>()(
           const q1Loser = q1Fixture.scorecard?.winnerId === q1Fixture.team1Id ? q1Fixture.team2Id : q1Fixture.team1Id;
           const e1Winner = e1Fixture.scorecard?.winnerId;
           if (q1Loser && e1Winner) {
-            extraFixtures.push({ id: 'q2', matchNumber: 73, day: 1000, team1Id: q1Loser, team2Id: e1Winner, status: MatchStatus.UPCOMING, isPlayoff: true, playoffType: 'Qualifier 2' });
+            extraFixtures.push({ id: 'q2', matchNumber: 73, day: 1000, team1Id: q1Loser, team2Id: e1Winner, status: MatchStatus.UPCOMING, fixtureStatus: 'SCHEDULED', isPlayoff: true, playoffType: 'Qualifier 2' });
           }
         }
 
@@ -765,7 +857,7 @@ export const useGameStore = create<GameStore>()(
           const q1Winner = q1Fixture.scorecard?.winnerId;
           const q2Winner = q2Fixture.scorecard?.winnerId;
           if (q1Winner && q2Winner) {
-            extraFixtures.push({ id: 'final', matchNumber: 74, day: 1001, team1Id: q1Winner, team2Id: q2Winner, status: MatchStatus.UPCOMING, isPlayoff: true, playoffType: 'Final' });
+            extraFixtures.push({ id: 'final', matchNumber: 74, day: 1001, team1Id: q1Winner, team2Id: q2Winner, status: MatchStatus.UPCOMING, fixtureStatus: 'SCHEDULED', isPlayoff: true, playoffType: 'Final' });
           }
         }
 
@@ -804,6 +896,10 @@ export const useGameStore = create<GameStore>()(
       autoSimulateMatch: (matchId) => set((state) => {
         const fixture = state.fixtures.find(f => f.id === matchId);
         if (!fixture) return state;
+        // Never re-simulate a finished match — its result is immutable.
+        if (fixture.status === MatchStatus.COMPLETED || fixture.status === MatchStatus.ABANDONED) {
+          return state;
+        }
 
         const team1Id = fixture.team1Id;
         const team2Id = fixture.team2Id;
@@ -1037,6 +1133,7 @@ export const useGameStore = create<GameStore>()(
           team1Id,
           team2Id,
           status: MatchStatus.UPCOMING,
+          fixtureStatus: 'SCHEDULED',
           format
         };
         set({

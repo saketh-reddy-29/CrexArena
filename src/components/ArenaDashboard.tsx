@@ -101,7 +101,7 @@ function RulesBar({ format }: { format: string }) {
 }
 
 export default function ArenaDashboard() {
-  const { setGameState, setActiveTab, selectedFormat, selectedFranchiseId, franchises, players, selectedSquadIds, fixtures, standings } = useGameStore();
+  const { setGameState, setActiveTab, selectedFormat, selectedFranchiseId, franchises, players, selectedSquadIds, fixtures, standings, startMatch } = useGameStore();
   const fmt = FORMAT_CONFIG[selectedFormat || 'T20'] || FORMAT_CONFIG.T20;
   const isIPL  = selectedFormat === 'IPL';
   const isTest = selectedFormat === 'TEST';
@@ -181,7 +181,7 @@ export default function ArenaDashboard() {
         {/* Next Match */}
         <div
           className={`rounded-3xl border p-6 mb-6 transition-all ${nextMatch ? `${fmt.accentBorder} bg-gradient-to-br ${fmt.accent} cursor-pointer hover:scale-[1.01] active:scale-[0.99]` : 'border-zinc-800 bg-zinc-900/60'}`}
-          onClick={() => { if (nextMatch) { useGameStore.setState({ currentMatchId: nextMatch.id }); useGameStore.getState().setGameState(GameState.PRE_MATCH); } }}
+          onClick={() => { if (nextMatch && startMatch(nextMatch.id)) { setGameState(GameState.PRE_MATCH); } }}
         >
           {nextMatch ? (
             <div className="flex items-center gap-4">
@@ -210,9 +210,8 @@ export default function ArenaDashboard() {
               <button 
                 onClick={(e) => {
                   e.stopPropagation();
-                  if (nextMatch) {
-                    useGameStore.setState({ currentMatchId: nextMatch.id });
-                    useGameStore.getState().setGameState(GameState.PRE_MATCH);
+                  if (nextMatch && startMatch(nextMatch.id)) {
+                    setGameState(GameState.PRE_MATCH);
                   }
                 }}
                 className={`shrink-0 px-5 py-3 rounded-xl font-black text-sm flex items-center gap-2 text-white ${playBtnClass} cursor-pointer active:scale-95 transition-all shadow-md`}

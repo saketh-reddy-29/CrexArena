@@ -76,7 +76,11 @@ CrexArena/
 │   │   ├── match.ts                # PitchType, WeatherCondition, Fixture, Standing, DRSReview
 │   │   └── common.ts               # Player, Franchise, SkillStats interfaces
 │   │
-│   └── tests/                      # Automated Vitest Suite (190 tests across 24 suites)
+│   └── tests/                      # Automated Vitest Suite (234 tests across 28 suites)
+│       ├── matchLifecycle.test.ts        # Idempotent match completion, standing updates & persistence
+│       ├── testMatchFlow.test.ts         # 4-innings Test match progression, follow-on & draws
+│       ├── seriesEngine.test.ts          # Bilateral series generation, trophy tracking & calendar
+│       ├── seriesStore.test.ts           # Series store state persistence & format isolation
 │       ├── adaptiveCaptainEngine.test.ts # Pressure cooker, collapse containment & dynamic fields
 │       ├── adaptiveSimulationCalibration.test.ts # T20/ODI/Test statistical distributions & no-forced-wickets
 │       ├── battingAIController.test.ts   # Opponent batting intent adaptation & collapse recovery
