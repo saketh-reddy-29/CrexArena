@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import { Fixture, Standing, MatchStatus, MatchScorecard, InningsData, TossDecision, MatchFormat } from '../types/match';
+import { Fixture, Standing, MatchStatus, MatchScorecard, InningsData, TossDecision, MatchFormat, SeriesConfig } from '../types/match';
 import { Player } from '../types/common';
 import { INITIAL_PLAYER_POOL } from '../data/players';
 import { INTL_PLAYER_POOL, INTL_TEAMS_DATA } from '../data/intlPlayers';
@@ -14,6 +14,12 @@ import { FixtureScheduler } from '../engine/scheduling/FixtureScheduler';
 import { WorkloadRotationEngine } from '../engine/ai/WorkloadRotationEngine';
 import { BowlerFieldStrategyEngine } from '../engine/strategy/BowlerFieldStrategyEngine';
 import { buildDeliveryModel } from '../engine/ai/AdaptiveCaptainEngine';
+import {
+  SeriesConfigInput,
+  computeSeriesStandings,
+  createSeriesConfig,
+  generateSeriesFixtures,
+} from '../engine/competition/seriesEngine';
 
 // Pre-flight cleanup: if localStorage contains bloated old store payload, strip heavy keys immediately
 try {
@@ -167,6 +173,8 @@ interface GameStore {
   selectedFormat: ArenaFormat | null;
   activeTab: ArenaTab;
   viewedPlayerId: string | null;
+  /** Active bilateral series, if the player configured one. */
+  seriesConfig: SeriesConfig | null;
 
   setArenaId: (arenaId: string) => void;
   setFixturePlayingXI: (fixtureId: string, team1XI: string[], team2XI: string[]) => void;
@@ -202,6 +210,8 @@ interface GameStore {
   initializeIntlFranchises: () => void;
   initializeIPLFranchises: () => void;
   generateSeasonFixtures: () => void;
+  createSeries: (input: SeriesConfigInput) => void;
+  clearSeries: () => void;
   updateMatchResult: (matchId: string, scorecard: MatchScorecard) => void;
   setCurrentMatch: (matchId: string | null) => void;
   setCurrentMatchToss: (toss: { winnerId: string; decision: TossDecision } | null) => void;
@@ -239,6 +249,7 @@ export const useGameStore = create<GameStore>()(
       liveMatchState: null,
       activeTab: 'OVERVIEW',
       viewedPlayerId: null,
+      seriesConfig: null,
 
       setArenaId: (arenaId) => set({ activeArenaId: arenaId }),
       setFormat: (format) => set({ selectedFormat: format }),
@@ -409,6 +420,7 @@ export const useGameStore = create<GameStore>()(
         playerFatigue: {},
         fixturePlayingXIs: {},
         liveMatchState: null,
+        seriesConfig: null,
         activeTab: 'OVERVIEW',
         viewedPlayerId: null,
       }),
@@ -490,6 +502,35 @@ export const useGameStore = create<GameStore>()(
 
         return { fixtures: fixtureList, standings: initialStandings };
       }),
+
+      createSeries: (input) => set((state) => {
+        const config = createSeriesConfig(input);
+        const fixtureList = generateSeriesFixtures(config);
+        const initialStandings: Standing[] = computeSeriesStandings(config, []).map((row) => ({
+          teamId: row.teamId,
+          played: row.played,
+          won: row.won,
+          lost: row.lost,
+          drawn: row.drawn,
+          tied: row.tied,
+          points: row.points,
+          pct: row.pct,
+          nrr: row.nrr,
+          runsScored: row.runsScored,
+          oversFaced: row.oversFaced,
+          runsConceded: row.runsConceded,
+          oversBowled: row.oversBowled,
+          form: row.form,
+        }));
+        return {
+          seriesConfig: config,
+          fixtures: fixtureList,
+          standings: initialStandings,
+          selectedFormat: config.format as ArenaFormat,
+        };
+      }),
+
+      clearSeries: () => set({ seriesConfig: null, fixtures: [], standings: [] }),
 
       updateMatchResult: (matchId, scorecard) => set((state) => {
         const existingFixture = state.fixtures.find(f => f.id === matchId);
@@ -728,9 +769,32 @@ export const useGameStore = create<GameStore>()(
           }
         }
 
+        // Bilateral series: the points table is derived from the series fixtures
+        // (which supports 4-innings Test scorecards that the generic path above
+        // does not aggregate).
+        let finalStandings = updatedStandings;
+        if (state.seriesConfig && existingFixture?.tournamentId === state.seriesConfig.id) {
+          finalStandings = computeSeriesStandings(state.seriesConfig, updatedFixtures).map((row) => ({
+            teamId: row.teamId,
+            played: row.played,
+            won: row.won,
+            lost: row.lost,
+            drawn: row.drawn,
+            tied: row.tied,
+            points: row.points,
+            pct: row.pct,
+            nrr: row.nrr,
+            runsScored: row.runsScored,
+            oversFaced: row.oversFaced,
+            runsConceded: row.runsConceded,
+            oversBowled: row.oversBowled,
+            form: row.form,
+          }));
+        }
+
         return { 
           fixtures: [...updatedFixtures, ...extraFixtures], 
-          standings: updatedStandings, 
+          standings: finalStandings, 
           playerSeasonStats: newPlayerStats,
           arenaPlayerStates: updatedRecentPlayerStates,
           playerFatigue: updatedFatigue,
@@ -1000,6 +1064,7 @@ export const useGameStore = create<GameStore>()(
         fixturePlayingXIs: state.fixturePlayingXIs,
         franchises: state.franchises,
         activeTab: state.activeTab,
+        seriesConfig: state.seriesConfig,
       }),
       storage: {
         getItem: (name) => {

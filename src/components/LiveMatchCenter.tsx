@@ -34,7 +34,7 @@ import { GameState, useGameStore } from '../stores/useGameStore';
 import type { Player } from '../types/common';
 import { MatchEngine } from '../lib/matchEngine';
 import { getPlayerImage, handlePlayerImageError } from '../lib/playerImages';
-import { MatchStatus, PitchType, WeatherCondition, type InningsData, type PlayerMatchStats, DRSResult } from '../types/match';
+import { MatchStatus, PitchType, WeatherCondition, type InningsData, type PlayerMatchStats, type MatchResultType, DRSResult } from '../types/match';
 import { getIntlTeamLogoUrl } from '../data/crexIntlTeams';
 import CricketActionVisualizer, { AnimationSpeed } from './CricketActionVisualizer';
 import PlayerSelectionDrawer from './PlayerSelectionDrawer';
@@ -55,6 +55,17 @@ import {
 } from '../engine/control/MatchControlPermissions';
 import { decideBowlingChange } from '../engine/ai/BowlingAIController';
 import { selectAINextBatter, selectAIOpeningBatters } from '../engine/ai/BattingAIController';
+import {
+  DEFAULT_TEST_RULES,
+  canDeclareNow,
+  determineTestResult,
+  evaluateFollowOn,
+  getFourthInningsTarget,
+  getTestDaySession,
+  isDayLimitReached,
+  teamAggregate,
+  type TestInningsSummary,
+} from '../engine/formats/test/testMatchFlow';
 import { cn } from '../lib/utils';
 
 const IPL_TEAM_LOGOS: Record<string, string> = {
@@ -217,6 +228,8 @@ interface InningsState {
   extras: ExtrasLine;
   commentary: CommentaryLine[];
   isComplete: boolean;
+  declared?: boolean;
+  isFollowOn?: boolean;
   partnershipBalls: number;
   partnershipRuns: number;
   recentBalls: string[];
@@ -246,6 +259,17 @@ const info = [
 
 function formatOvers(balls: number) {
   return `${Math.floor(balls / 6)}.${balls % 6}`;
+}
+
+function ordinal(n: number) {
+  const rem100 = n % 100;
+  if (rem100 >= 11 && rem100 <= 13) return `${n}th`;
+  switch (n % 10) {
+    case 1: return `${n}st`;
+    case 2: return `${n}nd`;
+    case 3: return `${n}rd`;
+    default: return `${n}th`;
+  }
 }
 
 function strikeRate(runs: number, balls: number) {
@@ -387,7 +411,7 @@ export default function LiveMatchCenter() {
   
   const isResuming = liveMatchState?.currentMatchId === currentMatchId;
   
-  const [inningNo, setInningNo] = useState<1 | 2>(isResuming ? liveMatchState.inningNo : 1);
+  const [inningNo, setInningNo] = useState<number>(isResuming ? liveMatchState.inningNo : 1);
   const [innings, setInnings] = useState<InningsState[]>(isResuming ? liveMatchState.innings : []);
   const [strikerId, setStrikerId] = useState<string | null>(isResuming ? liveMatchState.strikerId : null);
   const [nonStrikerId, setNonStrikerId] = useState<string | null>(isResuming ? liveMatchState.nonStrikerId : null);
@@ -402,6 +426,7 @@ export default function LiveMatchCenter() {
   const [manualBallRequests, setManualBallRequests] = useState(0);
   const [queueBowlerAfterBatter, setQueueBowlerAfterBatter] = useState(false);
   const [resultSubmitted, setResultSubmitted] = useState(false);
+  const [declarePending, setDeclarePending] = useState(false);
   const [showImpactModal, setShowImpactModal] = useState(false);
   const [impactOutgoingId, setImpactOutgoingId] = useState<string | null>(null);
   const [impactIncomingId, setImpactIncomingId] = useState<string | null>(null);
@@ -494,6 +519,8 @@ export default function LiveMatchCenter() {
   const secondBattingTeamId = firstBattingTeamId === team1.id ? team2.id : team1.id;
   const myTeamId = selectedFranchiseId || '';
   const maxBalls = selectedFormat === 'ODI' ? 300 : selectedFormat === 'TEST' ? 9999 : 120; // balls per innings
+  const isTest = selectedFormat === 'TEST';
+  const testRules = DEFAULT_TEST_RULES;
 
   // Use locked Playing XI (11 players). Falls back to franchise.squad for AI/IPL teams.
   const selectedXiPlayers = useMemo(
@@ -532,11 +559,75 @@ export default function LiveMatchCenter() {
   const isMyTeamBatting = battingTeam.id === myTeamId;
   const isMyTeamBowling = bowlingTeam.id === myTeamId;
 
-  // ─── Central control authority ───────────────────────────────────────────
-  // The user controls ONLY their own team's batting decisions. All bowling,
-  // bowling-plan and fielding decisions, plus the opponent's batting, are
-  // owned by the AI. Every user command is gated through this permission set
-  // so the rule is enforced in the application logic, not just the UI.
+  // ─── Test-match meta-state (pure engine) ─────────────────────────────────
+  // Everything the live loop needs above a single innings: the batting order
+  // across four innings, the follow-on, the 4th-innings target, the day clock
+  // and the final result. Kept in sync with the tested `testMatchFlow` engine.
+  const testSummaries: TestInningsSummary[] = useMemo(
+    () =>
+      innings.map((inn) => ({
+        battingTeamId: inn.battingTeamId,
+        bowlingTeamId: inn.bowlingTeamId,
+        runs: inn.runs,
+        wickets: inn.wickets,
+        balls: inn.balls,
+        declared: inn.declared,
+        isFollowOn: inn.isFollowOn,
+        isComplete: inn.isComplete,
+      })),
+    [innings],
+  );
+
+  const matchTarget = useMemo(() => {
+    if (isTest) {
+      if (inningNo !== 4) return 0;
+      const summaries = testSummaries.slice(0, 4);
+      const aggregateToBeat = getFourthInningsTarget(summaries);
+      if (aggregateToBeat == null) return 0;
+      const battingTeamId = innings[3]?.battingTeamId || '';
+      const ownPrior = teamAggregate(summaries.slice(0, 3), battingTeamId);
+      return Math.max(1, aggregateToBeat + 1 - ownPrior);
+    }
+    return inningNo === 2 ? (innings[0]?.runs || 0) + 1 : 0;
+  }, [isTest, inningNo, innings, testSummaries]);
+
+  const totalTestBalls = useMemo(() => innings.reduce((sum, inn) => sum + inn.balls, 0), [innings]);
+  const testDaySession = useMemo(() => getTestDaySession(totalTestBalls, testRules), [totalTestBalls, testRules]);
+  const testDayLimitReached = isTest && isDayLimitReached(totalTestBalls, testRules);
+  const testResultDecision = useMemo(
+    () => (isTest ? determineTestResult(testSummaries, team1.id, team2.id) : null),
+    [isTest, testSummaries, team1.id, team2.id],
+  );
+  const isMatchOver = isTest
+    ? Boolean(testResultDecision && testResultDecision.result !== 'IN_PROGRESS') || testDayLimitReached
+    : Boolean(inning?.isComplete && inningNo === 2);
+
+  const canDeclare = isTest
+    && !isMatchOver
+    && isMyTeamBatting
+    && Boolean(inning)
+    && canDeclareNow(testSummaries[inningNo - 1], testSummaries, testRules);
+
+  const testLead = useMemo(
+    () => (isTest
+      ? teamAggregate(testSummaries, battingTeam.id) - teamAggregate(testSummaries, bowlingTeam.id)
+      : 0),
+    [isTest, testSummaries, battingTeam.id, bowlingTeam.id],
+  );
+
+  const handleDeclare = useCallback(() => {
+    if (!canDeclare) return;
+    setInnings((prev) => {
+      const next = [...prev];
+      const current = next[inningNo - 1];
+      if (!current || current.isComplete) return prev;
+      next[inningNo - 1] = { ...current, isComplete: true, declared: true };
+      return next;
+    });
+    setPendingBatterEnd('striker');
+    setDeclarePending(true);
+  }, [canDeclare, inningNo]);
+
   const controlPermissions = useMemo(
     () =>
       computeControlPermissions({
@@ -547,12 +638,12 @@ export default function LiveMatchCenter() {
           innings.length === 0
             ? 'PRE_INNINGS'
             : inning?.isComplete
-              ? inningNo === 2
+              ? isMatchOver
                 ? 'MATCH_COMPLETE'
                 : 'INNINGS_BREAK'
               : 'IN_INNINGS',
       }),
-    [myTeamId, inning?.battingTeamId, inning?.bowlingTeamId, inning?.isComplete, innings.length, inningNo, battingTeam.id, bowlingTeam.id],
+    [myTeamId, inning?.battingTeamId, inning?.bowlingTeamId, inning?.isComplete, innings.length, isMatchOver, battingTeam.id, bowlingTeam.id],
   );
   const userCanSelectOpeners = canPerformAction(controlPermissions, 'SELECT_OPENING_BATTERS');
   const userCanSelectIncomingBatter = canPerformAction(controlPermissions, 'SELECT_INCOMING_BATTER');
@@ -658,7 +749,18 @@ export default function LiveMatchCenter() {
     first.commentary = [
       { ball: 'TOSS', outcome: 'T', text: currentMatchToss ? `${tossWinner?.name || battingTeam.name} won the toss and elected to ${currentMatchToss.decision.toLowerCase()} first.` : `${battingTeam.name} will bat first.`, badge: `${(franchises.find((f) => f.id === firstBattingTeamId) || team1).shortName} BAT`, tone: 'info' },
     ];
-    setInnings([first, second]);
+    // Tests are pre-seeded with four innings (the 3rd/4th are filled in later,
+    // possibly reordered by a follow-on); limited-overs matches keep two.
+    setInnings(
+      isTest
+        ? [
+            first,
+            second,
+            emptyInnings(firstBattingTeamId, secondBattingTeamId),
+            emptyInnings(secondBattingTeamId, firstBattingTeamId),
+          ]
+        : [first, second],
+    );
     setInningNo(1);
     setStrikerId(null);
     setNonStrikerId(null);
@@ -718,7 +820,7 @@ export default function LiveMatchCenter() {
         wickets: inning.wickets,
         runs: inning.runs,
         balls: inning.balls,
-        target: inningNo === 2 ? (innings[0]?.runs || 0) + 1 : undefined,
+        target: matchTarget > 0 ? matchTarget : undefined,
         recentBalls: inning.recentBalls,
       });
       if (selection.player) {
@@ -741,7 +843,7 @@ export default function LiveMatchCenter() {
         balls: inning.balls,
         wickets: inning.wickets,
         runs: inning.runs,
-        target: inningNo === 2 ? (innings[0]?.runs || 0) + 1 : undefined,
+        target: matchTarget > 0 ? matchTarget : undefined,
         recentBalls: inning.recentBalls,
         fieldingSquad: bowlingSquad,
         bowlerStats: inning.bowlers,
@@ -924,8 +1026,8 @@ export default function LiveMatchCenter() {
         upd.partnershipRuns = (upd.partnershipRuns || 0) + ballRuns;
       }
 
-      if (overEnded) {
-        const timeout = MatchEngine.shouldTriggerStrategicTimeout(overIndex + 1, inningNo, upd.strategicTimeouts);
+      if (overEnded && !isTest) {
+        const timeout = MatchEngine.shouldTriggerStrategicTimeout(overIndex + 1, inningNo as 1 | 2, upd.strategicTimeouts);
         if (timeout) {
           upd.strategicTimeouts = [...upd.strategicTimeouts, timeout];
           upd.commentary = [{
@@ -940,8 +1042,7 @@ export default function LiveMatchCenter() {
         }
       }
 
-      const targetScore = inningNo === 2 ? (next[0]?.runs || 0) + 1 : 0;
-      const inningsComplete = nextBall >= maxBalls || wicketNumber >= 10 || (inningNo === 2 && targetScore > 0 && nextRuns >= targetScore);
+      const inningsComplete = nextBall >= maxBalls || wicketNumber >= 10 || (matchTarget > 0 && nextRuns >= matchTarget);
       if (inningsComplete) {
         upd.isComplete = true;
       }
@@ -1006,6 +1107,41 @@ export default function LiveMatchCenter() {
     }
   }, [currentDeliveryResult, inningNo, battingTeam.shortName, maxBalls, striker, currentMatchId, bowlingTeam.name, inning, bowlingSquad, lastOverBowlerId, currentBowler, pitch, weather, selectedFormat, fieldPresetKey, nonStriker]);
 
+  // Advances a Test match past a completed innings: 1 → 2 → 3 → 4, applying
+  // the follow-on when the trailing side was bowled out far enough behind, and
+  // stopping once the match is decided (innings defeat) or all four are done.
+  const advanceTestInnings = useCallback((completedInningsNo: number) => {
+    setQueueBowlerAfterBatter(false);
+    if (completedInningsNo >= 4) {
+      setPending(null);
+      return;
+    }
+    const decision = determineTestResult(testSummaries, team1.id, team2.id);
+    if (decision.result !== 'IN_PROGRESS') {
+      setPending(null);
+      return;
+    }
+    if (completedInningsNo === 2) {
+      const followOn = evaluateFollowOn(testSummaries, testRules);
+      if (followOn?.available) {
+        setInnings((prev) => {
+          const next = [...prev];
+          next[2] = { ...next[2], battingTeamId: prev[1].battingTeamId, bowlingTeamId: prev[0].battingTeamId, isFollowOn: true };
+          next[3] = { ...next[3], battingTeamId: prev[0].battingTeamId, bowlingTeamId: prev[1].battingTeamId };
+          return next;
+        });
+      }
+    }
+    setInningNo(completedInningsNo + 1);
+    setStrikerId(null);
+    setNonStrikerId(null);
+    setBowlerId(null);
+    setLastOverBowlerId(null);
+    setBattingCursor(2);
+    setPendingBatterEnd('striker');
+    setPending('openers');
+  }, [testSummaries, team1.id, team2.id, testRules]);
+
   const handlePlaybackComplete = useCallback(() => {
     if (!currentDeliveryResult) return;
     if (completedDeliveryIdRef.current === currentDeliveryResult.id) {
@@ -1026,14 +1162,17 @@ export default function LiveMatchCenter() {
     const nextBall = current.balls;
     const nextRuns = current.runs;
     const wicketNumber = current.wickets;
-    const targetScore = inningNo === 2 ? (innings[0]?.runs || 0) + 1 : 0;
 
     const overEnded = !wicket && isLegalDelivery && nextBall % 6 === 0;
     const wicketAtOverEnd = wicket && isLegalDelivery && nextBall % 6 === 0;
-    const inningsComplete = nextBall >= maxBalls || wicketNumber >= 10 || (inningNo === 2 && targetScore > 0 && nextRuns >= targetScore);
+    const inningsComplete = nextBall >= maxBalls || wicketNumber >= 10 || (matchTarget > 0 && nextRuns >= matchTarget);
 
     if (inningsComplete) {
-      if (inningNo === 1) {
+      if (isTest) {
+        // Advance (or end) the Test match now that the animation has finished,
+        // keeping the transition aligned with the ball's playback.
+        advanceTestInnings(inningNo);
+      } else if (inningNo === 1) {
         setInningNo(2);
         setStrikerId(null);
         setNonStrikerId(null);
@@ -1087,7 +1226,16 @@ export default function LiveMatchCenter() {
         setDeliveryLifecycle('READY');
       }, 40);
     }, 60);
-  }, [currentDeliveryResult, inning, innings, inningNo, maxBalls, currentBowler, striker, nonStriker, autoPlay]);
+  }, [currentDeliveryResult, inning, innings, inningNo, maxBalls, matchTarget, isTest, advanceTestInnings, currentBowler, striker, nonStriker, autoPlay]);
+
+  // A declaration closes the innings without a delivery; advance once the gate
+  // is clear so the follow-on/next-innings logic sees the declared state.
+  useEffect(() => {
+    if (!declarePending) return;
+    if (pending) return;
+    advanceTestInnings(inningNo);
+    setDeclarePending(false);
+  }, [declarePending, pending, inningNo, advanceTestInnings]);
 
   useEffect(() => {
     if (!inning || inning.isComplete || pending || !striker || !nonStriker || !currentBowler) return;
@@ -1099,7 +1247,7 @@ export default function LiveMatchCenter() {
       const current = inning;
       if (current.isComplete || isBallAnimating || isFieldChanging) return;
 
-      const target = inningNo === 2 ? (innings[0]?.runs || 0) + 1 : 0;
+      const target = matchTarget;
       const ballsRemaining = Math.max(1, maxBalls - current.balls);
       const requiredRate = target ? ((target - current.runs) / (ballsRemaining / 6)) : 0;
       const strikerLine = current.batters[striker.id] || { balls: 0, dots: 0, fours: 0, out: false, runs: 0, sixes: 0, status: 'not out' };
@@ -1266,9 +1414,36 @@ export default function LiveMatchCenter() {
   ]);
 
   useEffect(() => {
+    if (!currentMatchId || resultSubmitted) return;
+
+    // Test: the match ends on a result (win/tie) or on the day limit (draw).
+    if (isTest) {
+      if (!isMatchOver) return;
+      const decided = Boolean(testResultDecision && testResultDecision.result !== 'IN_PROGRESS');
+      const resultType: MatchResultType = decided ? testResultDecision!.result as MatchResultType : 'DRAW';
+      const played = innings.filter((inn) => inn.isComplete || inn.balls > 0);
+      updateMatchResult(currentMatchId, {
+        team1Id: team1.id,
+        team2Id: team2.id,
+        innings: played.map((inn, idx) => ({
+          ...inningsToStoreData(inn),
+          inningsNumber: idx + 1,
+          declared: inn.declared,
+          isFollowOn: inn.isFollowOn,
+        })),
+        winnerId: decided
+          ? (testResultDecision!.result === 'TIE' ? 'TIE' : testResultDecision!.winnerId)
+          : 'DRAW',
+        margin: decided ? testResultDecision!.margin : 'Match drawn',
+        result: resultType,
+      });
+      setResultSubmitted(true);
+      return;
+    }
+
     const first = innings[0];
     const second = innings[1];
-    if (!currentMatchId || resultSubmitted || !first?.isComplete || !second?.isComplete) return;
+    if (!first?.isComplete || !second?.isComplete) return;
 
     const winnerId = second.runs > first.runs ? second.battingTeamId : first.battingTeamId;
     const margin = second.runs > first.runs
@@ -1285,7 +1460,7 @@ export default function LiveMatchCenter() {
       margin,
     });
     setResultSubmitted(true);
-  }, [innings, currentMatchId, resultSubmitted, updateMatchResult]);
+  }, [innings, currentMatchId, resultSubmitted, updateMatchResult, isTest, isMatchOver, testResultDecision, team1.id, team2.id]);
 
   const currentRunRate = inning && inning.balls ? (inning.runs / (inning.balls / 6)).toFixed(2) : '0.00';
   const currentOverIdx = inning?.balls ? (inning.balls % 6 === 0 ? Math.floor(inning.balls / 6) - 1 : Math.floor(inning.balls / 6)) : 0;
@@ -1326,7 +1501,13 @@ export default function LiveMatchCenter() {
   const secondWorm = wormPoints(innings[1]);
   const maxWormRuns = Math.max(200, ...firstWorm.map((point) => point.runs), ...secondWorm.map((point) => point.runs));
   const projectedScore = inning?.balls ? Math.round((inning.runs / inning.balls) * (maxBalls || 120)) : 0;
-  const matchStatus = inning?.isComplete && inningNo === 2 ? 'Result official' : inningNo === 1 ? 'First innings live' : 'Chase live';
+  const matchStatus = isMatchOver
+    ? 'Result official'
+    : isTest
+      ? `${ordinal(inningNo)} innings live`
+      : inningNo === 1
+        ? 'First innings live'
+        : 'Chase live';
   const matchInfo = [
     ['Toss result', currentMatchToss ? `${tossWinner?.shortName} won, ${currentMatchToss.decision.toLowerCase()} first` : `${team1.shortName} batting first`],
     ['Pitch', pitch],
@@ -1378,27 +1559,36 @@ export default function LiveMatchCenter() {
       .filter((d) => d.over === currentOverIdx && d.isWicket).length;
   }, [inning?.deliveries, currentOverIdx]);
 
-  const targetScore = inningNo === 2 ? (innings[0]?.runs || 0) + 1 : 0;
+  const targetScore = matchTarget;
   const runsNeeded = targetScore ? Math.max(0, targetScore - (inning?.runs || 0)) : 0;
   const ballsRemaining = Math.max(0, maxBalls - (inning?.balls || 0));
   const requiredRunRate = ballsRemaining > 0 && runsNeeded > 0 ? ((runsNeeded / ballsRemaining) * 6).toFixed(2) : '0.00';
 
   const winProbability = useMemo(() => {
-    if (inningNo === 1) {
+    if (inningNo === 1 || (isTest && inningNo < 4)) {
+      // Pre-result innings: a lead-weighted, format-par balance. For Tests this
+      // stands in for the state of a multi-innings match before the chase.
       const par = selectedFormat === 'ODI' ? 275 : selectedFormat === 'TEST' ? 320 : 168;
       const proj = inning?.balls ? Math.round((inning.runs / inning.balls) * (maxBalls || 120)) : par;
-      const diff = proj - par;
+      const diff = proj - par + (isTest ? testLead * 0.35 : 0);
       const batProb = Math.max(15, Math.min(85, Math.round(50 + diff * 0.4 - (inning?.wickets || 0) * 3.5)));
       return { batting: batProb, bowling: 100 - batProb };
     } else {
       if (runsNeeded === 0) return { batting: 100, bowling: 0 };
-      if ((inning?.wickets || 0) >= 10 || ballsRemaining <= 0) return { batting: 0, bowling: 100 };
+      if ((inning?.wickets || 0) >= 10) return { batting: 0, bowling: 100 };
+      if (isTest) {
+        // 4th-innings chase has no over limit: weigh runs needed vs wickets left.
+        const wicketsLeft = 10 - (inning?.wickets || 0);
+        const batProb = Math.max(5, Math.min(95, Math.round(50 + wicketsLeft * 4 - runsNeeded * 0.15)));
+        return { batting: batProb, bowling: 100 - batProb };
+      }
+      if (ballsRemaining <= 0) return { batting: 0, bowling: 100 };
       const rrr = Number(requiredRunRate);
       const base = 50 + (8.5 - rrr) * 6 - (inning?.wickets || 0) * 4.5;
       const clamped = Math.max(5, Math.min(95, Math.round(base)));
       return { batting: clamped, bowling: 100 - clamped };
     }
-  }, [inningNo, runsNeeded, ballsRemaining, requiredRunRate, inning?.balls, inning?.runs, inning?.wickets, maxBalls, selectedFormat]);
+  }, [inningNo, runsNeeded, ballsRemaining, requiredRunRate, inning?.balls, inning?.runs, inning?.wickets, maxBalls, selectedFormat, isTest, testLead]);
 
   const filteredCommentary = useMemo(() => {
     const list = inning?.commentary || [];
@@ -1427,7 +1617,7 @@ export default function LiveMatchCenter() {
   };
 
   const handleReturnToHub = () => {
-    if (inning?.isComplete && inningNo === 2) {
+    if (isMatchOver) {
       saveLiveMatchState(null);
     } else {
       saveLiveMatchState({
@@ -1546,10 +1736,55 @@ export default function LiveMatchCenter() {
                   <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-500 opacity-75" />
                   <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-red-600" />
                 </span>
-                <span>{inning?.isComplete && inningNo === 2 ? 'Official Result' : 'LIVE'}</span>
+                <span>{isMatchOver ? 'Official Result' : 'LIVE'}</span>
               </div>
             </div>
           </div>
+
+          {/* Test-match day/session strip */}
+          {isTest && (
+            <div className="pt-2 flex flex-wrap items-center gap-1.5 text-[10px] font-black uppercase tracking-wide">
+              <span className="px-2 py-0.5 rounded bg-rose-50 text-rose-700 border border-rose-200">
+                Day {testDaySession.day} · {testDaySession.session}
+              </span>
+              <span className="px-2 py-0.5 rounded bg-slate-100 text-slate-700 border border-slate-200">
+                {ordinal(inningNo)} Innings
+              </span>
+              {innings[inningNo - 1]?.declared && (
+                <span className="px-2 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200">
+                  Declared
+                </span>
+              )}
+              {innings[inningNo - 1]?.isFollowOn && (
+                <span className="px-2 py-0.5 rounded bg-purple-50 text-purple-700 border border-purple-200">
+                  Follow-on
+                </span>
+              )}
+              {testLead !== 0 && (
+                <span className={cn(
+                  'px-2 py-0.5 rounded border',
+                  testLead > 0
+                    ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                    : 'bg-red-50 text-red-700 border-red-200',
+                )}>
+                  {testLead > 0 ? `Lead by ${testLead}` : `Trail by ${Math.abs(testLead)}`}
+                </span>
+              )}
+              {matchTarget > 0 && (
+                <span className="px-2 py-0.5 rounded bg-blue-50 text-blue-700 border border-blue-200">
+                  Target {matchTarget}
+                </span>
+              )}
+              {canDeclare && (
+                <button
+                  onClick={handleDeclare}
+                  className="px-2.5 py-0.5 rounded bg-slate-900 text-white border border-slate-900 hover:bg-slate-700 transition-colors"
+                >
+                  Declare
+                </button>
+              )}
+            </div>
+          )}
 
           {/* Main Authoritative Score & Control Row */}
           <div className="pt-3 flex flex-wrap lg:flex-nowrap items-center justify-between gap-4">
@@ -1573,7 +1808,7 @@ export default function LiveMatchCenter() {
                   <div className="text-xs text-slate-500 font-semibold flex items-center gap-1.5">
                     <span>CRR: <span className="font-bold text-slate-800">{currentRunRate}</span></span>
                     <span className="text-slate-300">|</span>
-                    <span className="font-bold text-slate-700">{inningNo === 1 ? '1st' : '2nd'} Innings</span>
+                    <span className="font-bold text-slate-700">{isTest ? `${ordinal(inningNo)} Innings` : inningNo === 1 ? '1st' : '2nd'} Innings</span>
                   </div>
                 </div>
               </div>
@@ -1586,9 +1821,9 @@ export default function LiveMatchCenter() {
                     ({formatOvers(inning?.balls || 0)} ov)
                   </span>
                 </div>
-                {inningNo === 2 && innings[0] && (
+                {matchTarget > 0 && (
                   <div className="text-[10px] font-bold text-amber-700 tracking-tight">
-                    Need {runsNeeded} from {ballsRemaining}b · RRR: {requiredRunRate}
+                    {isTest ? `Need ${runsNeeded} runs` : `Need ${runsNeeded} from ${ballsRemaining}b · RRR: ${requiredRunRate}`}
                   </div>
                 )}
               </div>
@@ -1608,9 +1843,11 @@ export default function LiveMatchCenter() {
                       <span className="bg-purple-100 text-purple-700 border border-purple-200 text-[9px] font-black px-1.5 py-0.5 rounded">YOU</span>
                     )}
                   </div>
-                  {inningNo === 2 && innings[0] && (
+                  {(isTest ? testLead !== 0 : inningNo === 2 && Boolean(innings[0])) && (
                     <div className="text-xs text-slate-500 font-semibold">
-                      1st Inn: {innings[0].runs}/{innings[0].wickets}
+                      {isTest
+                        ? `${testLead > 0 ? 'Lead' : 'Trail'} by ${Math.abs(testLead)}`
+                        : `1st Inn: ${innings[0]?.runs}/${innings[0]?.wickets}`}
                     </div>
                   )}
                 </div>
@@ -1775,7 +2012,8 @@ export default function LiveMatchCenter() {
                     overs: inning?.balls ? Math.floor(inning.balls / 6) : 0,
                     balls: inning?.balls ? inning.balls % 6 : 0,
                   }}
-                  target={inningNo === 2 ? (innings[0]?.runs || 0) + 1 : undefined}
+                  target={matchTarget > 0 ? matchTarget : undefined}
+                  testDaySession={isTest ? testDaySession : undefined}
                   pitch={pitch}
                   weather={weather}
                   fieldingSquad={bowlingSquad}
@@ -2410,16 +2648,16 @@ export default function LiveMatchCenter() {
                   <span className="font-black text-slate-900 tabular-nums">{currentRunRate}</span>
                 </div>
                 <div className="bg-slate-50 border border-slate-100 rounded-lg px-2.5 py-1.5">
-                  <span className="text-[9px] uppercase font-bold text-slate-400 block">{inningNo === 2 ? 'RRR' : 'Projected'}</span>
-                  <span className="font-black text-slate-900 tabular-nums">{inningNo === 2 ? requiredRunRate : `~${projectedScore}`}</span>
+                  <span className="text-[9px] uppercase font-bold text-slate-400 block">{matchTarget > 0 ? (isTest ? 'Target' : 'RRR') : 'Projected'}</span>
+                  <span className="font-black text-slate-900 tabular-nums">{matchTarget > 0 ? (isTest ? matchTarget : requiredRunRate) : `~${projectedScore}`}</span>
                 </div>
                 <div className="bg-slate-50 border border-slate-100 rounded-lg px-2.5 py-1.5">
-                  <span className="text-[9px] uppercase font-bold text-slate-400 block">Balls Left</span>
-                  <span className="font-black text-slate-900 tabular-nums">{ballsRemaining}</span>
+                  <span className="text-[9px] uppercase font-bold text-slate-400 block">{isTest ? 'Innings' : 'Balls Left'}</span>
+                  <span className="font-black text-slate-900 tabular-nums">{isTest ? ordinal(inningNo) : ballsRemaining}</span>
                 </div>
                 <div className="bg-slate-50 border border-slate-100 rounded-lg px-2.5 py-1.5">
-                  <span className="text-[9px] uppercase font-bold text-slate-400 block">{inningNo === 2 ? 'Runs Needed' : 'Partnership'}</span>
-                  <span className="font-black text-slate-900 tabular-nums">{inningNo === 2 ? runsNeeded : `${inning?.partnershipRuns || 0} (${inning?.partnershipBalls || 0}b)`}</span>
+                  <span className="text-[9px] uppercase font-bold text-slate-400 block">{matchTarget > 0 ? 'Runs Needed' : 'Partnership'}</span>
+                  <span className="font-black text-slate-900 tabular-nums">{matchTarget > 0 ? runsNeeded : `${inning?.partnershipRuns || 0} (${inning?.partnershipBalls || 0}b)`}</span>
                 </div>
               </div>
             </div>
@@ -2573,6 +2811,21 @@ export default function LiveMatchCenter() {
             <div>
               <h2 className="text-2xl font-black text-slate-900">Match Completed</h2>
               {(() => {
+                if (isTest) {
+                  const decided = Boolean(testResultDecision && testResultDecision.result !== 'IN_PROGRESS');
+                  if (!decided) {
+                    return <p className="text-base font-bold text-slate-600 mt-1">Match drawn</p>;
+                  }
+                  if (testResultDecision!.result === 'TIE') {
+                    return <p className="text-base font-bold text-slate-600 mt-1">Match Tied</p>;
+                  }
+                  const winner = franchises.find((f) => f.id === testResultDecision!.winnerId);
+                  return (
+                    <p className="text-base font-bold text-slate-600 mt-1">
+                      <strong className="text-emerald-600">{winner?.name} won by {testResultDecision!.margin}</strong>
+                    </p>
+                  );
+                }
                 const i1 = innings[0];
                 const i2 = innings[1];
                 const winnerId = i2.runs > i1.runs ? i2.battingTeamId : i1.battingTeamId;
@@ -2592,13 +2845,39 @@ export default function LiveMatchCenter() {
             <div className="grid grid-cols-2 gap-3 text-center">
               <div className="p-3 rounded-2xl bg-slate-50 border border-slate-200">
                 <span className="text-xs font-bold text-slate-500 block">{team1.shortName}</span>
-                <span className="text-xl font-black text-slate-900">{innings[0]?.runs}/{innings[0]?.wickets}</span>
-                <span className="text-[10px] text-slate-400 block">{formatOvers(innings[0]?.balls || 0)} ov</span>
+                {isTest ? (
+                  <>
+                    <span className="text-xl font-black text-slate-900">
+                      {innings.filter((i) => i.battingTeamId === team1.id).reduce((s, i) => s + i.runs, 0)}
+                    </span>
+                    <span className="text-[10px] text-slate-400 block">
+                      {innings.filter((i) => i.battingTeamId === team1.id).length} innings
+                    </span>
+                  </>
+                ) : (
+                  <>
+                    <span className="text-xl font-black text-slate-900">{innings[0]?.runs}/{innings[0]?.wickets}</span>
+                    <span className="text-[10px] text-slate-400 block">{formatOvers(innings[0]?.balls || 0)} ov</span>
+                  </>
+                )}
               </div>
               <div className="p-3 rounded-2xl bg-slate-50 border border-slate-200">
                 <span className="text-xs font-bold text-slate-500 block">{team2.shortName}</span>
-                <span className="text-xl font-black text-slate-900">{innings[1]?.runs}/{innings[1]?.wickets}</span>
-                <span className="text-[10px] text-slate-400 block">{formatOvers(innings[1]?.balls || 0)} ov</span>
+                {isTest ? (
+                  <>
+                    <span className="text-xl font-black text-slate-900">
+                      {innings.filter((i) => i.battingTeamId === team2.id).reduce((s, i) => s + i.runs, 0)}
+                    </span>
+                    <span className="text-[10px] text-slate-400 block">
+                      {innings.filter((i) => i.battingTeamId === team2.id).length} innings
+                    </span>
+                  </>
+                ) : (
+                  <>
+                    <span className="text-xl font-black text-slate-900">{innings[1]?.runs}/{innings[1]?.wickets}</span>
+                    <span className="text-[10px] text-slate-400 block">{formatOvers(innings[1]?.balls || 0)} ov</span>
+                  </>
+                )}
               </div>
             </div>
 

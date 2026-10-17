@@ -3,6 +3,7 @@ import { useGameStore, GameState, ArenaTab } from '../stores/useGameStore';
 import { ArrowLeft } from 'lucide-react';
 import ArenaDashboard from './ArenaDashboard';
 import ScheduleTab from './league/ScheduleTab';
+import SeriesTab from './league/SeriesTab';
 import LeaderboardTab from './league/LeaderboardTab';
 import QualificationTab from './league/QualificationTab';
 import SquadPlanner from './SquadPlanner';
@@ -45,6 +46,7 @@ export default function ArenaHub() {
       tabs.push({ id: 'MATCHES', label: 'MATCHES' });
       tabs.push({ id: 'TABLE', label: 'WTC TABLE' });
     } else {
+      tabs.push({ id: 'SERIES', label: 'SERIES' });
       tabs.push({ id: 'SQUAD', label: 'SQUAD' });
       tabs.push({ id: 'MATCHES', label: 'MATCHES' });
       tabs.push({ id: 'TABLE', label: 'TABLE' });
@@ -75,10 +77,15 @@ export default function ArenaHub() {
       case 'AUCTION':
         return <AuctionRoom />;
       case 'MATCHES':
-      case 'SERIES':
         return (
           <div className="p-4 sm:p-6 max-w-6xl mx-auto">
             <ScheduleTab franchises={franchises} />
+          </div>
+        );
+      case 'SERIES':
+        return (
+          <div className="p-4 sm:p-6 max-w-6xl mx-auto">
+            <SeriesTab franchises={franchises} />
           </div>
         );
       case 'PLAYOFFS':

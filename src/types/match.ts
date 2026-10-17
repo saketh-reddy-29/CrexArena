@@ -101,7 +101,7 @@ export interface ImpactPlayerSubstitution {
 export interface StrategicTimeout {
   teamType: 'bowling' | 'batting';
   overNumber: number;
-  inningsNumber: 1 | 2;
+  inningsNumber: number; // 1-2 for limited overs, 1-4 for Test
 }
 
 export interface SuperOverInnings {
@@ -145,12 +145,19 @@ export interface PlayerMatchStats {
   legalBallsThisOver?: number;  // Track balls in current over
 }
 
+export type MatchResultType = 'WIN' | 'DRAW' | 'TIE' | 'NO_RESULT';
+
 export interface MatchScorecard {
   team1Id: string;
   team2Id: string;
-  innings: [InningsData, InningsData];
+  /**
+   * All innings in batting order. Limited-overs matches have 2; Test matches
+   * have up to 4 (innings 3/4 only exist if the match reaches them).
+   */
+  innings: InningsData[];
   winnerId?: string;
   margin?: string;
+  result?: MatchResultType;
   playerOfMatchId?: string;
   superOver?: SuperOver;        // If match tied
 }
@@ -178,6 +185,15 @@ export interface InningsData {
   impactPlayer?: ImpactPlayerSubstitution;
   strategicTimeouts: StrategicTimeout[];
   currentPhase: PowerPlayPhase;
+  // Test-specific (optional so limited-overs innings remain valid)
+  inningsNumber?: number;             // 1-4, batting order across the match
+  declared?: boolean;                 // Captain declared the innings closed
+  isFollowOn?: boolean;               // Batting again because of an enforced follow-on
+}
+
+export interface TestDaySession {
+  day: number;                        // 1-5
+  session: 'Morning' | 'Afternoon' | 'Evening';
 }
 
 export interface Fixture {
@@ -219,3 +235,43 @@ export interface Standing {
   oversBowled: number;
   form: Array<'W' | 'L' | 'D' | 'T'>;
 }
+
+// ─── Series (bilateral) ──────────────────────────────────────────────
+
+export type SeriesFormat = 'T20' | 'ODI' | 'TEST';
+
+/**
+ * A bilateral series: exactly two teams meeting over a fixed number of
+ * matches. This is the configuration a player chooses on the Series setup
+ * screen before fixtures are generated.
+ */
+export interface SeriesConfig {
+  id: string;
+  name: string;
+  format: SeriesFormat;
+  team1Id: string;
+  team2Id: string;
+  /** Number of matches in the series (1-7). */
+  matchCount: number;
+  createdAt: number;
+}
+
+/** A single row of a bilateral series points table. */
+export interface SeriesStanding {
+  teamId: string;
+  played: number;
+  won: number;
+  lost: number;
+  drawn: number;
+  tied: number;
+  points: number;
+  /** WTC-style points percentage (points / (played * maxPoints) * 100). */
+  pct: number;
+  nrr: number;
+  runsScored: number;
+  oversFaced: number;
+  runsConceded: number;
+  oversBowled: number;
+  form: Array<'W' | 'L' | 'D' | 'T'>;
+}
+
