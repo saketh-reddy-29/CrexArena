@@ -6,6 +6,7 @@ import {
   FieldConfiguration,
   FielderAssignment,
 } from '../strategy/BowlerFieldStrategyEngine';
+import { getFieldingPhase, type FieldingPhaseKey } from '../fielding/FieldingRestrictionEngine';
 
 // ═══════════════════════════════════════════════════════════════════════════════
 //  ADAPTIVE AI CAPTAIN — Boundary Prevention, Realistic Wicket Strategy &
@@ -366,6 +367,108 @@ function topZones(weight: Record<ScoringZoneName, number>, n: number): ScoringZo
     .slice(0, n);
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+//  STRATEGIC SETUP — the captain's three canonical game-plans.
+//
+//  A field is a whole-ground decision (off side / leg side, across the close /
+//  inner-ring / boundary zones). Rather than pick positions ad hoc, the captain
+//  first commits to ONE of three classic setups — Attacking, Containment or
+//  Death — driven by the match format, the innings phase and the batter at the
+//  crease, then realises it with a legal preset formation.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export type StrategicSetup = 'ATTACKING' | 'CONTAINMENT' | 'DEATH';
+
+/** The canonical preset formation each setup is realised with. */
+export const SETUP_PRESET_KEY: Record<StrategicSetup, string> = {
+  ATTACKING: 'ATTACKING_SLIP_CORDON',
+  CONTAINMENT: 'BALANCED_RING',
+  DEATH: 'DEATH_YORKER_SHIELD',
+};
+
+export interface StrategicSetupInput {
+  format: ArenaFormat | string;
+  /** 1-indexed over about to be bowled. */
+  over: number;
+  wickets?: number;
+  requiredRate?: number;
+  striker?: Player | null;
+  /** Balls the striker has faced — a small number marks a new batter. */
+  strikerBalls?: number;
+  recentOutcomes?: string[];
+  trigger?: 'INITIAL' | 'OVER_END' | 'WICKET_FALL' | 'BOUNDARY_CLUSTER' | 'MANUAL_REQUEST';
+  /** True when the bowler for this over is a spinner (enables the spin web). */
+  bowlerIsSpin?: boolean;
+}
+
+export interface StrategicSetupDecision {
+  setup: StrategicSetup;
+  presetKey: string;
+  phase: FieldingPhaseKey;
+  reason: string;
+}
+
+/**
+ * The single coordinated game-plan decision: format + phase + batter resolve to
+ * one of Attacking / Containment / Death, which maps to one legal preset key.
+ * Deterministic — the same situation always yields the same setup.
+ */
+export function selectStrategicSetup(input: StrategicSetupInput): StrategicSetupDecision {
+  const format = String(input.format).toUpperCase();
+  const over = input.over || 1;
+  const phase = getFieldingPhase(format as any, over).key;
+  const archetype = classifyBatterArchetype(input.striker ?? null);
+  const isNewBatter = Boolean(input.striker) && (input.strikerBalls ?? 0) <= 6;
+
+  let setup: StrategicSetup;
+  let reason: string;
+
+  if (phase === 'DEATH') {
+    setup = 'DEATH';
+    reason = 'Death overs — protect the rope and force low-percentage shots.';
+  } else if (phase === 'TEST') {
+    // Test cricket has no limited-overs urgency: attack the new ball, then
+    // settle into patience and squeeze.
+    setup = over <= 15 ? 'ATTACKING' : 'CONTAINMENT';
+    reason = over <= 15
+      ? 'Test new-ball spell — catchers behind the bat, attacking line outside off.'
+      : 'Test match — containment; dry the runs and wait for the pitch.';
+  } else if (phase === 'POWERPLAY') {
+    setup = 'ATTACKING';
+    reason = 'Powerplay — only two fielders back, so attack with catchers.';
+  } else {
+    setup = 'CONTAINMENT';
+    reason = 'Middle overs — pack the ring, choke singles, force the risky shot.';
+  }
+
+  // Batter context can override a passive middle-overs plan — attack the tail
+  // or a brand-new batter even outside the powerplay.
+  if ((phase === 'MIDDLE' || phase === 'TEST') && archetype === 'tail') {
+    setup = 'ATTACKING';
+    reason = 'Tailender at the crease — crowd the bat and attack.';
+  } else if (phase === 'MIDDLE' && isNewBatter) {
+    setup = 'ATTACKING';
+    reason = 'New batter at the crease — bring the catchers in.';
+  }
+
+  // Reactive triggers (Section 12-A): one coordinated override.
+  if (input.trigger === 'BOUNDARY_CLUSTER') {
+    setup = phase === 'DEATH' ? 'DEATH' : 'CONTAINMENT';
+    reason = 'Boundary cluster conceded — pull sweepers back and rebuild pressure.';
+  } else if (input.trigger === 'WICKET_FALL' && phase !== 'DEATH') {
+    setup = 'ATTACKING';
+    reason = 'Wicket just fell — attacking the incoming batter.';
+  }
+
+  let presetKey = SETUP_PRESET_KEY[setup];
+  // A spinner's containment plan is realised with the spin web (leg slip/short leg).
+  if (setup === 'CONTAINMENT' && input.bowlerIsSpin) {
+    presetKey = 'SPIN_TRAP_WEB';
+  }
+
+  return { setup, presetKey, phase, reason };
+}
+
 /**
  * Builds the single coordinated per-delivery tactical model. One call resolves
  * field placement influence, the bowling line/length and the reversible
@@ -465,6 +568,7 @@ function round3(value: number): number {
 export class AdaptiveCaptainEngine {
   static buildDeliveryModel = buildDeliveryModel;
   static recommendFieldPreset = recommendFieldPreset;
+  static selectStrategicSetup = selectStrategicSetup;
   static computePressureScore = computePressureScore;
   static analyzeFieldCoverage = analyzeFieldCoverage;
   static getBatterZonePreference = getBatterZonePreference;

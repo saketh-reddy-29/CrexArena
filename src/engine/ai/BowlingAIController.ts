@@ -8,7 +8,7 @@ import {
   CANONICAL_POSITIONS,
 } from '../strategy/BowlerFieldStrategyEngine';
 import { getFieldingPhase, validateField } from '../fielding/FieldingRestrictionEngine';
-import { recommendFieldPreset, type ScoringZoneName } from './AdaptiveCaptainEngine';
+import { recommendFieldPreset, selectStrategicSetup, type ScoringZoneName } from './AdaptiveCaptainEngine';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // AUTONOMOUS BOWLING AI — the bowling team's captain.
@@ -46,6 +46,8 @@ export interface BowlingAIInput {
   currentBowler?: Player | null;
   striker?: Player | null;
   nonStriker?: Player | null;
+  /** Balls the striker has faced (drives the new-batter attacking override). */
+  strikerBalls?: number;
   pitch: PitchType;
   weather?: WeatherCondition;
   /** 0-100 fatigue per player id (higher = more tired). */
@@ -69,6 +71,9 @@ export interface BowlingAIDecision {
   fieldValid: boolean;
   fieldMessage: string;
   fieldChanged: boolean;
+  /** The single coordinated game-plan chosen for this delivery. */
+  strategicSetup: string;
+  fieldReason: string;
   changeBowler: boolean;
   notification: string | null;
   reasoning: string;
@@ -275,10 +280,11 @@ function buildFieldConfiguration(
   }
 }
 
-function describeFieldChange(config: FieldConfiguration | null, presetKey: string): string {
+function describeFieldChange(config: FieldConfiguration | null, presetKey: string, setup?: string): string {
   const presetName = BowlerFieldStrategyEngine.PRESET_OVERLAYS[presetKey]?.name ?? 'New field';
   const intentText = config?.tacticalIntent ? ` — ${config.tacticalIntent.toLowerCase()}` : '';
-  return `Field adjusted: ${presetName}${intentText}.`;
+  const setupText = setup ? ` (${setup} setup)` : '';
+  return `Field adjusted: ${presetName}${intentText}${setupText}.`;
 }
 
 /**
@@ -308,8 +314,20 @@ export function decideBowlingChange(input: BowlingAIInput): BowlingAIDecision {
       })
     : null;
 
-  const preferredPreset = plan?.recommendedFieldPreset ?? null;
-  let presetKey = chooseLegalFieldPresetKey(preferredPreset, input.format, input.over);
+  // The single coordinated game-plan: format + phase + batter resolve to one
+  // of Attacking / Containment / Death, realised with a legal preset formation.
+  const setupDecision = selectStrategicSetup({
+    format: input.format,
+    over: input.over,
+    wickets: input.wickets,
+    requiredRate: input.target ? (input.target - input.runs) / Math.max(1, (maxBowlerBalls(input.format) - input.balls) / 6) : undefined,
+    striker: input.striker ?? null,
+    strikerBalls: input.strikerBalls,
+    recentOutcomes: input.recentBalls,
+    trigger: input.trigger,
+    bowlerIsSpin: bowler ? isSpinBowler(bowler) : undefined,
+  });
+  let presetKey = chooseLegalFieldPresetKey(setupDecision.presetKey, input.format, input.over);
 
   // Boundary-prevention refinement (Section 12-A): when the batter has just
   // hurt us or a new batter is in, look at *their* scoring zones and move the
@@ -342,7 +360,7 @@ export function decideBowlingChange(input: BowlingAIInput): BowlingAIDecision {
       })
     : null;
 
-  const notification = fieldChanged ? describeFieldChange(fieldConfiguration, presetKey) : null;
+  const notification = fieldChanged ? describeFieldChange(fieldConfiguration, presetKey, setupDecision.setup) : null;
 
   return {
     bowlerId: bowler?.id ?? null,
@@ -353,12 +371,14 @@ export function decideBowlingChange(input: BowlingAIInput): BowlingAIDecision {
     fieldValid,
     fieldMessage: validation?.message ?? 'Field not generated.',
     fieldChanged,
+    strategicSetup: setupDecision.setup,
+    fieldReason: setupDecision.reason,
     changeBowler: isOverChange || !current,
     notification,
     reasoning: bowler
-      ? `${bowler.name} to bowl over ${input.over}${isSpinBowler(bowler) ? ' (spin)' : ' (pace)'}${
-          plan ? ` — ${plan.summary}` : ''
-        }.`
+      ? `${bowler.name} to bowl over ${input.over}${isSpinBowler(bowler) ? ' (spin)' : ' (pace)'} — ${setupDecision.setup} setup: ${setupDecision.reason}${
+          plan ? ` ${plan.summary}` : ''
+        }`
       : 'No eligible bowler available.',
     confidence: isOverChange ? 80 : 72,
   };

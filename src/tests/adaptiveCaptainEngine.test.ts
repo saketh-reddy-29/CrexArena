@@ -14,6 +14,8 @@ import {
   isLeftHandedBatter,
   neutralDeliveryModel,
   recommendFieldPreset,
+  selectStrategicSetup,
+  SETUP_PRESET_KEY,
   zoneAngleDeg,
   WAGON_ZONES,
 } from '../engine/ai/AdaptiveCaptainEngine';
@@ -208,5 +210,64 @@ describe('AdaptiveCaptainEngine — public API surface', () => {
     expect(typeof AdaptiveCaptainEngine.recommendFieldPreset).toBe('function');
     expect(typeof AdaptiveCaptainEngine.computePressureScore).toBe('function');
     expect(typeof AdaptiveCaptainEngine.analyzeFieldCoverage).toBe('function');
+    expect(typeof AdaptiveCaptainEngine.selectStrategicSetup).toBe('function');
+  });
+});
+
+describe('AdaptiveCaptainEngine — Strategic Setup selection (Attack / Contain / Death)', () => {
+  it('attacks in the T20 powerplay and defends the rope at the death', () => {
+    const pp = selectStrategicSetup({ format: 'T20', over: 2, striker: anchor, strikerBalls: 30 });
+    expect(pp.phase).toBe('POWERPLAY');
+    expect(pp.setup).toBe('ATTACKING');
+    expect(pp.presetKey).toBe(SETUP_PRESET_KEY.ATTACKING);
+
+    const death = selectStrategicSetup({ format: 'T20', over: 18, striker: finisher, strikerBalls: 25 });
+    expect(death.phase).toBe('DEATH');
+    expect(death.setup).toBe('DEATH');
+    expect(death.presetKey).toBe(SETUP_PRESET_KEY.DEATH);
+  });
+
+  it('contains through the ODI middle overs and switches to death at over 41', () => {
+    expect(selectStrategicSetup({ format: 'ODI', over: 25, striker: anchor, strikerBalls: 60 }).setup).toBe('CONTAINMENT');
+    expect(selectStrategicSetup({ format: 'ODI', over: 44, striker: finisher, strikerBalls: 40 }).setup).toBe('DEATH');
+  });
+
+  it('has no limited-overs death phase in Test cricket (patient, format-specific)', () => {
+    const early = selectStrategicSetup({ format: 'TEST', over: 3, striker: anchor, strikerBalls: 12 });
+    const late = selectStrategicSetup({ format: 'TEST', over: 60, striker: anchor, strikerBalls: 180 });
+    expect(early.phase).toBe('TEST');
+    expect(early.setup).toBe('ATTACKING');
+    expect(late.setup).toBe('CONTAINMENT');
+    expect([early.setup, late.setup]).not.toContain('DEATH');
+  });
+
+  it('attacks a brand-new batter and a tailender even in the middle overs', () => {
+    expect(selectStrategicSetup({ format: 'T20', over: 10, striker: anchor, strikerBalls: 2 }).setup).toBe('ATTACKING');
+    expect(selectStrategicSetup({ format: 'T20', over: 10, striker: tailender, strikerBalls: 30 }).setup).toBe('ATTACKING');
+  });
+
+  it('reacts to genuine events: boundary cluster pulls sweepers back, wicket attacks the newcomer', () => {
+    const cluster = selectStrategicSetup({ format: 'T20', over: 10, striker: anchor, strikerBalls: 20, trigger: 'BOUNDARY_CLUSTER' });
+    expect(cluster.setup).toBe('CONTAINMENT');
+    const wicket = selectStrategicSetup({ format: 'T20', over: 10, striker: anchor, strikerBalls: 0, trigger: 'WICKET_FALL' });
+    expect(wicket.setup).toBe('ATTACKING');
+  });
+
+  it('realises a spinner containment plan with the spin web, and is deterministic', () => {
+    const spin = selectStrategicSetup({ format: 'ODI', over: 25, striker: anchor, strikerBalls: 40, bowlerIsSpin: true });
+    expect(spin.setup).toBe('CONTAINMENT');
+    expect(spin.presetKey).toBe('SPIN_TRAP_WEB');
+    const a = selectStrategicSetup({ format: 'ODI', over: 25, striker: anchor, strikerBalls: 40 });
+    const b = selectStrategicSetup({ format: 'ODI', over: 25, striker: anchor, strikerBalls: 40 });
+    expect(a).toEqual(b);
+  });
+
+  it('always returns a preset key that exists in the field engine', () => {
+    for (const format of ['T20', 'IPL', 'ODI', 'TEST'] as ArenaFormat[]) {
+      for (const over of [1, 5, 12, 20, 35, 48]) {
+        const d = selectStrategicSetup({ format, over, striker: finisher, strikerBalls: 20 });
+        expect(Object.keys(BowlerFieldStrategyEngine.PRESET_OVERLAYS)).toContain(d.presetKey);
+      }
+    }
   });
 });
