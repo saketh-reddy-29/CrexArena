@@ -496,31 +496,6 @@ export default function LiveMatchCenter() {
   const [recentBoundaryZones, setRecentBoundaryZones] = useState<ScoringZoneName[]>([]);
   const [historyDeliveryResults, setHistoryDeliveryResults] = useState<DeliveryResult[]>([]);
 
-  const handleUserFieldPresetChange = useCallback((key: string | null) => {
-    setFieldPresetKey(key);
-    setUserLockedFieldPreset(Boolean(key));
-    if (key) {
-      const newConfig = BowlerFieldStrategyEngine.generateFieldConfiguration({
-        format: (selectedFormat as ArenaFormat) || 'T20',
-        bowler: currentBowler,
-        striker,
-        nonStriker: nonStriker || null,
-        overs: Math.floor((inning?.balls || 0) / 6),
-        balls: inning?.balls || 0,
-        wickets: inning?.wickets || 0,
-        runs: inning?.runs || 0,
-        target: matchTarget > 0 ? matchTarget : undefined,
-        pitch,
-        weather,
-        manualPresetKey: key,
-        fieldingSquad: bowlingSquad,
-        previousConfig: liveFieldConfiguration,
-      });
-      setLiveFieldConfiguration(newConfig);
-      setOpponentTacticalNotice(`Field set: ${BowlerFieldStrategyEngine.PRESET_OVERLAYS[key]?.name || key}`);
-    }
-  }, [selectedFormat, currentBowler, striker, nonStriker, inning, matchTarget, pitch, weather, bowlingSquad, liveFieldConfiguration]);
-
   useEffect(() => {
     if (currentDeliveryResult) {
       setHistoryDeliveryResults(prev => {
@@ -647,6 +622,31 @@ export default function LiveMatchCenter() {
     }
     return inningNo === 2 ? (innings[0]?.runs || 0) + 1 : 0;
   }, [isTest, inningNo, innings, testSummaries]);
+
+  const handleUserFieldPresetChange = useCallback((key: string | null) => {
+    setFieldPresetKey(key);
+    setUserLockedFieldPreset(Boolean(key));
+    if (key) {
+      const newConfig = BowlerFieldStrategyEngine.generateFieldConfiguration({
+        format: (selectedFormat as ArenaFormat) || 'T20',
+        bowler: currentBowler,
+        striker,
+        nonStriker: nonStriker || null,
+        overs: Math.floor((inning?.balls || 0) / 6),
+        balls: inning?.balls || 0,
+        wickets: inning?.wickets || 0,
+        runs: inning?.runs || 0,
+        target: matchTarget > 0 ? matchTarget : undefined,
+        pitch,
+        weather,
+        manualPresetKey: key,
+        fieldingSquad: bowlingSquad,
+        previousConfig: liveFieldConfiguration,
+      });
+      setLiveFieldConfiguration(newConfig);
+      setOpponentTacticalNotice(`Field set: ${BowlerFieldStrategyEngine.PRESET_OVERLAYS[key]?.name || key}`);
+    }
+  }, [selectedFormat, currentBowler, striker, nonStriker, inning, matchTarget, pitch, weather, bowlingSquad, liveFieldConfiguration]);
 
   const totalTestBalls = useMemo(() => innings.reduce((sum, inn) => sum + inn.balls, 0), [innings]);
   const testDaySession = useMemo(() => getTestDaySession(totalTestBalls, testRules), [totalTestBalls, testRules]);
@@ -942,7 +942,7 @@ export default function LiveMatchCenter() {
       });
       if (decision.bowlerId) setBowlerId(decision.bowlerId);
       if (decision.bowlingPlan) setUserBowlingPlan(decision.bowlingPlan);
-      if (!userLockedFieldPreset) {
+      if (!userLockedFieldPreset && !isMyTeamBowling) {
         if (decision.fieldPresetKey) setFieldPresetKey(decision.fieldPresetKey);
         if (decision.fieldConfiguration) setLiveFieldConfiguration(decision.fieldConfiguration);
       }
@@ -1191,7 +1191,7 @@ export default function LiveMatchCenter() {
         totalOvers: Math.round(maxBalls / 6),
         trigger: wicket ? 'WICKET_FALL' : 'BOUNDARY_CLUSTER',
       });
-      if (!userLockedFieldPreset) {
+      if (!userLockedFieldPreset && !isMyTeamBowling) {
         if (fieldDecision.fieldChanged) {
           setFieldPresetKey(fieldDecision.fieldPresetKey);
         }

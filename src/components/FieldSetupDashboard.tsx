@@ -12,7 +12,7 @@
  */
 
 import React, { useEffect, useMemo, useState } from 'react';
-import { Shield, Cpu, User } from 'lucide-react';
+import { Shield, Cpu, User, CheckCircle2 } from 'lucide-react';
 import {
   BowlerFieldStrategyEngine,
   CANONICAL_POSITIONS,

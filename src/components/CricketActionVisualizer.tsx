@@ -610,7 +610,7 @@ export default function CricketActionVisualizer({
   const prevAutoPhaseOverRef = useRef<number>(score?.overs || 0);
 
   useEffect(() => {
-    if (activePresetKey) return; // Respect explicit user manual lock
+    if (activePresetKey || isUserTeamBowling) return; // Respect explicit user manual lock and user bowling sovereignty
 
     const strikerChanged = Boolean(striker?.id && striker.id !== prevAutoStrikerIdRef.current);
     const bowlerChanged = Boolean(bowler?.id && bowler.id !== prevAutoBowlerIdRef.current);
@@ -632,7 +632,7 @@ export default function CricketActionVisualizer({
     if (strikerChanged || bowlerChanged || wicketFell || phaseChanged) {
       triggerTacticalRecalculation();
     }
-  }, [striker?.id, bowler?.id, score?.wickets, score?.overs, activePresetKey, selectedFormat, triggerTacticalRecalculation]);
+  }, [striker?.id, bowler?.id, score?.wickets, score?.overs, activePresetKey, isUserTeamBowling, selectedFormat, triggerTacticalRecalculation]);
 
   // Report the initial (possibly restored) formation once on mount so the parent
   // and the persisted live-match state always know the active field + intent even
