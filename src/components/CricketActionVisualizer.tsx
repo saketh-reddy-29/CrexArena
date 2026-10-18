@@ -917,23 +917,23 @@ export default function CricketActionVisualizer({
           TOP MATCH BAR: BRANDING, FORMAT, SCORE, SPEED & PLAYBACK CONTROLS
       â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */}
       {!hideTopHeader && (
-        <div className="w-full px-4 py-3 bg-slate-950/90 backdrop-blur-xl border-b border-white/10 flex flex-wrap items-center justify-between gap-3 z-30">
+        <div className="w-full px-3 py-2 sm:px-4 sm:py-3 bg-slate-950/90 backdrop-blur-xl border-b border-white/10 flex flex-wrap items-center justify-between gap-2.5 z-30">
         {/* Branding & Format Selector */}
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2 sm:gap-3">
           <div className="flex items-center gap-2">
-            <div className="h-8 w-8 rounded-xl bg-gradient-to-tr from-cyan-500 to-blue-600 flex items-center justify-center shadow-lg shadow-cyan-500/25">
-              <Compass className="w-4 h-4 text-white animate-spin-slow" />
+            <div className="h-7 w-7 sm:h-8 sm:w-8 rounded-xl bg-gradient-to-tr from-cyan-500 to-blue-600 flex items-center justify-center shadow-lg shadow-cyan-500/25 shrink-0">
+              <Compass className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-white animate-spin-slow" />
             </div>
             <div>
-              <div className="text-[10px] font-black tracking-widest text-cyan-400 uppercase leading-none">CRICKET ARENA</div>
-              <div className="text-xs font-black tracking-wide text-white">FIELD TACTICS 2D</div>
+              <div className="text-[9px] sm:text-[10px] font-black tracking-widest text-cyan-400 uppercase leading-none">CRICKET ARENA</div>
+              <div className="text-[11px] sm:text-xs font-black tracking-wide text-white">FIELD TACTICS 2D</div>
             </div>
           </div>
 
           <div className="h-4 w-px bg-white/10 mx-1 hidden sm:block" />
 
           {/* Format Selector */}
-          <div className="flex items-center bg-slate-900/90 p-1 rounded-xl border border-white/10">
+          <div className="flex items-center bg-slate-900/90 p-0.5 sm:p-1 rounded-xl border border-white/10">
             {(['T20', 'ODI', 'TEST'] as ArenaFormat[]).map((fmt) => (
               <button
                 key={fmt}
@@ -963,7 +963,7 @@ export default function CricketActionVisualizer({
                   applyNewFieldConfiguration(newConfig);
                 }}
                 className={cn(
-                  "px-2.5 py-1 rounded-lg text-[10px] font-black transition-all",
+                  "px-2 sm:px-2.5 py-0.5 sm:py-1 rounded-lg text-[9px] sm:text-[10px] font-black transition-all",
                   selectedFormat === fmt
                     ? fmt === 'TEST'
                       ? "bg-red-600 text-white shadow-md shadow-red-600/30"
@@ -980,24 +980,24 @@ export default function CricketActionVisualizer({
         </div>
 
         {/* Live Scoreboard Header */}
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2 sm:gap-3">
           <div className="flex items-center gap-1.5">
             <span className="relative flex h-2 w-2">
               <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
               <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
             </span>
-            <span className="text-[11px] font-bold text-emerald-400 uppercase tracking-wider">
+            <span className="text-[10px] sm:text-[11px] font-bold text-emerald-400 uppercase tracking-wider">
               {isFieldChanging ? 'FIELD IN MOTION' : lifecycle === 'RESULT_LOCKED' || lifecycle === 'BALL_PATH_PLAYBACK' ? 'IN PLAY' : 'READY'}
             </span>
           </div>
 
           {score && (
-            <div className="flex items-baseline gap-2 bg-white/[0.04] px-3 py-1 rounded-xl border border-white/5">
-              <span className="text-xs font-bold text-slate-400 truncate max-w-[80px]">{battingTeamName}</span>
-              <span className="text-sm font-black text-white tabular-nums tracking-tight">
+            <div className="flex items-baseline gap-1.5 sm:gap-2 bg-white/[0.04] px-2.5 sm:px-3 py-1 rounded-xl border border-white/5">
+              <span className="text-xs font-bold text-slate-400 truncate max-w-[70px] sm:max-w-[80px]">{battingTeamName}</span>
+              <span className="text-xs sm:text-sm font-black text-white tabular-nums tracking-tight">
                 {score.runs}/{score.wickets}
               </span>
-              <span className="text-[10px] font-bold text-slate-400 tabular-nums">
+              <span className="text-[9px] sm:text-[10px] font-bold text-slate-400 tabular-nums">
                 ({score.overs}.{score.balls} ov)
               </span>
             </div>
@@ -1012,15 +1012,15 @@ export default function CricketActionVisualizer({
         </div>
 
         {/* Playback Controls (1x, 1.5x, 2x, Pause/Resume, Replay, Skip, Debug) */}
-        <div className="flex items-center gap-1.5">
+        <div className="flex items-center gap-1 sm:gap-1.5 overflow-x-auto no-scrollbar py-0.5">
           {/* Speed Buttons */}
-          <div className="flex items-center bg-slate-900/90 p-1 rounded-xl border border-white/10">
+          <div className="flex items-center bg-slate-900/90 p-0.5 sm:p-1 rounded-xl border border-white/10 shrink-0">
             {([1, 1.5, 2] as AnimationSpeed[]).map((spd) => (
               <button
                 key={spd}
                 onClick={() => setSpeed(spd)}
                 className={cn(
-                  "px-2 py-0.5 rounded-lg text-[10px] font-black transition-all",
+                  "px-1.5 sm:px-2 py-0.5 rounded-lg text-[9px] sm:text-[10px] font-black transition-all",
                   speed === spd
                     ? "bg-white text-slate-950 shadow-sm"
                     : "text-slate-400 hover:text-white"
@@ -1036,7 +1036,7 @@ export default function CricketActionVisualizer({
             onClick={() => setIsPaused(v => !v)}
             title={isPaused ? "Resume" : "Pause"}
             className={cn(
-              "p-1.5 rounded-xl border text-xs transition-colors",
+              "p-1.5 rounded-xl border text-xs transition-colors shrink-0",
               isPaused 
                 ? "bg-amber-500/20 border-amber-400 text-amber-300" 
                 : "bg-slate-900 border-white/10 text-slate-300 hover:text-white"
@@ -1049,7 +1049,7 @@ export default function CricketActionVisualizer({
           <button
             onClick={handleReplay}
             title="Replay Last Ball"
-            className="p-1.5 rounded-xl bg-slate-900 border border-white/10 text-slate-300 hover:text-white transition-colors"
+            className="p-1.5 rounded-xl bg-slate-900 border border-white/10 text-slate-300 hover:text-white transition-colors shrink-0"
           >
             <RotateCcw className="w-3.5 h-3.5" />
           </button>
@@ -1058,7 +1058,7 @@ export default function CricketActionVisualizer({
           <button
             onClick={handleSkip}
             title="Skip Animation"
-            className="px-2 py-1 rounded-xl bg-slate-900 border border-white/10 text-[10px] font-black text-slate-300 hover:text-white transition-colors"
+            className="px-2 py-1 rounded-xl bg-slate-900 border border-white/10 text-[9px] sm:text-[10px] font-black text-slate-300 hover:text-white transition-colors shrink-0"
           >
             Skip
           </button>
@@ -1068,7 +1068,7 @@ export default function CricketActionVisualizer({
             onClick={() => setShowDebugHUD(v => !v)}
             title="Toggle Debug Panel"
             className={cn(
-              "p-1.5 rounded-xl border text-xs transition-colors",
+              "p-1.5 rounded-xl border text-xs transition-colors shrink-0",
               showDebugHUD 
                 ? "bg-purple-500/20 border-purple-400 text-purple-300" 
                 : "bg-slate-900 border-white/10 text-slate-400 hover:text-white"
@@ -1085,7 +1085,7 @@ export default function CricketActionVisualizer({
       â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */}
       <div className="w-full flex flex-col lg:flex-row items-stretch justify-between relative bg-[#060913]">
         {/* â”€â”€ 2D CIRCULAR PLAYING GROUND (SVG) â”€â”€ */}
-        <div className="flex-1 relative flex items-center justify-center p-3 sm:p-5 overflow-hidden min-h-[460px] lg:min-h-[560px]">
+        <div className="flex-1 relative flex items-center justify-center p-2 sm:p-5 overflow-hidden min-h-[320px] sm:min-h-[440px] lg:min-h-[560px]">
           {/* Subtle Outer Stadium Glow */}
           <div className="absolute inset-0 pointer-events-none overflow-hidden">
             <div className="absolute -top-20 -left-20 w-72 h-72 rounded-full bg-cyan-500/10 blur-[90px]" />
@@ -1094,13 +1094,13 @@ export default function CricketActionVisualizer({
           </div>
 
           {/* Fielder Display Mode Pill (Standard vs Labels) */}
-          <div className="absolute top-3.5 left-3.5 z-30 flex items-center gap-2">
-            <div className="flex items-center bg-slate-950/85 backdrop-blur-md p-1 rounded-xl border border-white/10 shadow-lg text-[10px] font-bold">
+          <div className="absolute top-2.5 left-2.5 sm:top-3.5 sm:left-3.5 z-30 flex items-center gap-1.5 sm:gap-2">
+            <div className="flex items-center bg-slate-950/85 backdrop-blur-md p-0.5 sm:p-1 rounded-xl border border-white/10 shadow-lg text-[9px] sm:text-[10px] font-bold">
               <button
                 type="button"
                 onClick={() => handleDisplayModeToggle('STANDARD')}
                 className={cn(
-                  "px-2.5 py-1 rounded-lg transition-all",
+                  "px-2 py-0.5 sm:px-2.5 sm:py-1 rounded-lg transition-all",
                   effectiveDisplayMode === 'STANDARD'
                     ? "bg-cyan-500 text-slate-950 font-black shadow-sm"
                     : "text-slate-400 hover:text-white"
@@ -1112,7 +1112,7 @@ export default function CricketActionVisualizer({
                 type="button"
                 onClick={() => handleDisplayModeToggle('LABELS')}
                 className={cn(
-                  "px-2.5 py-1 rounded-lg transition-all",
+                  "px-2 py-0.5 sm:px-2.5 sm:py-1 rounded-lg transition-all",
                   effectiveDisplayMode === 'LABELS'
                     ? "bg-cyan-500 text-slate-950 font-black shadow-sm"
                     : "text-slate-400 hover:text-white"
@@ -1124,22 +1124,23 @@ export default function CricketActionVisualizer({
           </div>
 
           {/* Field Strategy Preset & Field Status Badge */}
-          <div className="absolute top-3.5 right-3.5 z-30 flex items-center gap-1.5 sm:gap-2">
+          <div className="absolute top-2.5 right-2.5 sm:top-3.5 sm:right-3.5 z-30 flex items-center gap-1 sm:gap-2">
             {/* Edit Field Toggle (enables drag-repositioning of fielders) — AI-owned, hidden from the user */}
             {manualControlsEnabled && (
               <button
                 type="button"
                 onClick={handleEditFieldToggle}
-                title={editFieldEnabled ? 'Editing on â€” drag fielders to reposition them' : 'Turn on to drag fielders into position'}
+                title={editFieldEnabled ? 'Editing on — drag fielders to reposition them' : 'Turn on to drag fielders into position'}
                 className={cn(
-                  "px-2.5 py-1.5 rounded-xl text-[10px] sm:text-xs font-black backdrop-blur-md shadow-lg border flex items-center gap-1.5 transition-all",
+                  "px-2 py-1 sm:px-2.5 sm:py-1.5 rounded-xl text-[9px] sm:text-xs font-black backdrop-blur-md shadow-lg border flex items-center gap-1 transition-all",
                   editFieldEnabled
                     ? "bg-cyan-500 text-slate-950 border-cyan-300"
                     : "bg-slate-950/90 text-slate-300 border-white/15 hover:text-white"
                 )}
               >
-                {editFieldEnabled ? <Unlock className="w-3 h-3" /> : <Lock className="w-3 h-3" />}
-                Edit Field
+                {editFieldEnabled ? <Unlock className="w-2.5 h-2.5 sm:w-3 sm:h-3" /> : <Lock className="w-2.5 h-2.5 sm:w-3 sm:h-3" />}
+                <span className="hidden sm:inline">Edit Field</span>
+                <span className="sm:hidden">Edit</span>
               </button>
             )}
 
@@ -1152,7 +1153,7 @@ export default function CricketActionVisualizer({
                   setActivePresetKey(val || null);
                   triggerTacticalRecalculation(val || undefined);
                 }}
-                className="bg-slate-950/90 backdrop-blur-md text-slate-200 text-[10px] sm:text-xs font-bold px-2.5 py-1.5 rounded-xl border border-white/15 focus:outline-none focus:border-cyan-400 shadow-lg cursor-pointer"
+                className="bg-slate-950/90 backdrop-blur-md text-slate-200 text-[9px] sm:text-xs font-bold px-1.5 sm:px-2.5 py-1 sm:py-1.5 rounded-xl border border-white/15 focus:outline-none focus:border-cyan-400 shadow-lg cursor-pointer max-w-[85px] sm:max-w-none truncate"
                 title="Select Field Preset"
               >
                 <option value="">Default Preset</option>
@@ -1167,7 +1168,7 @@ export default function CricketActionVisualizer({
             {/* Field Status Pill */}
             <span
               className={cn(
-                "px-2.5 py-1 rounded-xl text-[10px] font-black uppercase flex items-center gap-1.5 tracking-wider backdrop-blur-md shadow-lg border",
+                "px-2 py-0.5 sm:px-2.5 sm:py-1 rounded-xl text-[9px] sm:text-[10px] font-black uppercase flex items-center gap-1 sm:gap-1.5 tracking-wider backdrop-blur-md shadow-lg border",
                 isFieldChanging
                   ? "bg-amber-500/20 text-amber-300 border-amber-500/40 animate-pulse"
                   : playbackStage === 'BALL_TRAVEL' || playbackStage === 'PITCH_BOUNCE'
@@ -1453,6 +1454,9 @@ export default function CricketActionVisualizer({
                 >
                   <title>{`${fielder.role}: ${fielder.name} (${fielder.tacticalRole}) - Click to inspect`}</title>
 
+                  {/* Expanded invisible touch hit target for mobile touch responsiveness */}
+                  <circle r="20" fill="transparent" pointerEvents="all" />
+
                   {/* Highlight ring if selected */}
                   {isSelected && (
                     <circle r="15" fill="none" stroke="#F59E0B" strokeWidth="2.5" strokeDasharray="3 2" className="animate-spin-slow" />
@@ -1605,12 +1609,12 @@ export default function CricketActionVisualizer({
                 animate={{ opacity: 1, y: 0, scale: 1 }}
                 exit={{ opacity: 0, y: 10, scale: 0.95 }}
                 transition={{ duration: 0.16 }}
-                className="absolute bottom-3 left-3 right-3 sm:left-auto sm:right-3 sm:w-80 bg-slate-950/95 backdrop-blur-xl border border-slate-700/80 rounded-2xl p-4 shadow-2xl z-30 text-white"
+                className="absolute bottom-2 left-2 right-2 sm:bottom-3 sm:left-auto sm:right-3 sm:w-80 max-h-[70vh] overflow-y-auto custom-scrollbar bg-slate-950/95 backdrop-blur-xl border border-slate-700/80 rounded-2xl p-3 sm:p-4 shadow-2xl z-30 text-white"
               >
                 <div className="flex items-start justify-between gap-3">
-                  <div className="flex items-center gap-2.5">
+                  <div className="flex items-center gap-2 sm:gap-2.5">
                     <div
-                      className="w-10 h-10 rounded-xl flex items-center justify-center font-black text-sm text-white shadow-md border"
+                      className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl flex items-center justify-center font-black text-xs sm:text-sm text-white shadow-md border shrink-0"
                       style={{
                         backgroundColor: inspectedFielder.isBowler
                           ? '#DC2626'
@@ -1632,13 +1636,13 @@ export default function CricketActionVisualizer({
                         .join('') || (inspectedFielder.isBowler ? 'BW' : inspectedFielder.isWicketkeeper ? 'WK' : 'FD')}
                     </div>
                     <div>
-                      <div className="text-sm font-black text-white leading-tight">{inspectedFielder.name}</div>
-                      <div className="text-[11px] font-bold text-amber-400 mt-0.5">{inspectedFielder.role}</div>
+                      <div className="text-xs sm:text-sm font-black text-white leading-tight">{inspectedFielder.name}</div>
+                      <div className="text-[10px] sm:text-[11px] font-bold text-amber-400 mt-0.5">{inspectedFielder.role}</div>
                     </div>
                   </div>
                   <button
                     onClick={() => setInspectedFielder(null)}
-                    className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition-colors"
+                    className="text-slate-400 hover:text-white p-1.5 rounded-lg hover:bg-slate-800 transition-colors shrink-0"
                     title="Close"
                   >
                     <X className="w-4 h-4" />
@@ -1707,12 +1711,12 @@ export default function CricketActionVisualizer({
                 animate={{ scale: 1, opacity: 1, y: 0 }}
                 exit={{ scale: 0.8, opacity: 0 }}
                 className={cn(
-                  "absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 px-7 py-3 rounded-2xl backdrop-blur-xl border font-black text-2xl tracking-wider shadow-2xl z-40 text-center pointer-events-none flex items-center gap-2",
-                  resultBanner.includes('SIX') && "bg-purple-950/90 border-purple-400 text-purple-200 shadow-purple-500/40 text-3xl animate-pulse",
-                  resultBanner.includes('FOUR') && "bg-blue-950/90 border-blue-400 text-blue-200 shadow-blue-500/40 text-3xl",
-                  resultBanner.includes('WICKET') && "bg-red-950/90 border-red-500 text-red-100 shadow-red-500/50 text-3xl",
-                  resultBanner.includes('RUN') && "bg-zinc-900/90 border-white/20 text-white text-xl",
-                  resultBanner.includes('DOT') && "bg-black/90 border-white/10 text-white/70 text-base"
+                  "absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 max-w-[90%] px-4 sm:px-7 py-2 sm:py-3 rounded-2xl backdrop-blur-xl border font-black text-xl sm:text-2xl tracking-wider shadow-2xl z-40 text-center pointer-events-none flex items-center justify-center gap-2",
+                  resultBanner.includes('SIX') && "bg-purple-950/90 border-purple-400 text-purple-200 shadow-purple-500/40 text-2xl sm:text-3xl animate-pulse",
+                  resultBanner.includes('FOUR') && "bg-blue-950/90 border-blue-400 text-blue-200 shadow-blue-500/40 text-2xl sm:text-3xl",
+                  resultBanner.includes('WICKET') && "bg-red-950/90 border-red-500 text-red-100 shadow-red-500/50 text-2xl sm:text-3xl",
+                  resultBanner.includes('RUN') && "bg-zinc-900/90 border-white/20 text-white text-lg sm:text-xl",
+                  resultBanner.includes('DOT') && "bg-black/90 border-white/10 text-white/70 text-sm sm:text-base"
                 )}
               >
                 {resultBanner.includes('SIX') && <Sparkles className="w-5 h-5 text-amber-300 animate-spin" />}
@@ -2028,8 +2032,8 @@ export default function CricketActionVisualizer({
       â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */}
       {!hideSideAndBottomPanels && (
         <div className="w-full bg-slate-950/95 backdrop-blur-xl border-t border-white/10">
-          <div className="px-4 py-2 border-b border-white/5 flex flex-wrap items-center justify-between gap-2">
-          <div className="flex items-center gap-1">
+          <div className="px-3 sm:px-4 py-2 border-b border-white/5 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2">
+          <div className="flex items-center gap-1 overflow-x-auto no-scrollbar py-0.5">
             {(['FIELD MAP', 'BOWLER PLAN', 'SCORING ZONES', 'AI CAPTAIN'] as const).map((tab) => {
               const tabKey = tab.replace(' ', '_') as BottomPanelTab;
               return (
@@ -2037,7 +2041,7 @@ export default function CricketActionVisualizer({
                   key={tab}
                   onClick={() => setActiveBottomTab(tabKey)}
                   className={cn(
-                    "px-3 py-1.5 rounded-xl text-xs font-black tracking-wider uppercase transition-all",
+                    "px-2.5 py-1 sm:px-3 sm:py-1.5 rounded-xl text-[10px] sm:text-xs font-black tracking-wider uppercase transition-all whitespace-nowrap shrink-0",
                     activeBottomTab === tabKey
                       ? "bg-white text-slate-950 shadow-md"
                       : "text-slate-400 hover:text-white"
@@ -2049,9 +2053,9 @@ export default function CricketActionVisualizer({
             })}
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center justify-between sm:justify-end gap-2">
             <span className={cn(
-              "px-3 py-1 rounded-full text-[10px] font-black uppercase flex items-center gap-1.5 tracking-wider",
+              "px-2.5 py-0.5 sm:px-3 sm:py-1 rounded-full text-[9px] sm:text-[10px] font-black uppercase flex items-center gap-1 sm:gap-1.5 tracking-wider shrink-0",
               isFieldChanging || lifecycle === 'DELIVERY_SIMULATION' || lifecycle === 'BALL_PATH_PLAYBACK'
                 ? "bg-amber-500/20 text-amber-300 border border-amber-500/40 animate-pulse"
                 : "bg-emerald-500/20 text-emerald-300 border border-emerald-500/40"
@@ -2059,7 +2063,7 @@ export default function CricketActionVisualizer({
               {isFieldChanging ? (
                 <>
                   <Lock className="w-3 h-3 text-amber-400" />
-                  DELIVERY LOCKED â€” FIELD IN MOTION
+                  DELIVERY LOCKED — FIELD IN MOTION
                 </>
               ) : lifecycle === 'BALL_PATH_PLAYBACK' ? (
                 <>
@@ -2076,7 +2080,7 @@ export default function CricketActionVisualizer({
           </div>
         </div>
 
-        <div className="p-4">
+        <div className="p-3 sm:p-4">
           {activeBottomTab === 'FIELD_MAP' && (
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
               <div className="bg-white/[0.03] p-3 rounded-xl border border-white/5">

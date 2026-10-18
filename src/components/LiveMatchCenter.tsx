@@ -1,4 +1,4 @@
-﻿import { useCallback, useEffect, useMemo, useState, useRef, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useState, useRef, type ReactNode } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   ArrowLeft,
@@ -1870,76 +1870,79 @@ export default function LiveMatchCenter() {
           )}
 
           {/* Main Authoritative Score & Control Row */}
-          <div className="pt-3 flex flex-wrap lg:flex-nowrap items-center justify-between gap-4">
+          <div className="pt-3 flex flex-col lg:flex-row lg:items-center justify-between gap-3 sm:gap-4">
             {/* Team 1 vs Team 2 + Scoreboard */}
-            <div className="flex items-center gap-4 sm:gap-6 flex-wrap sm:flex-nowrap">
-              {/* Batting Team */}
-              <div className="flex items-center gap-2.5">
-                <img
-                  src={resolveTeamLogo(battingTeam)}
-                  alt={battingTeam.shortName}
-                  className="h-9 w-9 object-contain drop-shadow-sm"
-                  onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
-                />
-                <div>
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-base sm:text-lg font-black text-slate-900">{battingTeam.name}</span>
-                    {battingTeam.id === myTeamId && (
-                      <span className="bg-blue-100 text-blue-700 border border-blue-200 text-[9px] font-black px-1.5 py-0.5 rounded">YOU</span>
-                    )}
-                  </div>
-                  <div className="text-xs text-slate-500 font-semibold flex items-center gap-1.5">
-                    <span>CRR: <span className="font-bold text-slate-800">{currentRunRate}</span></span>
-                    <span className="text-slate-300">|</span>
-                    <span className="font-bold text-slate-700">{isTest ? `${ordinal(inningNo)} Innings` : inningNo === 1 ? '1st' : '2nd'} Innings</span>
+            <div className="w-full lg:w-auto flex flex-col sm:flex-row items-center justify-between sm:justify-start gap-3 sm:gap-6">
+              {/* Teams & Score Row on Mobile, inline on Desktop */}
+              <div className="w-full sm:w-auto flex items-center justify-between sm:justify-start gap-2.5 sm:gap-6">
+                {/* Batting Team */}
+                <div className="flex items-center gap-2 sm:gap-2.5 min-w-0">
+                  <img
+                    src={resolveTeamLogo(battingTeam)}
+                    alt={battingTeam.shortName}
+                    className="h-8 w-8 sm:h-9 sm:w-9 object-contain drop-shadow-sm shrink-0"
+                    onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
+                  />
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-sm sm:text-lg font-black text-slate-900 truncate max-w-[95px] sm:max-w-none">{battingTeam.name}</span>
+                      {battingTeam.id === myTeamId && (
+                        <span className="bg-blue-100 text-blue-700 border border-blue-200 text-[8px] sm:text-[9px] font-black px-1 sm:px-1.5 py-0.5 rounded shrink-0">YOU</span>
+                      )}
+                    </div>
+                    <div className="text-[10px] sm:text-xs text-slate-500 font-semibold flex items-center gap-1">
+                      <span>CRR: <span className="font-bold text-slate-800">{currentRunRate}</span></span>
+                      <span className="text-slate-300">|</span>
+                      <span className="font-bold text-slate-700 truncate">{isTest ? `${ordinal(inningNo)} Inn` : inningNo === 1 ? '1st' : '2nd'}</span>
+                    </div>
                   </div>
                 </div>
-              </div>
 
-              {/* Authoritative Live Score */}
-              <div className="px-4 py-1.5 rounded-xl bg-slate-50 border border-slate-200/90 text-center min-w-[140px]">
-                <div className="text-2xl sm:text-3xl font-black text-slate-950 tabular-nums tracking-tight">
-                  {inning?.runs || 0}<span className="text-slate-400">/</span>{inning?.wickets || 0}
-                  <span className="text-xs sm:text-sm font-bold text-slate-500 ml-1.5">
-                    ({formatOvers(inning?.balls || 0)} ov)
-                  </span>
-                </div>
-                {matchTarget > 0 && (
-                  <div className="text-[10px] font-bold text-amber-700 tracking-tight">
-                    {isTest ? `Need ${runsNeeded} runs` : `Need ${runsNeeded} from ${ballsRemaining}b · RRR: ${requiredRunRate}`}
+                {/* Authoritative Live Score */}
+                <div className="px-2.5 sm:px-4 py-1.5 rounded-xl bg-slate-50 border border-slate-200/90 text-center min-w-[110px] sm:min-w-[140px] shrink-0">
+                  <div className="text-xl sm:text-3xl font-black text-slate-950 tabular-nums tracking-tight">
+                    {inning?.runs || 0}<span className="text-slate-400">/</span>{inning?.wickets || 0}
+                    <span className="text-[10px] sm:text-sm font-bold text-slate-500 ml-1">
+                      ({formatOvers(inning?.balls || 0)} ov)
+                    </span>
                   </div>
-                )}
-              </div>
-
-              {/* Bowling Team */}
-              <div className="flex items-center gap-2.5">
-                <img
-                  src={resolveTeamLogo(bowlingTeam)}
-                  alt={bowlingTeam.shortName}
-                  className="h-9 w-9 object-contain opacity-90 drop-shadow-sm"
-                  onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
-                />
-                <div>
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-sm sm:text-base font-bold text-slate-700">{bowlingTeam.name}</span>
-                    {bowlingTeam.id === myTeamId && (
-                      <span className="bg-purple-100 text-purple-700 border border-purple-200 text-[9px] font-black px-1.5 py-0.5 rounded">YOU</span>
-                    )}
-                  </div>
-                  {(isTest ? testLead !== 0 : inningNo === 2 && Boolean(innings[0])) && (
-                    <div className="text-xs text-slate-500 font-semibold">
-                      {isTest
-                        ? `${testLead > 0 ? 'Lead' : 'Trail'} by ${Math.abs(testLead)}`
-                        : `1st Inn: ${innings[0]?.runs}/${innings[0]?.wickets}`}
+                  {matchTarget > 0 && (
+                    <div className="text-[9px] sm:text-[10px] font-bold text-amber-700 tracking-tight">
+                      {isTest ? `Need ${runsNeeded}r` : `Need ${runsNeeded} in ${ballsRemaining}b`}
                     </div>
                   )}
+                </div>
+
+                {/* Bowling Team */}
+                <div className="flex items-center gap-2 sm:gap-2.5 min-w-0 justify-end sm:justify-start">
+                  <div className="text-right sm:text-left min-w-0">
+                    <div className="flex items-center justify-end sm:justify-start gap-1.5">
+                      <span className="text-xs sm:text-base font-bold text-slate-700 truncate max-w-[85px] sm:max-w-none">{bowlingTeam.name}</span>
+                      {bowlingTeam.id === myTeamId && (
+                        <span className="bg-purple-100 text-purple-700 border border-purple-200 text-[8px] sm:text-[9px] font-black px-1 sm:px-1.5 py-0.5 rounded shrink-0">YOU</span>
+                      )}
+                    </div>
+                    {(isTest ? testLead !== 0 : inningNo === 2 && Boolean(innings[0])) && (
+                      <div className="text-[10px] sm:text-xs text-slate-500 font-semibold truncate">
+                        {isTest
+                          ? `${testLead > 0 ? 'Lead' : 'Trail'} ${Math.abs(testLead)}`
+                          : `1st: ${innings[0]?.runs}/${innings[0]?.wickets}`}
+                      </div>
+                    )}
+                  </div>
+                  <img
+                    src={resolveTeamLogo(bowlingTeam)}
+                    alt={bowlingTeam.shortName}
+                    className="h-8 w-8 sm:h-9 sm:w-9 object-contain opacity-90 drop-shadow-sm shrink-0"
+                    onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
+                  />
                 </div>
               </div>
             </div>
 
             {/* Playback Controls (bowling & fielding are AI-controlled, so no manual tactical mode) */}
-            <div className="flex items-center gap-2 bg-slate-50 p-1.5 rounded-xl border border-slate-200">
-              <span className="hidden md:inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-slate-100 border border-slate-200 text-[9px] font-black uppercase text-slate-500">
+            <div className="w-full lg:w-auto flex items-center justify-between sm:justify-start gap-1.5 sm:gap-2 bg-slate-50 p-1.5 rounded-xl border border-slate-200 overflow-x-auto no-scrollbar">
+              <span className="hidden md:inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-slate-100 border border-slate-200 text-[9px] font-black uppercase text-slate-500 shrink-0">
                 {controlSummary}
               </span>
 
@@ -1950,7 +1953,7 @@ export default function LiveMatchCenter() {
                   setIsPlaybackPaused(v => !v);
                 }}
                 className={cn(
-                  "p-1.5 rounded-lg border text-xs transition-colors",
+                  "p-2 sm:p-1.5 rounded-lg border text-xs transition-colors shrink-0",
                   autoPlay && !isPlaybackPaused
                     ? "bg-white border-slate-200 text-slate-700 hover:bg-slate-100"
                     : "bg-amber-500 text-white border-amber-600"
@@ -1961,7 +1964,7 @@ export default function LiveMatchCenter() {
               </button>
 
               {/* Speed Selectors (1x, 1.5x, 2x) */}
-              <div className="hidden sm:flex items-center bg-white p-0.5 rounded-lg border border-slate-200">
+              <div className="hidden sm:flex items-center bg-white p-0.5 rounded-lg border border-slate-200 shrink-0">
                 {([1, 1.5, 2] as AnimationSpeed[]).map((spd) => (
                   <button
                     key={spd}
@@ -1981,7 +1984,7 @@ export default function LiveMatchCenter() {
               {/* Replay */}
               <button
                 onClick={() => setReplayTrigger(n => n + 1)}
-                className="p-1.5 rounded-lg bg-white border border-slate-200 text-slate-700 hover:bg-slate-100 transition-colors"
+                className="p-2 sm:p-1.5 rounded-lg bg-white border border-slate-200 text-slate-700 hover:bg-slate-100 transition-colors shrink-0"
                 title="Replay Delivery"
               >
                 <RotateCcw className="w-3.5 h-3.5" />
@@ -1998,7 +2001,7 @@ export default function LiveMatchCenter() {
                 }}
                 disabled={!isBallAnimating && (!canPlayManualBall || autoPlay)}
                 className={cn(
-                  "px-3 py-1 rounded-lg text-[10px] font-black uppercase transition-all border",
+                  "flex-1 sm:flex-initial px-3 sm:px-4 py-2 sm:py-1 rounded-lg text-[10px] sm:text-xs font-black uppercase transition-all border text-center shrink-0",
                   isBallAnimating
                     ? "bg-slate-800 text-white border-slate-900 hover:bg-slate-700"
                     : canPlayManualBall && !autoPlay
@@ -2021,7 +2024,7 @@ export default function LiveMatchCenter() {
                 }}
                 disabled={autoPlay || !canPlayManualBall}
                 className={cn(
-                  "px-3 py-1 rounded-lg text-[10px] font-black uppercase transition-all border",
+                  "flex-1 sm:flex-initial px-3 sm:px-4 py-2 sm:py-1 rounded-lg text-[10px] sm:text-xs font-black uppercase transition-all border text-center shrink-0",
                   !autoPlay && canPlayManualBall
                     ? "bg-indigo-600 text-white border-indigo-700 shadow-sm hover:bg-indigo-700"
                     : "opacity-40 bg-slate-200 border-slate-300 text-slate-400 cursor-not-allowed"
@@ -2312,10 +2315,10 @@ export default function LiveMatchCenter() {
           </div>
 
           {/* ── BOTTOM STRIP: LAST 6 BALLS + RECENT COMMENTARY ── */}
-          <div className="lg:col-span-12 bg-white rounded-2xl border border-slate-200/90 shadow-sm p-3.5 flex flex-col lg:flex-row lg:items-center gap-4">
-            <div className="flex items-center gap-3 shrink-0">
+          <div className="lg:col-span-12 bg-white rounded-2xl border border-slate-200/90 shadow-sm p-3 sm:p-3.5 flex flex-col lg:flex-row lg:items-center justify-between gap-3 sm:gap-4">
+            <div className="flex flex-wrap sm:flex-nowrap items-center gap-2.5 sm:gap-3 shrink-0">
               <span className="text-[10px] font-black uppercase text-slate-400 tracking-wider">Last 6 Balls</span>
-              <div className="flex items-center gap-1.5">
+              <div className="flex items-center gap-1 sm:gap-1.5 overflow-x-auto no-scrollbar py-0.5">
                 {Array.from({ length: 6 }).map((_, i) => {
                   const filledFrom = 6 - last6.length;
                   const outcome = i >= filledFrom ? last6[i - filledFrom] : '';
@@ -2332,7 +2335,7 @@ export default function LiveMatchCenter() {
                       }}
                       title={outcome ? `Ball: ${outcome} — click to replay` : ''}
                       className={cn(
-                        'h-7 w-7 rounded-full grid place-items-center text-[10px] font-black shrink-0 transition-transform',
+                        'h-6 w-6 sm:h-7 sm:w-7 rounded-full grid place-items-center text-[9px] sm:text-[10px] font-black shrink-0 transition-transform',
                         outcome ? 'hover:scale-110 cursor-pointer' : 'cursor-default',
                         ballChipClass(outcome)
                       )}
@@ -2345,7 +2348,7 @@ export default function LiveMatchCenter() {
               <span className="text-[10px] font-bold text-slate-400 tabular-nums">{formatOvers(inning?.balls || 0)} ov</span>
               <div className="hidden sm:block w-px self-stretch bg-slate-100" />
               <div
-                className="flex items-center gap-2"
+                className="flex items-center gap-1.5 sm:gap-2 flex-wrap"
                 title={
                   fieldStatus.phase.restricted
                     ? fieldStatus.legal
@@ -2356,7 +2359,7 @@ export default function LiveMatchCenter() {
               >
                 <span
                   className={cn(
-                    'text-[9px] font-black uppercase tracking-wider px-2 py-1 rounded-full border whitespace-nowrap',
+                    'text-[8px] sm:text-[9px] font-black uppercase tracking-wider px-2 py-0.5 sm:py-1 rounded-full border whitespace-nowrap',
                     fieldStatus.legal
                       ? 'bg-cyan-50 text-cyan-700 border-cyan-200'
                       : 'bg-rose-50 text-rose-700 border-rose-200'
@@ -2366,7 +2369,7 @@ export default function LiveMatchCenter() {
                 </span>
                 <span
                   className={cn(
-                    'text-[9px] font-bold px-2 py-1 rounded-full border flex items-center gap-1 whitespace-nowrap',
+                    'text-[8px] sm:text-[9px] font-bold px-2 py-0.5 sm:py-1 rounded-full border flex items-center gap-1 whitespace-nowrap',
                     isRetrieving ? 'bg-amber-50 text-amber-700 border-amber-200' : 'bg-emerald-50 text-emerald-700 border-emerald-200'
                   )}
                 >
