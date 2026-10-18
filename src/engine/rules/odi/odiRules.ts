@@ -11,6 +11,7 @@ export const odiRules: CricketRules = {
     { startOver: 11, endOver: 40, maxOutsideCircle: 4 },
     { startOver: 41, endOver: 50, maxOutsideCircle: 5 }
   ],
+  maxLegSideFielders: 5,
   newBallRules: {
     initialBalls: 2 // Two new balls at the start of the innings
   },

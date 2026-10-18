@@ -1,4 +1,5 @@
 import { Point } from '../engine/strategy/BowlerFieldStrategyEngine';
+import type { FieldValidationResult } from '../engine/fielding/FieldingRestrictionEngine';
 
 export type DeliveryLifecycle =
   | 'READY'
@@ -67,5 +68,7 @@ export interface DeliveryResult {
   overCompleted: boolean;
   isFreeHit?: boolean;
   triggeredFreeHit?: boolean;
+  /** Authoritative field-legality report captured at the instant of delivery. */
+  fieldValidation?: FieldValidationResult;
 }
 

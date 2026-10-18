@@ -14,6 +14,7 @@ export const t20Rules: CricketRules = {
     { startOver: 1, endOver: 6, maxOutsideCircle: 2 },
     { startOver: 7, endOver: 20, maxOutsideCircle: 5 }
   ],
+  maxLegSideFielders: 5,
   superOver: true,
   reviews: {
     perInnings: 2,

@@ -1,6 +1,11 @@
 import { Player } from '../../types/common';
 import { PitchType, WeatherCondition } from '../../types/match';
 import { ArenaFormat } from '../models/ArenaState';
+import {
+  getFieldingPhase,
+  getLegSideLimit,
+  isOnLegSide,
+} from '../fielding/FieldingRestrictionEngine';
 
 export interface Point {
   x: number;
@@ -72,6 +77,10 @@ export interface FieldConfiguration {
     toPoint: Point;
   }>;
   scoringZones: ScoringZoneData[];
+  /** Active Law 28.3 leg-side maximum applied to this configuration. */
+  legSideLimit?: number;
+  /** True when the strict two-fielder movement budget deferred part of the ideal change. */
+  movementLimited?: boolean;
 }
 
 export interface FieldStrategyInput {
@@ -94,6 +103,14 @@ export interface FieldStrategyInput {
   manualPresetKey?: string;
   testDaySession?: { day: number; session: 'Morning' | 'Afternoon' | 'Evening' };
   ballAgeOvers?: number;
+  /** Total overs of the (possibly reduced) innings — rescales phase windows. */
+  totalOvers?: number;
+  /** Batter's recently punished scoring arcs (wagon zones) — attracts fielders within the movement budget. */
+  hotZones?: string[];
+  /** Strict per-update movement budget (default 2, per the Laws of the game's flow). */
+  maxFielderMoves?: number;
+  /** Competition season — used for season-keyed rules (e.g. IPL). */
+  season?: number;
 }
 
 // ─── CANONICAL 3D FIELD POSITION REGISTRY (600 x 600 Ground Space) ───────────
@@ -142,6 +159,68 @@ export const CANONICAL_POSITIONS: Record<string, FieldPositionDef> = {
   DEEP_SQUARE_LEG: { key: 'DEEP_SQUARE_LEG', name: 'Deep Square Leg', x: 525, y: 395, category: 'BOUNDARY', ringDistance: 'OUTER', isOutsideCircle: true, tacticalRole: 'Hook / Pull Sweeper' },
   DEEP_FINE_LEG: { key: 'DEEP_FINE_LEG', name: 'Deep Fine Leg', x: 410, y: 495, category: 'BOUNDARY', ringDistance: 'OUTER', isOutsideCircle: true, tacticalRole: 'Hook / Glance Boundary Guard' },
 };
+
+// ─── PHASE BOUNDARY RESOLUTION (reduced-overs aware) ─────────────────────────
+// Mirrors the rule-layer scaling: a 20-over ODI keeps proportional phases
+// (powerplay 1-4, middle 5-16, death 17-20).
+export interface PhaseBounds {
+  /** Last over of the powerplay (1-indexed). */
+  ppEnd: number;
+  /** Last over of the middle phase (1-indexed). */
+  midEnd: number;
+  /** Total overs of the innings. */
+  total: number;
+}
+
+export function phaseBoundaries(format: ArenaFormat, totalOvers?: number): PhaseBounds {
+  if (format === 'TEST') return { ppEnd: 0, midEnd: 0, total: 0 };
+  const base = format === 'ODI' ? 50 : 20;
+  const total = totalOvers && totalOvers > 0 && totalOvers < base ? Math.floor(totalOvers) : base;
+  const ppEnd = format === 'ODI'
+    ? Math.max(1, Math.round((10 / 50) * total))
+    : Math.max(1, Math.round((6 / 20) * total));
+  const rawMid = format === 'ODI'
+    ? Math.round((40 / 50) * total)
+    : Math.round((15 / 20) * total);
+  const midEnd = Math.min(total, Math.max(ppEnd + 1, rawMid));
+  return { ppEnd, midEnd, total };
+}
+
+// ─── HOT-ZONE (WAGON ZONE) GEOMETRY ──────────────────────────────────────────
+// Local arcs mirroring the captaincy wagon zones — defined here to avoid a
+// circular dependency on AdaptiveCaptainEngine.
+export const HOT_ZONE_ARCS: Record<string, [number, number]> = {
+  THIRD_MAN_GULLY: [-150, -110],
+  POINT_SQUARE: [-110, -70],
+  COVER: [-70, -25],
+  LONG_OFF: [-25, 0],
+  LONG_ON: [0, 25],
+  MID_WICKET_COW: [25, 70],
+  SQUARE_LEG: [70, 110],
+  FINE_LEG: [110, 150],
+};
+
+/** Angle (deg) of a point from the batter's crease, flipped for left-handers. */
+export function zoneAngleFromBatter(p: Point, isLeftHanded: boolean): number {
+  const deg = Math.atan2(p.x - 300, -(p.y - 410)) * (180 / Math.PI);
+  return isLeftHanded ? -deg : deg;
+}
+
+/** True when the point falls inside any of the batter's recently punished arcs. */
+export function isWithinHotZone(p: Point, isLeftHanded: boolean, hotZones?: string[] | null): boolean {
+  if (!hotZones || hotZones.length === 0) return false;
+  const deg = zoneAngleFromBatter(p, isLeftHanded);
+  return hotZones.some((z) => {
+    const arc = HOT_ZONE_ARCS[z];
+    return !!arc && deg >= arc[0] && deg <= arc[1];
+  });
+}
+
+/** Off-side replacement positions used when rebalancing a leg-side-heavy set. */
+const OFF_SIDE_FALLBACKS = [
+  'DEEP_THIRD_MAN', 'DEEP_POINT', 'SWEEPER_COVER', 'DEEP_COVER',
+  'SHORT_THIRD_MAN', 'EXTRA_COVER', 'COVER_POINT', 'BACKWARD_POINT',
+];
 
 export class BowlerFieldStrategyEngine {
   /**
@@ -198,7 +277,13 @@ export class BowlerFieldStrategyEngine {
     const isLeftHander = this.isLeftHandedBatter(striker);
     const isSpinner = this.isSpinBowler(bowler);
 
-    let maxOutsideCircle = 5;
+    // Phase windows + limits come from the authoritative rules layer and
+    // automatically rescale for reduced-overs competitions and season rules.
+    const bounds = phaseBoundaries(format, input.totalOvers);
+    const activePhase = getFieldingPhase(format, overs + 1, undefined, input.totalOvers, input.season);
+    const legSideLimit = getLegSideLimit(format, input.season);
+
+    let maxOutsideCircle = activePhase.restricted ? activePhase.maxOutsideCircle : 9;
     let phaseName = 'Middle';
     let configName = 'Tactical Balanced';
     let intentText = 'Control singles and apply pressure';
@@ -215,7 +300,6 @@ export class BowlerFieldStrategyEngine {
       const day = input.testDaySession?.day ?? (Math.floor(overs / 90) + 1);
       const session = input.testDaySession?.session ?? (overs % 90 < 30 ? 'Morning' : overs % 90 < 60 ? 'Afternoon' : 'Evening');
       maxOutsideCircle = 9; // No fielding circle limits in Test cricket!
-
       if (isNewBall && !isSpinner) {
         phaseName = `New Ball (Day ${day} ${session})`;
         configName = 'Attacking Slip Cordon (Test)';
@@ -259,7 +343,7 @@ export class BowlerFieldStrategyEngine {
         };
         selectedKeys = [
           'FIRST_SLIP', 'GULLY', 'SHORT_LEG', 'SILLY_MID_ON',
-          'MID_OFF', 'MID_ON', 'SQUARE_LEG', 'DEEP_SQUARE_LEG', 'DEEP_FINE_LEG'
+          'MID_OFF', 'MID_ON', 'SQUARE_LEG', 'DEEP_SQUARE_LEG', 'DEEP_THIRD_MAN'
         ];
       } else {
         phaseName = `Settled Batter (Day ${day} ${session})`;
@@ -279,10 +363,9 @@ export class BowlerFieldStrategyEngine {
       }
     } else if (format === 'ODI') {
       // ════ ODI CRICKET ENGINE ════
-      if (overs < 10) {
-        // Powerplay 1 (Overs 1-10) — Max 2 Outside Circle, 2 Catchers Required
-        maxOutsideCircle = 2;
-        phaseName = 'Powerplay 1 (Overs 1–10)';
+      if (overs < bounds.ppEnd) {
+        // Powerplay 1 — Max 2 Outside Circle, 2 Catchers Required
+        phaseName = `Powerplay 1 (Overs 1–${bounds.ppEnd})`;
         configName = 'ODI Powerplay Ring (2 Slips)';
         intentText = 'Attacking with 2 slips while guarding deep boundaries strictly within mandatory 2-outside limit';
         bowlingPlan = {
@@ -296,10 +379,9 @@ export class BowlerFieldStrategyEngine {
           'FIRST_SLIP', 'SECOND_SLIP', 'POINT', 'COVER',
           'MID_OFF', 'MID_ON', 'MID_WICKET', 'DEEP_THIRD_MAN', 'DEEP_FINE_LEG'
         ];
-      } else if (overs < 40) {
-        // Middle Overs (11-40) — Max 4 Outside Circle
-        maxOutsideCircle = 4;
-        phaseName = 'Middle Overs (11–40)';
+      } else if (overs < bounds.midEnd) {
+        // Middle Overs — Max 4 Outside Circle
+        phaseName = `Middle Overs (${bounds.ppEnd + 1}–${bounds.midEnd})`;
         configName = isSpinner ? 'ODI Spin Choke (4 Deep)' : 'ODI Balanced 4-Deep Split';
         intentText = 'Choking rotation of strike through ring fielders with 4 deep sweepers for lofted shots';
         bowlingPlan = {
@@ -317,9 +399,8 @@ export class BowlerFieldStrategyEngine {
           'MID_ON', 'DEEP_THIRD_MAN', 'LONG_OFF', 'LONG_ON', 'DEEP_MID_WICKET'
         ];
       } else {
-        // Death Overs (41-50) — Max 5 Outside Circle
-        maxOutsideCircle = 5;
-        phaseName = 'Death Overs (41–50)';
+        // Death Overs — Max 5 Outside Circle
+        phaseName = `Death Overs (${bounds.midEnd + 1}–${bounds.total})`;
         configName = 'ODI Death Yorker Defense (5 Deep)';
         intentText = 'Protecting boundaries with 5 fielders on the rope, executing blockhole yorkers';
         bowlingPlan = {
@@ -336,10 +417,9 @@ export class BowlerFieldStrategyEngine {
       }
     } else {
       // ════ T20 & IPL CRICKET ENGINE ════
-      if (overs < 6) {
-        // Powerplay (1-6) — Max 2 Outside Circle
-        maxOutsideCircle = 2;
-        phaseName = 'Powerplay (Overs 1–6)';
+      if (overs < bounds.ppEnd) {
+        // Powerplay — Max 2 Outside Circle
+        phaseName = `Powerplay (Overs 1–${bounds.ppEnd})`;
         configName = 'T20 Powerplay Ring & Slip';
         intentText = 'Stopping early boundary blitz with 1 slip and packed 30-yard ring, 2 on boundary';
         bowlingPlan = {
@@ -353,10 +433,9 @@ export class BowlerFieldStrategyEngine {
           'FIRST_SLIP', 'POINT', 'COVER', 'EXTRA_COVER',
           'MID_OFF', 'MID_ON', 'MID_WICKET', 'DEEP_THIRD_MAN', 'DEEP_FINE_LEG'
         ];
-      } else if (overs < 16) {
-        // Middle Overs (7-15) — Max 5 Outside Circle
-        maxOutsideCircle = 5;
-        phaseName = 'Middle Overs (7–15)';
+      } else if (overs < bounds.midEnd) {
+        // Middle Overs — Max 5 Outside Circle
+        phaseName = `Middle Overs (${bounds.ppEnd + 1}–${bounds.midEnd})`;
         configName = isSpinner ? 'T20 Spin Web (5 Deep)' : 'T20 Middle Squeeze (5 Deep)';
         intentText = 'Starving boundaries and building pressure with 5 deep fielders and active sweeper';
         bowlingPlan = {
@@ -374,9 +453,8 @@ export class BowlerFieldStrategyEngine {
           'DEEP_POINT', 'LONG_OFF', 'LONG_ON', 'DEEP_MID_WICKET', 'DEEP_SQUARE_LEG'
         ];
       } else {
-        // Death Overs (16-20) — Max 5 Outside Circle
-        maxOutsideCircle = 5;
-        phaseName = 'Death Overs (16–20)';
+        // Death Overs — Max 5 Outside Circle
+        phaseName = `Death Overs (${bounds.midEnd + 1}–${bounds.total})`;
         configName = 'T20 Death Yorker Shield';
         intentText = 'All-out boundary protection: 5 deep sentries, wide line yorkers, zero slot balls';
         bowlingPlan = {
@@ -401,6 +479,9 @@ export class BowlerFieldStrategyEngine {
       intentText = preset.intent;
     }
 
+    // Law 28.3 — never station more than the legal maximum on the leg side.
+    selectedKeys = this.enforceLegSideBalance(selectedKeys.slice(0, 9), isLeftHander, legSideLimit);
+
     // ─────────────────────────────────────────────────────────────────────────
     // 2. ASSIGN REAL FIELDERS FROM SQUAD
     // ─────────────────────────────────────────────────────────────────────────
@@ -417,7 +498,6 @@ export class BowlerFieldStrategyEngine {
     // Build the 9 fielders
     const fielders: FielderAssignment[] = [];
     const prevFielders = previousConfig?.fielders || [];
-    const changedFielders: FieldConfiguration['changedFielders'] = [];
 
     // Add Wicketkeeper
     const wkBase = CANONICAL_POSITIONS.WICKETKEEPER;
@@ -441,21 +521,9 @@ export class BowlerFieldStrategyEngine {
       const assignedPlayer = otherPlayers[idx] || otherPlayers[idx % otherPlayers.length];
       const targetPos = this.mirrorForLeftHander(pDef, isLeftHander);
 
-      // Find if this player had a previous position to calculate movement
+      // Anchor the fielder's start point to its previous station (if known).
       const prevAssign = prevFielders.find(f => f.id === assignedPlayer.id);
       const currentPos = prevAssign ? { ...prevAssign.targetPos } : { ...targetPos };
-
-      const dist = Math.hypot(currentPos.x - targetPos.x, currentPos.y - targetPos.y);
-      if (prevAssign && dist > 15) {
-        changedFielders.push({
-          playerId: assignedPlayer.id,
-          playerName: assignedPlayer.name,
-          fromRole: prevAssign.positionName,
-          toRole: pDef.name,
-          fromPoint: { ...currentPos },
-          toPoint: { ...targetPos },
-        });
-      }
 
       fielders.push({
         id: assignedPlayer.id,
@@ -472,15 +540,29 @@ export class BowlerFieldStrategyEngine {
     });
 
     // ─────────────────────────────────────────────────────────────────────────
-    // 3. COMPLIANCE & TACTICAL METRICS
+    // 3. STRICT MOVEMENT BUDGET — at most N fielders (default 2) may be
+    //    repositioned per tactical update. All other fielders hold station.
+    // ─────────────────────────────────────────────────────────────────────────
+    const maxMoves = input.maxFielderMoves ?? 2;
+    const { changedFielders, movementLimited } = this.applyMovementLimit(fielders, previousConfig, {
+      isLeftHander,
+      maxMoves,
+      hotZones: input.hotZones ?? [],
+      maxOutsideCircle,
+      legSideLimit,
+      restricted: activePhase.restricted,
+    });
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // 4. COMPLIANCE & TACTICAL METRICS
     // ─────────────────────────────────────────────────────────────────────────
     const actualOutside = fielders.filter(f => f.isOutsideCircle).length;
     const offSide = fielders.filter(f => isLeftHander ? f.targetPos.x > 300 : f.targetPos.x < 300).length;
     const legSide = fielders.filter(f => isLeftHander ? f.targetPos.x < 300 : f.targetPos.x > 300).length;
-    const isCompliant = format === 'TEST' || actualOutside <= maxOutsideCircle;
+    const isCompliant = actualOutside <= maxOutsideCircle && legSide <= legSideLimit;
 
     // ─────────────────────────────────────────────────────────────────────────
-    // 4. SCORING ZONES CALCULATION (360° Wagon Wheel)
+    // 5. SCORING ZONES CALCULATION (360° Wagon Wheel)
     // ─────────────────────────────────────────────────────────────────────────
     const scoringZones = this.computeScoringZones(fielders, isLeftHander);
 
@@ -496,6 +578,8 @@ export class BowlerFieldStrategyEngine {
       actualOutsideCircle: actualOutside,
       offSideCount: offSide,
       legSideCount: legSide,
+      legSideLimit,
+      movementLimited,
       isCompliant,
       changedFielders,
       scoringZones,
@@ -522,6 +606,165 @@ export class BowlerFieldStrategyEngine {
     if (Math.floor(currentOvers) !== Math.floor(previousOvers)) return true; // Over completed
     if (consecutiveBoundaries) return true;
     return false;
+  }
+
+  /**
+   * Law 28.3 — never station more than the legal maximum on the leg side.
+   * Over-limit leg-side positions are swapped for same-category off-side slots.
+   */
+  private static enforceLegSideBalance(keys: string[], isLeftHander: boolean, limit: number): string[] {
+    const adjusted = [...keys];
+    const isLegKey = (k: string): boolean => {
+      const def = CANONICAL_POSITIONS[k];
+      if (!def) return false;
+      const x = isLeftHander ? 600 - def.x : def.x;
+      return isOnLegSide(x, isLeftHander);
+    };
+    const countLeg = () => adjusted.filter(isLegKey).length;
+    let guard = 0;
+    while (countLeg() > limit && guard++ < 16) {
+      let legIdx = -1;
+      for (let i = adjusted.length - 1; i >= 0; i -= 1) {
+        if (isLegKey(adjusted[i])) { legIdx = i; break; }
+      }
+      if (legIdx < 0) break;
+      const removedCategory = CANONICAL_POSITIONS[adjusted[legIdx]]?.category;
+      const fallback = OFF_SIDE_FALLBACKS.find(k => !adjusted.includes(k) && CANONICAL_POSITIONS[k]?.category === removedCategory)
+        ?? OFF_SIDE_FALLBACKS.find(k => !adjusted.includes(k));
+      if (!fallback) break;
+      adjusted[legIdx] = fallback;
+    }
+    return adjusted;
+  }
+
+  /**
+   * Applies the per-update movement budget. Fielders whose ideal station
+   * differs from their previous station are "movers"; at most `maxMoves` of
+   * them relocate. The subset is chosen by legal-field feasibility first, then
+   * by hot-zone relevance, then by travel distance. Every intermediate field
+   * remains legal, and the animation simply represents the already-decided
+   * result.
+   */
+  private static applyMovementLimit(
+    fielders: FielderAssignment[],
+    previousConfig: FieldConfiguration | null | undefined,
+    opts: {
+      isLeftHander: boolean;
+      maxMoves: number;
+      hotZones: string[];
+      maxOutsideCircle: number;
+      legSideLimit: number;
+      restricted: boolean;
+    },
+  ): { changedFielders: FieldConfiguration['changedFielders']; movementLimited: boolean } {
+    const changedFielders: FieldConfiguration['changedFielders'] = [];
+    const prevById = new Map<string, FielderAssignment>();
+    (previousConfig?.fielders ?? []).forEach(f => prevById.set(f.id, f));
+    if (!prevById.size || opts.maxMoves <= 0) return { changedFielders, movementLimited: false };
+
+    interface Mover { f: FielderAssignment; prev: FielderAssignment; dist: number; }
+    const MOVE_THRESHOLD = 4;
+    const movers: Mover[] = [];
+
+    for (const f of fielders) {
+      const prev = prevById.get(f.id);
+      if (!prev) continue;
+      f.currentPos = { ...prev.targetPos };
+      if (f.positionKey === 'WICKETKEEPER') continue;
+      const dist = Math.hypot(f.currentPos.x - f.targetPos.x, f.currentPos.y - f.targetPos.y);
+      if (dist > MOVE_THRESHOLD) movers.push({ f, prev, dist });
+    }
+
+    const isProjectedLegal = (settled: Set<FielderAssignment>): boolean => {
+      let outside = 0;
+      let leg = 0;
+      for (const f of fielders) {
+        if (f.positionKey === 'WICKETKEEPER') continue;
+        const anchor = settled.has(f) ? f : prevById.get(f.id) ?? f;
+        const pos = settled.has(f) ? f.targetPos : anchor.targetPos;
+        if (anchor.isOutsideCircle) outside += 1;
+        if (isOnLegSide(pos.x, opts.isLeftHander)) leg += 1;
+      }
+      if (opts.restricted && outside > opts.maxOutsideCircle) return false;
+      return leg <= opts.legSideLimit;
+    };
+
+    const recordChanges = (selected: Mover[]) => {
+      for (const m of selected) {
+        changedFielders.push({
+          playerId: m.f.id,
+          playerName: m.f.name,
+          fromRole: m.prev.positionName,
+          toRole: m.f.positionName,
+          fromPoint: { ...m.f.currentPos },
+          toPoint: { ...m.f.targetPos },
+        });
+      }
+    };
+
+    if (movers.length <= opts.maxMoves) {
+      recordChanges(movers);
+      return { changedFielders, movementLimited: false };
+    }
+
+    const pool = movers
+      .map(m => ({ m, score: this.moverPriorityScore(m, opts.isLeftHander, opts.hotZones) }))
+      .sort((a, b) => b.score - a.score)
+      .slice(0, Math.max(opts.maxMoves, 6))
+      .map(p => p.m);
+
+    let chosen: Mover[] = [];
+    for (let size = opts.maxMoves; size >= 1 && chosen.length === 0; size -= 1) {
+      for (const combo of this.combinations(pool, size)) {
+        if (isProjectedLegal(new Set(combo.map(c => c.f)))) { chosen = combo; break; }
+      }
+    }
+
+    const chosenSet = new Set(chosen.map(c => c.f));
+    for (const m of movers) {
+      if (chosenSet.has(m.f)) continue;
+      // Movement budget exhausted — hold station at the previous assignment.
+      m.f.targetPos = { ...m.f.currentPos };
+      m.f.positionKey = m.prev.positionKey;
+      m.f.positionName = m.prev.positionName;
+      m.f.isOutsideCircle = m.prev.isOutsideCircle;
+      m.f.isCatching = m.prev.isCatching;
+      m.f.tacticalRole = m.prev.tacticalRole;
+    }
+    recordChanges(chosen);
+    return { changedFielders, movementLimited: true };
+  }
+
+  private static moverPriorityScore(
+    m: { f: FielderAssignment; prev: FielderAssignment; dist: number },
+    isLeftHanded: boolean,
+    hotZones: string[],
+  ): number {
+    let score = Math.min(m.dist, 250) / 10;
+    const idealHot = isWithinHotZone(m.f.targetPos, isLeftHanded, hotZones);
+    const wasHot = isWithinHotZone(m.f.currentPos, isLeftHanded, hotZones);
+    if (idealHot && !wasHot) score += 300;
+    else if (idealHot) score += 120;
+    if (wasHot && !idealHot) score -= 200;
+    if (m.f.isCatching) score += 40;
+    if (m.f.isOutsideCircle && !m.prev.isOutsideCircle) score += 30;
+    return score;
+  }
+
+  private static combinations<T>(items: T[], size: number): T[][] {
+    if (size <= 0 || size > items.length) return [];
+    const result: T[][] = [];
+    const combo: T[] = [];
+    const walk = (start: number) => {
+      if (combo.length === size) { result.push([...combo]); return; }
+      for (let i = start; i < items.length; i += 1) {
+        combo.push(items[i]);
+        walk(i + 1);
+        combo.pop();
+      }
+    };
+    walk(0);
+    return result;
   }
 
   /**
@@ -584,8 +827,8 @@ export class BowlerFieldStrategyEngine {
     },
     SHORT_BALL_AMBUSH: {
       name: 'Short Ball Bouncer Trap',
-      keys: ['FIRST_SLIP', 'SHORT_LEG', 'POINT', 'MID_OFF', 'MID_ON', 'SQUARE_LEG', 'DEEP_SQUARE_LEG', 'DEEP_MID_WICKET', 'DEEP_FINE_LEG'],
-      intent: 'Bouncer ambush with 3 deep leg-side catchers for hook and pull shots',
+      keys: ['FIRST_SLIP', 'SHORT_LEG', 'POINT', 'MID_OFF', 'MID_ON', 'SQUARE_LEG', 'DEEP_SQUARE_LEG', 'DEEP_MID_WICKET', 'DEEP_THIRD_MAN'],
+      intent: 'Bouncer ambush with deep square and mid-wicket waiting for hook and pull shots',
     },
   };
 

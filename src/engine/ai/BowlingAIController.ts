@@ -55,9 +55,17 @@ export interface BowlingAIInput {
   /** Optional pre-computed eligible pool from the caller. */
   eligibleBowlerIds?: string[];
   previousFieldPresetKey?: string | null;
+  /** The currently deployed field — enables the strict per-update movement budget. */
+  previousFieldConfiguration?: FieldConfiguration | null;
   trigger: BowlingChangeTrigger;
   /** Recent boundary arcs punished by the striker (Section 12-A). */
   recentBoundaryZones?: ScoringZoneName[];
+  /** Shortlist of zones (wagon arcs) the AI should prioritise covering. */
+  hotZones?: ScoringZoneName[];
+  /** Total overs of the (possibly reduced) innings — rescales phase windows. */
+  totalOvers?: number;
+  /** Competition season — used for season-keyed rules (e.g. IPL). */
+  season?: number;
   /** Injectable RNG (0..1) for deterministic tests. Omit for deterministic picks. */
   random?: () => number;
 }
@@ -123,8 +131,9 @@ export function chooseLegalFieldPresetKey(
   preferredKey: string | null | undefined,
   format: ArenaFormat,
   over: number,
+  totalOvers?: number,
 ): string {
-  const phase = getFieldingPhase(format, over);
+  const phase = getFieldingPhase(format, over, undefined, totalOvers);
   const max = phase.restricted ? phase.maxOutsideCircle : Number.POSITIVE_INFINITY;
 
   const validKeys = Object.keys(BowlerFieldStrategyEngine.PRESET_OVERLAYS);
@@ -156,7 +165,7 @@ export function chooseBatterAdaptivePresetKey(
   const striker = input.striker;
   if (!striker) return fallback;
 
-  const phase = getFieldingPhase(input.format, input.over);
+  const phase = getFieldingPhase(input.format, input.over, undefined, input.totalOvers);
   const max = phase.restricted ? phase.maxOutsideCircle : Number.POSITIVE_INFINITY;
   const legalKeys = Object.keys(BowlerFieldStrategyEngine.PRESET_OVERLAYS).filter(
     (k) => presetOutsideCount(k) <= max,
@@ -203,7 +212,7 @@ function bowlerPhaseScore(p: Player, input: BowlingAIInput): number {
   let score = p.stats?.bowling ?? p.rating ?? 70;
   const balls = input.bowlerStats[p.id]?.balls ?? 0;
   const overs = balls / 6;
-  const phase = getFieldingPhase(input.format, input.over).key;
+  const phase = getFieldingPhase(input.format, input.over, undefined, input.totalOvers).key;
   const spinner = isSpinBowler(p);
 
   if (phase === 'POWERPLAY') {
@@ -258,6 +267,10 @@ function buildFieldConfiguration(
       weather: input.weather ?? WeatherCondition.SUNNY,
       fieldingSquad: input.fieldingSquad,
       manualPresetKey: presetKey,
+      previousConfig: input.previousFieldConfiguration ?? null,
+      hotZones: input.hotZones,
+      totalOvers: input.totalOvers,
+      season: input.season,
     });
     // Authoritative legality gate — the AI never returns an illegal field.
     const validation = validateField({
@@ -272,6 +285,8 @@ function buildFieldConfiguration(
         isOutsideCircle: f.isOutsideCircle,
       })),
       options: { enforcePlayerCount: false },
+      totalOvers: input.totalOvers,
+      season: input.season,
     });
     if (!validation.valid) return null;
     return config;
@@ -327,7 +342,7 @@ export function decideBowlingChange(input: BowlingAIInput): BowlingAIDecision {
     trigger: input.trigger,
     bowlerIsSpin: bowler ? isSpinBowler(bowler) : undefined,
   });
-  let presetKey = chooseLegalFieldPresetKey(setupDecision.presetKey, input.format, input.over);
+  let presetKey = chooseLegalFieldPresetKey(setupDecision.presetKey, input.format, input.over, input.totalOvers);
 
   // Boundary-prevention refinement (Section 12-A): when the batter has just
   // hurt us or a new batter is in, look at *their* scoring zones and move the
@@ -338,7 +353,7 @@ export function decideBowlingChange(input: BowlingAIInput): BowlingAIDecision {
       presetKey,
       input.trigger === 'BOUNDARY_CLUSTER',
     );
-    presetKey = chooseLegalFieldPresetKey(adaptiveKey, input.format, input.over);
+    presetKey = chooseLegalFieldPresetKey(adaptiveKey, input.format, input.over, input.totalOvers);
   }
 
   const fieldConfiguration = buildFieldConfiguration(input, bowler, presetKey);
@@ -357,6 +372,8 @@ export function decideBowlingChange(input: BowlingAIInput): BowlingAIDecision {
           isOutsideCircle: f.isOutsideCircle,
         })),
         options: { enforcePlayerCount: false },
+        totalOvers: input.totalOvers,
+        season: input.season,
       })
     : null;
 

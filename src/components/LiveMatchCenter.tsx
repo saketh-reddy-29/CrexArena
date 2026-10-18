@@ -42,9 +42,10 @@ import { ArenaFormat } from '../engine/models/ArenaState';
 import { DeliveryLifecycle, DeliveryResult } from '../types/delivery';
 import { DeliveryResultFactory } from '../engine/core/DeliveryResultFactory';
 import { AICaptainEngine, CaptainDecision } from '../engine/ai/AICaptainEngine';
+import type { ScoringZoneName } from '../engine/ai/AdaptiveCaptainEngine';
 import { BatterDecisionEngine, BatterInningsState, BattingIntent } from '../engine/ai/BatterDecisionEngine';
 import { BowlingPlanEngine, DetailedBowlingPlan } from '../engine/ai/BowlingPlanEngine';
-import { BowlerFieldStrategyEngine, CANONICAL_POSITIONS } from '../engine/strategy/BowlerFieldStrategyEngine';
+import { BowlerFieldStrategyEngine, CANONICAL_POSITIONS, type FieldConfiguration } from '../engine/strategy/BowlerFieldStrategyEngine';
 import { BallLifecycleController, BallLifecycleState } from '../engine/fielding/BallLifecycleController';
 import { validateField, getFieldingPhase, getRestrictionSummary, overFromBalls } from '../engine/fielding/FieldingRestrictionEngine';
 import {
@@ -282,6 +283,24 @@ function economy(runs: number, balls: number) {
   return balls ? (runs / (balls / 6)).toFixed(2) : '0.00';
 }
 
+/**
+ * Maps a DeliveryResult target-zone label onto the captaincy wagon-zone arc so
+ * the fielding AI can prioritise the batter's recently punished scoring areas.
+ */
+function zoneNameFromTargetZone(targetZone: string | undefined): ScoringZoneName | null {
+  if (!targetZone) return null;
+  const z = targetZone.toUpperCase();
+  if (z.includes('THIRD_MAN')) return 'THIRD_MAN_GULLY';
+  if (z.includes('GULLY') || z.includes('POINT') || z.includes('SQUARE_CUT')) return 'POINT_SQUARE';
+  if (z.includes('COVER')) return 'COVER';
+  if (z.includes('LONG_OFF') || z.includes('MID_OFF') || z.includes('STRAIGHT')) return 'LONG_OFF';
+  if (z.includes('LONG_ON') || z.includes('MID_ON')) return 'LONG_ON';
+  if (z.includes('COW') || z.includes('MID_WICKET')) return 'MID_WICKET_COW';
+  if (z.includes('SQUARE_LEG')) return 'SQUARE_LEG';
+  if (z.includes('FINE_LEG') || z.includes('GLANCE')) return 'FINE_LEG';
+  return null;
+}
+
 function overRuns(score: InningsState | undefined) {
   if (!score) return [];
   const overs = Array.from({ length: Math.max(20, Math.ceil(score.balls / 6)) }, (_, over) => ({
@@ -464,6 +483,10 @@ export default function LiveMatchCenter() {
   const [tacticalSubTab, setTacticalSubTab] = useState<'BATTING' | 'BOWLING' | 'FIELD'>('BATTING');
   const [openTacticalMenu, setOpenTacticalMenu] = useState<TacticalMenuKey | null>('BATTING');
   const [fieldPresetKey, setFieldPresetKey] = useState<string | null>(null);
+  // Live, authoritative field configuration reported by the visualizer, plus the
+  // batter's recently punished arcs — both feed the fielding AI's movement budget.
+  const [liveFieldConfiguration, setLiveFieldConfiguration] = useState<FieldConfiguration | null>(null);
+  const [recentBoundaryZones, setRecentBoundaryZones] = useState<ScoringZoneName[]>([]);
   const [historyDeliveryResults, setHistoryDeliveryResults] = useState<DeliveryResult[]>([]);
 
   useEffect(() => {
@@ -880,16 +903,20 @@ export default function LiveMatchCenter() {
         fatigue: playerFatigue,
         eligibleBowlerIds: getAvailableBowlers(inning, bowlingSquad, lastOverBowlerId).map((p) => p.id),
         previousFieldPresetKey: fieldPresetKey,
+        previousFieldConfiguration: liveFieldConfiguration,
+        hotZones: recentBoundaryZones,
+        totalOvers: Math.round(maxBalls / 6),
         trigger: inning.balls === 0 ? 'INITIAL' : 'OVER_END',
       });
       if (decision.bowlerId) setBowlerId(decision.bowlerId);
       if (decision.bowlingPlan) setUserBowlingPlan(decision.bowlingPlan);
       if (decision.fieldPresetKey) setFieldPresetKey(decision.fieldPresetKey);
+      if (decision.fieldConfiguration) setLiveFieldConfiguration(decision.fieldConfiguration);
       if (decision.notification) setOpponentTacticalNotice(decision.notification);
       setAiCaptainRecommendation(null);
       setPending(null);
     }
-  }, [pending, inning, innings, inningNo, battingSquad, bowlingSquad, battingCursor, isMyTeamBatting, strikerId, nonStrikerId, queueBowlerAfterBatter, lastOverBowlerId, pendingBatterEnd, selectedFormat, pitch, weather, playerFatigue, fieldPresetKey, striker, nonStriker, getAvailableBowlers]);
+  }, [pending, inning, innings, inningNo, battingSquad, bowlingSquad, battingCursor, isMyTeamBatting, strikerId, nonStrikerId, queueBowlerAfterBatter, lastOverBowlerId, pendingBatterEnd, selectedFormat, pitch, weather, playerFatigue, fieldPresetKey, striker, nonStriker, getAvailableBowlers, liveFieldConfiguration, recentBoundaryZones, maxBalls]);
 
   // Auto-dismiss the unobtrusive AI field-change notice after a few seconds.
   useEffect(() => {
@@ -1092,6 +1119,15 @@ export default function LiveMatchCenter() {
       });
     }
 
+    // Record the arc the batter just punished so the fielding AI can prioritise
+    // covering it within the two-fielder movement budget on the next update.
+    if (!wicket && ballRuns >= 4) {
+      const zone = zoneNameFromTargetZone(ball.targetZone);
+      if (zone) {
+        setRecentBoundaryZones(prev => [...prev.filter(z => z !== zone), zone].slice(-3));
+      }
+    }
+
     // AI captain reacts to a wicket or a boundary cluster by re-planning the
     // field. The resulting formation is always validated against the fielding
     // restrictions inside the controller, then applied to the live field.
@@ -1116,11 +1152,15 @@ export default function LiveMatchCenter() {
         pitch,
         weather,
         previousFieldPresetKey: fieldPresetKey,
+        previousFieldConfiguration: liveFieldConfiguration,
+        hotZones: recentBoundaryZones,
+        totalOvers: Math.round(maxBalls / 6),
         trigger: wicket ? 'WICKET_FALL' : 'BOUNDARY_CLUSTER',
       });
       if (fieldDecision.fieldChanged) {
         setFieldPresetKey(fieldDecision.fieldPresetKey);
       }
+      if (fieldDecision.fieldConfiguration) setLiveFieldConfiguration(fieldDecision.fieldConfiguration);
       setOpponentTacticalNotice(
         fieldDecision.notification ||
           `${bowlingTeam.name} AI: ${
@@ -1128,7 +1168,7 @@ export default function LiveMatchCenter() {
           }`,
       );
     }
-  }, [currentDeliveryResult, inningNo, battingTeam.shortName, maxBalls, striker, currentMatchId, bowlingTeam.name, inning, bowlingSquad, lastOverBowlerId, currentBowler, pitch, weather, selectedFormat, fieldPresetKey, nonStriker]);
+  }, [currentDeliveryResult, inningNo, battingTeam.shortName, maxBalls, striker, currentMatchId, bowlingTeam.name, inning, bowlingSquad, lastOverBowlerId, currentBowler, pitch, weather, selectedFormat, fieldPresetKey, nonStriker, liveFieldConfiguration, recentBoundaryZones]);
 
   // Advances a Test match past a completed innings: 1 → 2 → 3 → 4, applying
   // the follow-on when the trailing side was bowled out far enough behind, and
@@ -1335,6 +1375,9 @@ export default function LiveMatchCenter() {
         weather,
         manualPresetKey: fieldPresetKey || undefined,
         fieldingSquad: bowlingSquad,
+        previousConfig: liveFieldConfiguration,
+        totalOvers: Math.round(maxBalls / 6),
+        hotZones: recentBoundaryZones,
       });
 
       const deliveryRes = DeliveryResultFactory.createDeliveryResult({
@@ -1391,6 +1434,7 @@ export default function LiveMatchCenter() {
         bowlingTeamId: bowlingTeam.id,
         drsReviewsRemaining: current.drsReviewsRemaining,
         fieldConfiguration: activeFieldConfiguration,
+        totalOvers: Math.round(maxBalls / 6),
         conditions: conditionsModel || undefined,
       });
 
@@ -1494,7 +1538,7 @@ export default function LiveMatchCenter() {
   // Format/phase fielding-restriction status (authoritative circle limits from getRules)
   const fieldStatus = useMemo(() => {
     const over = overFromBalls(inning?.balls || 0);
-    const phase = getFieldingPhase(selectedFormat, over);
+    const phase = getFieldingPhase(selectedFormat, over, undefined, Math.round(maxBalls / 6));
     const preset = fieldPresetKey ? BowlerFieldStrategyEngine.PRESET_OVERLAYS[fieldPresetKey] : null;
     const keys = preset?.keys ?? [];
     const hasPreset = keys.length > 0;
@@ -1507,10 +1551,11 @@ export default function LiveMatchCenter() {
       over,
       fielders: fielderPositions,
       options: { enforcePlayerCount: false },
+      totalOvers: Math.round(maxBalls / 6),
     });
     const legal = !hasPreset || validation.valid;
     return { over, phase, outside: validation.outsideCircleCount, hasPreset, legal, validation };
-  }, [inning?.balls, selectedFormat, fieldPresetKey]);
+  }, [inning?.balls, selectedFormat, fieldPresetKey, maxBalls]);
   const fieldStatusLabel = !fieldStatus.phase.restricted
     ? `${fieldStatus.phase.shortLabel} · No circle restriction`
     : fieldStatus.hasPreset
@@ -2084,6 +2129,9 @@ export default function LiveMatchCenter() {
                   replayDeliveryResult={replayDelivery}
                   fieldPresetKey={fieldPresetKey}
                   onFieldPresetChange={setFieldPresetKey}
+                  onFieldConfigurationChange={setLiveFieldConfiguration}
+                  totalOvers={Math.round(maxBalls / 6)}
+                  hotZones={recentBoundaryZones}
                 />
               </div>
             </div>

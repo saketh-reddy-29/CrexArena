@@ -34,6 +34,8 @@ export interface CricketRules {
     end: number;
   };
   fieldingRestrictions?: FieldingRestriction[];
+  /** Law 28.3: maximum fielders allowed on the leg side (default 5). */
+  maxLegSideFielders?: number;
   newBallRules?: NewBallRules;
   followOn?: boolean;
   followOnMargin?: number;

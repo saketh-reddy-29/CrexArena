@@ -78,6 +78,8 @@ export interface FieldValidationResult {
   maxOutsideCircle: number;
   offSideCount: number;
   legSideCount: number;
+  /** Active Law 28.3 leg-side maximum. */
+  legSideLimit: number;
   /** Fielders currently outside the circle (ids). */
   outsideFielderIds: string[];
   violations: FieldValidationViolation[];
@@ -91,6 +93,10 @@ export interface FieldValidationInput {
   over: number;
   fielders: FielderPosition[];
   options?: FieldValidationOptions;
+  /** Total overs of the (possibly reduced) innings — rescales phase windows. */
+  totalOvers?: number;
+  /** Competition season — used for season-keyed rules (e.g. IPL). */
+  season?: number;
 }
 
 const clamp = (v: number, min: number, max: number) => Math.max(min, Math.min(max, v));
@@ -131,19 +137,20 @@ function describeFormat(format: Format): string {
   }
 }
 
-function phaseMeta(format: Format, over: number): { key: FieldingPhaseKey; label: string; shortLabel: string } {
+function phaseMeta(format: Format, over: number, totalOvers?: number): { key: FieldingPhaseKey; label: string; shortLabel: string } {
   if (format === 'TEST') {
     return { key: 'TEST', label: 'Test Match', shortLabel: 'TEST' };
   }
-  if (format === 'ODI') {
-    if (over <= 10) return { key: 'POWERPLAY', label: 'Powerplay (Overs 1–10)', shortLabel: 'POWERPLAY' };
-    if (over <= 40) return { key: 'MIDDLE', label: 'Middle Overs (11–40)', shortLabel: 'MIDDLE OVERS' };
-    return { key: 'DEATH', label: 'Death Overs (41–50)', shortLabel: 'DEATH OVERS' };
-  }
-  // T20 / IPL
-  if (over <= 6) return { key: 'POWERPLAY', label: 'Powerplay (Overs 1–6)', shortLabel: 'POWERPLAY' };
-  if (over <= 15) return { key: 'MIDDLE', label: 'Middle Overs (7–15)', shortLabel: 'MIDDLE OVERS' };
-  return { key: 'DEATH', label: 'Death Overs (16–20)', shortLabel: 'DEATH OVERS' };
+  // Rescale the phase windows for reduced-overs innings so labels and limits
+  // stay coherent (e.g. a 10-over T20: powerplay 1-3, middle 4-8, death 9-10).
+  const base = format === 'ODI' ? 50 : 20;
+  const factor = totalOvers && totalOvers < base ? totalOvers / base : 1;
+  const ppEnd = Math.max(1, Math.round((format === 'ODI' ? 10 : 6) * factor));
+  const midEnd = Math.max(ppEnd, Math.round((format === 'ODI' ? 40 : 15) * factor));
+  const lastOver = totalOvers && totalOvers < base ? totalOvers : base;
+  if (over <= ppEnd) return { key: 'POWERPLAY', label: `Powerplay (Overs 1–${ppEnd})`, shortLabel: 'POWERPLAY' };
+  if (over <= midEnd) return { key: 'MIDDLE', label: `Middle Overs (${ppEnd + 1}–${midEnd})`, shortLabel: 'MIDDLE OVERS' };
+  return { key: 'DEATH', label: `Death Overs (${midEnd + 1}–${lastOver})`, shortLabel: 'DEATH OVERS' };
 }
 
 /**
@@ -151,19 +158,53 @@ function phaseMeta(format: Format, over: number): { key: FieldingPhaseKey; label
  * competition overrides. This is the single source of truth used by both the
  * UI and the authoritative simulation layer.
  */
-export function getFieldingRestrictions(format: Format, overrides?: FieldingRestriction[]): FieldingRestriction[] {
+export function getFieldingRestrictions(format: Format, overrides?: FieldingRestriction[], season?: number): FieldingRestriction[] {
   if (overrides && overrides.length) return overrides;
-  const rules = getRules(format);
+  const rules = getRules(format, season);
   return rules.fieldingRestrictions ?? [];
+}
+
+/**
+ * Law 28.3 — maximum fielders on the leg side. Defaults to 5 for every
+ * format unless the competition rules configure otherwise.
+ */
+export function getLegSideLimit(format: Format, season?: number): number {
+  const rules = getRules(format, season);
+  return rules.maxLegSideFielders ?? 5;
+}
+
+/**
+ * Rescales restriction windows for a reduced-overs innings. A 20-over ODI,
+ * for example, keeps the same proportional phases: powerplay 1-4, middle
+ * 5-16, death 17-20.
+ */
+export function scaleRestrictionsForTotalOvers(
+  restrictions: FieldingRestriction[],
+  baseTotalOvers: number,
+  totalOvers: number,
+): FieldingRestriction[] {
+  if (!totalOvers || totalOvers >= baseTotalOvers || baseTotalOvers <= 0) return restrictions;
+  const factor = totalOvers / baseTotalOvers;
+  return restrictions.map((r, idx) => {
+    const isLast = idx === restrictions.length - 1;
+    const startOver = Math.max(1, Math.round((r.startOver - 1) * factor) + 1);
+    const endOver = isLast ? totalOvers : Math.max(startOver, Math.round(r.endOver * factor));
+    return { ...r, startOver, endOver };
+  });
 }
 
 /**
  * Resolves the active fielding phase for the given format + over.
  * Test cricket returns an unrestricted phase (no circle limits).
+ * `totalOvers` rescales the windows for reduced-overs competitions.
  */
-export function getFieldingPhase(format: Format, over: number, overrides?: FieldingRestriction[]): FieldingPhase {
-  const meta = phaseMeta(format, over);
-  const restrictions = getFieldingRestrictions(format, overrides);
+export function getFieldingPhase(format: Format, over: number, overrides?: FieldingRestriction[], totalOvers?: number, season?: number): FieldingPhase {
+  const meta = phaseMeta(format, over, totalOvers);
+  const rules = getRules(format, season);
+  let restrictions = getFieldingRestrictions(format, overrides, season);
+  if (totalOvers && rules.maxOvers) {
+    restrictions = scaleRestrictionsForTotalOvers(restrictions, rules.maxOvers, totalOvers);
+  }
 
   if (!restrictions.length) {
     // Test cricket (or any format with no configured restrictions): no limit.
@@ -224,14 +265,25 @@ export function isBowlerOrKeeper(f: FielderPosition): boolean {
   return role === 'bowler' || role === 'wicketkeeper' || role === 'wicket-keeper' || role === 'keeper';
 }
 
+/** Counts outfielders on the leg side (excludes bowler + wicketkeeper). */
+export function countOnLegSide(fielders: FielderPosition[], isLeftHanded: boolean): number {
+  return fielders.filter((f) => {
+    if (isBowlerOrKeeper(f)) return false;
+    return isOnLegSide(f.x, isLeftHanded);
+  }).length;
+}
+
 /**
  * The mandatory field validation gate. Every fielding configuration must pass
  * this before it can be applied to the authoritative simulation layer.
+ * Enforces the outside-circle restriction for the active phase AND the
+ * Law 28.3 leg-side maximum, at the instant of delivery.
  */
 export function validateField(input: FieldValidationInput): FieldValidationResult {
   const { format, over, fielders } = input;
   const options = input.options ?? {};
-  const phase = getFieldingPhase(format, over, options.overrides);
+  const phase = getFieldingPhase(format, over, options.overrides, input.totalOvers, input.season);
+  const legSideLimit = options.maxLegSide !== undefined ? options.maxLegSide : getLegSideLimit(format, input.season);
 
   const isLeftHanded = options.isLeftHanded ?? false;
   const outsideFielderIds: string[] = [];
@@ -288,12 +340,12 @@ export function validateField(input: FieldValidationInput): FieldValidationResul
     violations.push({ code: 'MISSING_BOWLER', message: 'A bowler must be assigned to the fielding side.' });
   }
 
-  // 4. Optional leg-side limit
-  if (options.maxLegSide !== undefined && legSide > options.maxLegSide) {
+  // 4. Leg-side limit (Law 28.3) — enabled by default for every format.
+  if (legSideLimit !== undefined && legSide > legSideLimit) {
     violations.push({
       code: 'TOO_MANY_LEG_SIDE',
-      message: `No more than ${options.maxLegSide} fielders may be on the leg side. Current: ${legSide}.`,
-      limit: options.maxLegSide,
+      message: `No more than ${legSideLimit} fielders may be on the leg side (Law 28.3). Current: ${legSide}. Move ${legSide - legSideLimit} fielder${legSide - legSideLimit > 1 ? 's' : ''} to the off side.`,
+      limit: legSideLimit,
       actual: legSide,
     });
   }
@@ -313,6 +365,7 @@ export function validateField(input: FieldValidationInput): FieldValidationResul
     maxOutsideCircle: phase.maxOutsideCircle,
     offSideCount: offSide,
     legSideCount: legSide,
+    legSideLimit,
     outsideFielderIds,
     violations,
     message,
@@ -335,8 +388,8 @@ export function getRestrictionSummary(phase: FieldingPhase, outsideCount: number
  * Convenience: validate using an already-computed outside count and phase,
  * without needing full fielder coordinates (used by UI presets).
  */
-export function isFieldLegal(format: Format, over: number, outsideCount: number, overrides?: FieldingRestriction[]): boolean {
-  const phase = getFieldingPhase(format, over, overrides);
+export function isFieldLegal(format: Format, over: number, outsideCount: number, overrides?: FieldingRestriction[], totalOvers?: number): boolean {
+  const phase = getFieldingPhase(format, over, overrides, totalOvers);
   if (!phase.restricted) return true;
   return outsideCount <= phase.maxOutsideCircle;
 }

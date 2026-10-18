@@ -107,6 +107,12 @@ export interface VisualizerProps {
   // When false, all manual bowling/field controls are hidden — bowling and
   // fielding are owned by the AI captain and are not user-editable.
   manualControlsEnabled?: boolean;
+
+  // Live field reporting & context (feeds the authoritative field engine)
+  onFieldConfigurationChange?: (config: FieldConfiguration) => void;
+  totalOvers?: number;
+  season?: number;
+  hotZones?: string[];
 }
 
 interface FielderLiveState {
@@ -203,6 +209,10 @@ export default function CricketActionVisualizer({
   onBallLifecycleChange,
   ballRetrievalEnabled = true,
   manualControlsEnabled = true,
+  onFieldConfigurationChange,
+  totalOvers,
+  season,
+  hotZones,
 }: VisualizerProps) {
   // Format state
   const [selectedFormat, setSelectedFormat] = useState<ArenaFormat>(initialFormat);
@@ -375,6 +385,8 @@ export default function CricketActionVisualizer({
   onContactReachedRef.current = onContactReached;
   const onFieldChangingChangeRef = useRef(onFieldChangingChange);
   onFieldChangingChangeRef.current = onFieldChangingChange;
+  const onFieldConfigurationChangeRef = useRef(onFieldConfigurationChange);
+  onFieldConfigurationChangeRef.current = onFieldConfigurationChange;
   const svgRef = useRef<SVGSVGElement | null>(null);
   const lastPlayedDeliveryIdRef = useRef<string | null>(null);
 
@@ -401,24 +413,43 @@ export default function CricketActionVisualizer({
   // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const applyNewFieldConfiguration = useCallback((newConfig: FieldConfiguration) => {
     setFieldConfig(newConfig);
+    onFieldConfigurationChangeRef.current?.(newConfig);
 
     const currentPositionsMap = new Map(fielders.map(f => [f.id, { x: f.currentX, y: f.currentY, role: f.role }]));
-    let hasMovement = false;
-    const movingList: FieldConfiguration['changedFielders'] = [];
 
-    const updatedFielders: FielderLiveState[] = newConfig.fielders.map((f) => {
+    const resolved = newConfig.fielders.map((f) => {
       const clampedTarget = clampFielderCoordinate(f.targetPos);
       const rawCurrent = currentPositionsMap.get(f.id) || { x: clampedTarget.x, y: clampedTarget.y, role: f.positionName };
       const clampedCurrent = clampFielderCoordinate(rawCurrent);
       const dist = Math.hypot(clampedTarget.x - clampedCurrent.x, clampedTarget.y - clampedCurrent.y);
-      const isMoving = dist > 4;
+      return { f, clampedTarget, clampedCurrent, dist, fromRole: rawCurrent.role };
+    });
+
+    // HARD MOVEMENT BUDGET — at most two fielders animate per field update.
+    // Any additional displacement is represented as already settled, so the
+    // animation can never exceed the legally-permitted two-fielder movement.
+    const moverIds = new Set(
+      resolved
+        .filter((r) => r.dist > 4)
+        .sort((a, b) => b.dist - a.dist)
+        .slice(0, 2)
+        .map((r) => r.f.id),
+    );
+
+    let hasMovement = false;
+    const movingList: FieldConfiguration['changedFielders'] = [];
+
+    const updatedFielders: FielderLiveState[] = resolved.map(({ f, clampedTarget, clampedCurrent, dist, fromRole }) => {
+      const isMoving = moverIds.has(f.id);
+      const targetX = isMoving ? clampedTarget.x : clampedCurrent.x;
+      const targetY = isMoving ? clampedTarget.y : clampedCurrent.y;
 
       if (isMoving) {
         hasMovement = true;
         movingList.push({
           playerId: f.id,
           playerName: f.name,
-          fromRole: rawCurrent.role,
+          fromRole,
           toRole: f.positionName,
           fromPoint: { x: clampedCurrent.x, y: clampedCurrent.y },
           toPoint: { x: clampedTarget.x, y: clampedTarget.y },
@@ -431,8 +462,8 @@ export default function CricketActionVisualizer({
         role: f.positionName,
         currentX: clampedCurrent.x,
         currentY: clampedCurrent.y,
-        targetX: clampedTarget.x,
-        targetY: clampedTarget.y,
+        targetX,
+        targetY,
         fromX: clampedCurrent.x,
         fromY: clampedCurrent.y,
         category: f.isCatching ? 'CATCHING' : f.isOutsideCircle ? 'BOUNDARY' : 'RING',
@@ -514,9 +545,12 @@ export default function CricketActionVisualizer({
       previousConfig: fieldConfig,
       manualPresetKey: presetKey,
       testDaySession,
+      totalOvers,
+      season,
+      hotZones,
     });
     applyNewFieldConfiguration(newConfig);
-  }, [selectedFormat, bowler, striker, nonStriker, score, target, pitch, weather, partnershipRuns, partnershipBalls, fieldingSquad, fieldConfig, testDaySession, applyNewFieldConfiguration]);
+  }, [selectedFormat, bowler, striker, nonStriker, score, target, pitch, weather, partnershipRuns, partnershipBalls, fieldingSquad, fieldConfig, testDaySession, totalOvers, season, hotZones, applyNewFieldConfiguration]);
 
   // External preset changes (e.g. Field Setup menu in the live-match sidebar)
   useEffect(() => {
@@ -906,6 +940,9 @@ export default function CricketActionVisualizer({
                     fieldingSquad,
                     previousConfig: fieldConfig,
                     testDaySession,
+                    totalOvers,
+                    season,
+                    hotZones,
                   });
                   applyNewFieldConfiguration(newConfig);
                 }}
@@ -1853,24 +1890,30 @@ export default function CricketActionVisualizer({
               </div>
               <div className="bg-white/[0.03] p-3 rounded-xl border border-white/5">
                 <span className="text-[10px] font-bold text-slate-400 block uppercase">Side Balance</span>
-                <span className="text-base font-black text-white">
+                <span className={cn(
+                  "text-base font-black",
+                  fieldConfig.legSideCount > (fieldConfig.legSideLimit ?? 5) ? "text-red-400" : "text-white"
+                )}>
                   {fieldConfig.offSideCount} Off / {fieldConfig.legSideCount} Leg
                 </span>
                 <span className="text-[9px] text-slate-500 block mt-0.5">
-                  Max leg side: 5 (Lawful)
+                  Max leg side: {fieldConfig.legSideLimit ?? 5} (Law 28.3)
                 </span>
               </div>
               <div className="bg-white/[0.03] p-3 rounded-xl border border-white/5">
                 <span className="text-[10px] font-bold text-slate-400 block uppercase">Format Restrictions</span>
-                <span className="text-xs font-black text-emerald-400">
-                  {fieldConfig.isCompliant ? 'Fully Compliant' : 'Warning: Ring breach'}
+                <span className={cn("text-xs font-black", fieldConfig.isCompliant ? "text-emerald-400" : "text-red-400")}>
+                  {fieldConfig.isCompliant ? 'Fully Compliant' : 'Illegal Formation'}
                 </span>
                 <span className="text-[9px] text-slate-500 block mt-0.5">{fieldConfig.phase}</span>
+                <span className="text-[9px] text-slate-500 block">
+                  {fieldConfig.changedFielders.length} moved{fieldConfig.movementLimited ? ' (budget capped)' : ''}
+                </span>
               </div>
               <div className="bg-white/[0.03] p-3 rounded-xl border border-white/5">
                 <span className="text-[10px] font-bold text-slate-400 block uppercase">Interactive Tweak</span>
                 <span className="text-xs font-black text-purple-400">Drag & Drop Active</span>
-                <span className="text-[9px] text-slate-500 block mt-0.5">Drag any fielder to adjust</span>
+                <span className="text-[9px] text-slate-500 block mt-0.5">Max 2 fielders move per update</span>
               </div>
             </div>
           )}

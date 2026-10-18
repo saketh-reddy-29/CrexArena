@@ -1,7 +1,7 @@
 import { Player } from '../../types/common';
 import { PitchType, WeatherCondition, PlayerMatchStats } from '../../types/match';
 import { ArenaFormat } from '../models/ArenaState';
-import { Point, FieldConfiguration } from '../strategy/BowlerFieldStrategyEngine';
+import { Point, FieldConfiguration, BowlerFieldStrategyEngine } from '../strategy/BowlerFieldStrategyEngine';
 import { MatchEngine } from '../../lib/matchEngine';
 import {
   DeliveryResult, 
@@ -11,6 +11,7 @@ import {
 import type { TacticalDeliveryModel } from '../ai/AdaptiveCaptainEngine';
 import type { MatchConditionsModel } from '../conditions/types';
 import { buildDeliveryModel } from '../ai/AdaptiveCaptainEngine';
+import { validateField } from '../fielding/FieldingRestrictionEngine';
 
 export interface DeliverySimulationInput {
   striker: Player;
@@ -35,6 +36,10 @@ export interface DeliverySimulationInput {
   batterInningsState?: any;
   /** Authoritative field layout active for this delivery (for zone influence). */
   fieldConfiguration?: FieldConfiguration | null;
+  /** Total overs of the (possibly reduced) innings — rescales field validation. */
+  totalOvers?: number;
+  /** Competition season — used for season-keyed rules (e.g. IPL). */
+  season?: number;
   /** Pre-resolved adaptive tactical model (field + reversible pressure). */
   tacticalModel?: TacticalDeliveryModel;
   /** Per-fixture venue/pitch/weather conditions model (optional refinement). */
@@ -175,6 +180,30 @@ export class DeliveryResultFactory {
     const totalRuns = rawOutcome.runs;
     const isLeftHander = (striker as any)?.battingHand === 'Left' || false;
 
+    // Field-legality snapshot captured at the instant of delivery. The field
+    // active for this ball is re-validated against the authoritative rules so
+    // an illegal formation can never pass silently through the pipeline.
+    const fieldValidation = input.fieldConfiguration
+      ? validateField({
+          format,
+          over: overIndex + 1,
+          fielders: input.fieldConfiguration.fielders.map((f) => ({
+            id: f.id,
+            name: f.name,
+            role: f.role,
+            x: f.targetPos.x,
+            y: f.targetPos.y,
+            isOutsideCircle: f.isOutsideCircle,
+          })),
+          options: {
+            enforcePlayerCount: false,
+            isLeftHanded: BowlerFieldStrategyEngine.isLeftHandedBatter(striker),
+          },
+          totalOvers: input.totalOvers,
+          season: input.season,
+        })
+      : undefined;
+
     // 2. Classify authoritative DeliveryResultType
     let resultType: DeliveryResultType;
     if (isWicket) {
@@ -251,6 +280,7 @@ export class DeliveryResultFactory {
       overCompleted,
       isFreeHit,
       triggeredFreeHit: rawOutcome.triggeredFreeHit || rawOutcome.extraType === 'No Ball',
+      fieldValidation,
     };
 
     return Object.freeze(deliveryResult);

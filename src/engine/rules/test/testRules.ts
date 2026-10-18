@@ -7,6 +7,8 @@ export const testRules: CricketRules = {
   followOn: true,
   followOnMargin: 200,
   declaration: true,
+  // Law 28.3 applies to every format, including Test cricket.
+  maxLegSideFielders: 5,
   reviews: {
     perInnings: 3,
     retainedOnUmpireCall: true
