@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
+import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   Play, 
@@ -18,7 +18,9 @@ import {
   Award,
   Terminal,
   Bug,
-  AlertTriangle
+  AlertTriangle,
+  X,
+  Info
 } from 'lucide-react';
 import { PitchType, WeatherCondition } from '../types/match';
 import { Player } from '../types/common';
@@ -119,6 +121,8 @@ interface FielderLiveState {
   id: string;
   name: string;
   role: string;
+  positionKey?: string;
+  fieldingRating?: number;
   currentX: number;
   currentY: number;
   targetX: number;
@@ -130,6 +134,8 @@ interface FielderLiveState {
   isCatching: boolean;
   tacticalRole: string;
   isMoving: boolean;
+  isBowler?: boolean;
+  isWicketkeeper?: boolean;
 }
 
 // 600 x 600 Circular Field Constants
@@ -287,7 +293,7 @@ export default function CricketActionVisualizer({
     });
   });
 
-  // Physical Fielders in 2D Space
+  // Physical Fielders in 2D Space (Exactly 11 Players)
   const [fielders, setFielders] = useState<FielderLiveState[]>(() => {
     return fieldConfig.fielders.map((f) => {
       const pos = clampFielderCoordinate(f.targetPos);
@@ -295,6 +301,10 @@ export default function CricketActionVisualizer({
         id: f.id,
         name: f.name,
         role: f.positionName,
+        positionKey: f.positionKey,
+        fieldingRating: f.fieldingRating,
+        isBowler: f.positionKey === 'BOWLER',
+        isWicketkeeper: f.positionKey === 'WICKETKEEPER',
         currentX: pos.x,
         currentY: pos.y,
         targetX: pos.x,
@@ -309,6 +319,9 @@ export default function CricketActionVisualizer({
       };
     });
   });
+
+  // Selected fielder for the read-only inspection modal
+  const [inspectedFielder, setInspectedFielder] = useState<FielderLiveState | null>(null);
 
   const [isFieldChanging, setIsFieldChanging] = useState<boolean>(false);
   const [fieldChangeProgress, setFieldChangeProgress] = useState<number>(100);
@@ -425,12 +438,11 @@ export default function CricketActionVisualizer({
       return { f, clampedTarget, clampedCurrent, dist, fromRole: rawCurrent.role };
     });
 
-    // HARD MOVEMENT BUDGET — at most two fielders animate per field update.
-    // Any additional displacement is represented as already settled, so the
-    // animation can never exceed the legally-permitted two-fielder movement.
+    // HARD MOVEMENT BUDGET — at most two outfielders animate per field update.
+    // Bowler and Wicketkeeper are stationary anchors.
     const moverIds = new Set(
       resolved
-        .filter((r) => r.dist > 4)
+        .filter((r) => r.f.positionKey !== 'BOWLER' && r.f.positionKey !== 'WICKETKEEPER' && r.dist > 4)
         .sort((a, b) => b.dist - a.dist)
         .slice(0, 2)
         .map((r) => r.f.id),
@@ -460,6 +472,10 @@ export default function CricketActionVisualizer({
         id: f.id,
         name: f.name,
         role: f.positionName,
+        positionKey: f.positionKey,
+        fieldingRating: f.fieldingRating,
+        isBowler: f.positionKey === 'BOWLER',
+        isWicketkeeper: f.positionKey === 'WICKETKEEPER',
         currentX: clampedCurrent.x,
         currentY: clampedCurrent.y,
         targetX,
@@ -1262,6 +1278,14 @@ export default function CricketActionVisualizer({
               return <circle key={ang} cx={mx} cy={my} r="2" fill="white" opacity="0.4" />;
             })}
 
+            {/* 2b. 30-Yard Circle Indicators */}
+            <text x="300" y="118" textAnchor="middle" fill="rgba(255,255,255,0.4)" fontSize="7" fontWeight="800" letterSpacing="1">
+              30 YARDS
+            </text>
+            <text x="300" y="484" textAnchor="middle" fill="rgba(255,255,255,0.4)" fontSize="7" fontWeight="800" letterSpacing="1">
+              30 YARDS
+            </text>
+
             {/* 3. Boundary Rope Circle */}
             <circle
               cx="300"
@@ -1272,6 +1296,41 @@ export default function CricketActionVisualizer({
               strokeWidth={boundaryEffect?.active ? "4.5" : "2.2"}
               className="transition-all duration-300"
             />
+
+            {/* 3b. Boundary Rope Distance Markers */}
+            {[
+              { label: '72m', x: 300, y: 44, anchor: 'middle' },
+              { label: '68m', x: 125, y: 108, anchor: 'middle' },
+              { label: '65m', x: 44, y: 304, anchor: 'start' },
+              { label: '60m', x: 115, y: 500, anchor: 'middle' },
+              { label: '58m', x: 300, y: 560, anchor: 'middle' },
+              { label: '60m', x: 485, y: 500, anchor: 'middle' },
+              { label: '65m', x: 556, y: 304, anchor: 'end' },
+              { label: '68m', x: 475, y: 108, anchor: 'middle' },
+            ].map((m, i) => (
+              <g key={`dist_${i}`} opacity="0.65">
+                <rect
+                  x={m.anchor === 'middle' ? m.x - 13 : m.anchor === 'end' ? m.x - 26 : m.x}
+                  y={m.y - 7}
+                  width="26"
+                  height="13"
+                  rx="3.5"
+                  fill="#0B132B"
+                  stroke="rgba(255,255,255,0.2)"
+                  strokeWidth="0.8"
+                />
+                <text
+                  x={m.anchor === 'middle' ? m.x : m.anchor === 'end' ? m.x - 13 : m.x + 13}
+                  y={m.y + 2.5}
+                  textAnchor="middle"
+                  fill="#F8FAFC"
+                  fontSize="6.8"
+                  fontWeight="800"
+                >
+                  {m.label}
+                </text>
+              </g>
+            ))}
 
             {/* 4. Central Cricket Pitch Strip */}
             <rect
@@ -1284,6 +1343,13 @@ export default function CricketActionVisualizer({
               stroke="rgba(0,0,0,0.4)"
               strokeWidth="1"
             />
+            {/* Bowler Run-Up Approach Strip */}
+            <g opacity="0.4">
+              <rect x="290" y="115" width="20" height="55" fill="none" stroke="rgba(255,255,255,0.2)" strokeWidth="1" strokeDasharray="3 3" />
+              <line x1="300" y1="115" x2="300" y2="170" stroke="rgba(255,255,255,0.25)" strokeWidth="1" strokeDasharray="2 2" />
+              <text x="300" y="145" textAnchor="middle" fill="rgba(255,255,255,0.35)" fontSize="6" fontWeight="700">RUN-UP</text>
+            </g>
+
             {/* Bowling Crease (y=190) & Popping Crease (y=410) */}
             <line x1="272" y1="190" x2="328" y2="190" stroke="white" strokeWidth="1.8" />
             <line x1="272" y1="410" x2="328" y2="410" stroke="white" strokeWidth="2.2" />
@@ -1348,50 +1414,98 @@ export default function CricketActionVisualizer({
               );
             })}
 
-            {/* 6. Active Fielders in 2D Positions */}
+            {/* 6. Active Fielders in 2D Positions (Exactly 11 Players including Bowler and Wicketkeeper) */}
             {fielders.map((fielder) => {
-              const isCatching = fielder.category === 'CATCHING';
-              const isBoundary = fielder.category === 'BOUNDARY';
+              const isBowler = fielder.positionKey === 'BOWLER' || fielder.role?.toLowerCase() === 'bowler';
+              const isWicketkeeper = fielder.positionKey === 'WICKETKEEPER' || fielder.role?.toLowerCase().includes('keeper');
+              const isSelected = inspectedFielder?.id === fielder.id;
+
+              // When bowler is running up or delivering: use animated bowlerPos
+              const posX = isBowler ? bowlerPos.x : fielder.currentX;
+              const posY = isBowler ? bowlerPos.y : fielder.currentY;
+
+              const initials = fielder.name
+                .split(' ')
+                .filter(Boolean)
+                .slice(0, 2)
+                .map((p) => p[0].toUpperCase())
+                .join('') || (isBowler ? 'BW' : isWicketkeeper ? 'WK' : 'FD');
+
+              const roleColor = isBowler
+                ? '#DC2626' // Crimson for Bowler
+                : isWicketkeeper
+                ? '#D97706' // Amber for Wicketkeeper
+                : fielder.isCatching
+                ? '#9333EA' // Purple for Slips / Catchers
+                : fielder.isOutsideCircle
+                ? '#0D9488' // Teal for Deep Boundary Fielders
+                : '#2563EB'; // Electric Blue for Ring Fielders
 
               return (
                 <g
                   key={fielder.id}
-                  transform={`translate(${fielder.currentX}, ${fielder.currentY})`}
-                  onMouseDown={() => { if (editFieldEnabled) setDraggedFielderId(fielder.id); }}
-                  className={editFieldEnabled ? 'cursor-grab active:cursor-grabbing' : 'cursor-default'}
+                  transform={`translate(${posX}, ${posY})`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setInspectedFielder((prev) => (prev?.id === fielder.id ? null : fielder));
+                  }}
+                  className="cursor-pointer"
                 >
-                  <title>{editFieldEnabled ? `${fielder.role} (${fielder.name}) â€” drag to reposition` : `${fielder.role} (${fielder.name})`}</title>
-                  <circle
-                    r="9.5"
-                    fill={fielder.isMoving ? "#22D3EE" : "#2563EB"}
-                    stroke="#FFFFFF"
-                    strokeWidth="2"
-                    opacity={fielder.isMoving ? "0.95" : "0.92"}
-                  />
-                  <circle r="2.8" fill="#FFFFFF" />
+                  <title>{`${fielder.role}: ${fielder.name} (${fielder.tacticalRole}) - Click to inspect`}</title>
 
-                  {/* Position Label Pill: Only displayed in LABELS mode */}
-                  {effectiveDisplayMode === 'LABELS' && (
-                    <g transform={`translate(0, ${fielder.currentY > 480 ? -14 : 14})`}>
+                  {/* Highlight ring if selected */}
+                  {isSelected && (
+                    <circle r="15" fill="none" stroke="#F59E0B" strokeWidth="2.5" strokeDasharray="3 2" className="animate-spin-slow" />
+                  )}
+
+                  {/* Movement ring if currently relocating */}
+                  {fielder.isMoving && !isSelected && (
+                    <circle r="14" fill="none" stroke="#22D3EE" strokeWidth="2" strokeDasharray="3 2" className="animate-spin-slow" />
+                  )}
+
+                  {/* Outer circle marker */}
+                  <circle
+                    r="10"
+                    fill={roleColor}
+                    stroke="#FFFFFF"
+                    strokeWidth={isSelected ? "2.5" : "1.8"}
+                    opacity="0.95"
+                  />
+
+                  {/* Player Initials text inside marker */}
+                  <text
+                    y="3"
+                    textAnchor="middle"
+                    fill="#FFFFFF"
+                    fontSize="7"
+                    fontWeight="900"
+                    pointerEvents="none"
+                  >
+                    {initials}
+                  </text>
+
+                  {/* Position Label Pill */}
+                  {(effectiveDisplayMode === 'LABELS' || isSelected) && (
+                    <g transform={`translate(0, ${posY > 470 ? -15 : 15})`}>
                       <rect
                         x="-26"
-                        y="-7"
+                        y="-7.5"
                         width="52"
-                        height="13"
-                        rx="3.5"
+                        height="14"
+                        rx="4"
                         fill="#0B132B"
-                        stroke={fielder.isMoving ? "#22D3EE" : "rgba(255,255,255,0.25)"}
-                        strokeWidth="0.8"
-                        opacity="0.92"
+                        stroke={isSelected ? "#F59E0B" : roleColor}
+                        strokeWidth={isSelected ? "1.2" : "0.8"}
+                        opacity="0.94"
                       />
                       <text
                         textAnchor="middle"
-                        y="2.5"
-                        fill={fielder.isMoving ? "#22D3EE" : "#F8FAFC"}
-                        fontSize="7"
-                        fontWeight="900"
+                        y="2.8"
+                        fill="#F8FAFC"
+                        fontSize="6.8"
+                        fontWeight="800"
                       >
-                        {fielder.role}
+                        {fielder.role.length > 11 ? fielder.role.substring(0, 10) + '…' : fielder.role}
                       </text>
                     </g>
                   )}
@@ -1399,35 +1513,14 @@ export default function CricketActionVisualizer({
               );
             })}
 
-            {/* 7. Wicketkeeper (Anchor at y=460) */}
-            <g transform="translate(300, 460)">
-              <title>Wicketkeeper</title>
-              <circle r="9" fill="#F59E0B" opacity="0.6" />
-              <circle r="7.5" fill="#FBBF24" stroke="#FFF" strokeWidth="1.8" />
-              <circle r="2.8" fill="#78350F" />
-              {effectiveDisplayMode === 'LABELS' && (
-                <g transform="translate(0, 14)">
-                  <rect x="-24" y="-7" width="48" height="13" rx="3.5" fill="#0B132B" stroke="#F59E0B" strokeWidth="0.8" opacity="0.9" />
-                  <text textAnchor="middle" y="2.5" fill="#FDE68A" fontSize="7" fontWeight="900">
-                    Wicketkeeper
-                  </text>
-                </g>
-              )}
-            </g>
-
-            {/* 8. Non-Striker & Bowler Markers */}
+            {/* 7. Non-Striker Batter Marker */}
             <g transform={`translate(${nonStrikerPos.x + 16}, ${nonStrikerPos.y})`}>
-              <circle r="8" fill="#0284C7" stroke="white" strokeWidth="1.6" />
+              <circle r="8.5" fill="#0284C7" stroke="white" strokeWidth="1.6" />
               <circle r="3" fill="white" />
               <text y="14" textAnchor="middle" fill="#7DD3FC" fontSize="6.5" fontWeight="900">Non-Str</text>
             </g>
-            <g transform={`translate(${bowlerPos.x - 16}, ${bowlerPos.y})`}>
-              <circle r="8.5" fill="#DC2626" stroke="white" strokeWidth="1.6" />
-              <circle r="3" fill="white" />
-              <text y="14" textAnchor="middle" fill="#FCA5A5" fontSize="6.5" fontWeight="900">Bowler</text>
-            </g>
 
-            {/* 9. Striker & Bat Marker */}
+            {/* 8. Striker Batter & Bat Marker */}
             <g transform={`translate(${strikerPos.x}, ${strikerPos.y})`}>
               <circle r="9" fill="#2563EB" stroke="white" strokeWidth="1.8" />
               <circle r="3.5" fill="white" />
@@ -1496,7 +1589,114 @@ export default function CricketActionVisualizer({
                 />
               </g>
             )}
+            {/* 14. Ball Direction Indicator (in flight) */}
+            {ballVisible && (playbackStage === 'BALL_TRAVEL' || playbackStage === 'PITCH_BOUNCE') && (
+              <g transform={`translate(${ballPos.x}, ${ballPos.y})`}>
+                <circle r="8" fill="none" stroke="#38BDF8" strokeWidth="1.2" strokeDasharray="2 2" className="animate-spin-slow" />
+              </g>
+            )}
           </svg>
+
+          {/* Read-Only Fielder Inspection Card */}
+          <AnimatePresence>
+            {inspectedFielder && (
+              <motion.div
+                initial={{ opacity: 0, y: 12, scale: 0.95 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                transition={{ duration: 0.16 }}
+                className="absolute bottom-3 left-3 right-3 sm:left-auto sm:right-3 sm:w-80 bg-slate-950/95 backdrop-blur-xl border border-slate-700/80 rounded-2xl p-4 shadow-2xl z-30 text-white"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex items-center gap-2.5">
+                    <div
+                      className="w-10 h-10 rounded-xl flex items-center justify-center font-black text-sm text-white shadow-md border"
+                      style={{
+                        backgroundColor: inspectedFielder.isBowler
+                          ? '#DC2626'
+                          : inspectedFielder.isWicketkeeper
+                          ? '#D97706'
+                          : inspectedFielder.category === 'CATCHING'
+                          ? '#7E22CE'
+                          : inspectedFielder.isOutsideCircle
+                          ? '#0F766E'
+                          : '#1D4ED8',
+                        borderColor: 'rgba(255,255,255,0.2)',
+                      }}
+                    >
+                      {inspectedFielder.name
+                        .split(' ')
+                        .filter(Boolean)
+                        .slice(0, 2)
+                        .map((p) => p[0].toUpperCase())
+                        .join('') || (inspectedFielder.isBowler ? 'BW' : inspectedFielder.isWicketkeeper ? 'WK' : 'FD')}
+                    </div>
+                    <div>
+                      <div className="text-sm font-black text-white leading-tight">{inspectedFielder.name}</div>
+                      <div className="text-[11px] font-bold text-amber-400 mt-0.5">{inspectedFielder.role}</div>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => setInspectedFielder(null)}
+                    className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition-colors"
+                    title="Close"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+
+                <div className="mt-3 grid grid-cols-2 gap-2 text-[10px]">
+                  <div className="bg-slate-900/80 border border-white/5 rounded-xl p-2">
+                    <span className="text-slate-400 block font-semibold">Zone Category</span>
+                    <span className="font-bold text-cyan-300">
+                      {inspectedFielder.isBowler
+                        ? 'Bowler Crease'
+                        : inspectedFielder.isWicketkeeper
+                        ? 'Behind Wicket'
+                        : inspectedFielder.category === 'CATCHING'
+                        ? 'Close Catching'
+                        : inspectedFielder.isOutsideCircle
+                        ? 'Deep Outfield'
+                        : '30-Yard Infield'}
+                    </span>
+                  </div>
+                  <div className="bg-slate-900/80 border border-white/5 rounded-xl p-2">
+                    <span className="text-slate-400 block font-semibold">Restriction Status</span>
+                    <span className={cn('font-bold', inspectedFielder.isOutsideCircle ? 'text-amber-400' : 'text-emerald-400')}>
+                      {inspectedFielder.isOutsideCircle ? 'Outside Circle' : 'Inside Ring'}
+                    </span>
+                  </div>
+                </div>
+
+                {inspectedFielder.fieldingRating && (
+                  <div className="mt-2.5 bg-slate-900/80 border border-white/5 rounded-xl p-2">
+                    <div className="flex justify-between items-center text-[10px] mb-1">
+                      <span className="text-slate-400 font-semibold">Fielding Rating</span>
+                      <span className="text-emerald-400 font-black">{inspectedFielder.fieldingRating}/100</span>
+                    </div>
+                    <div className="w-full bg-slate-800 rounded-full h-1.5 overflow-hidden">
+                      <div
+                        className="bg-emerald-500 h-full rounded-full transition-all duration-300"
+                        style={{ width: `${Math.min(100, Math.max(0, inspectedFielder.fieldingRating))}%` }}
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {inspectedFielder.tacticalRole && (
+                  <div className="mt-2.5 bg-slate-900/80 border border-white/5 rounded-xl p-2 text-[10px]">
+                    <span className="text-slate-400 block font-semibold mb-0.5">Tactical Duty</span>
+                    <p className="text-slate-200 font-medium leading-relaxed">{inspectedFielder.tacticalRole}</p>
+                  </div>
+                )}
+
+                <div className="mt-2 flex items-center justify-between text-[9px] text-slate-500 font-mono">
+                  <span>AI Assigned • Read Only</span>
+                  <span>Coords: ({Math.round(inspectedFielder.currentX)}, {Math.round(inspectedFielder.currentY)})</span>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
           </div>
 
           {/* Delivery Result Banner Overlay */}

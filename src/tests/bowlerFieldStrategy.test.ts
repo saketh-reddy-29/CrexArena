@@ -64,7 +64,9 @@ describe('BowlerFieldStrategyEngine - Format Engine Verification', () => {
       expect(config.maxOutsideCircle).toBe(2);
       expect(config.actualOutsideCircle).toBeLessThanOrEqual(2);
       expect(config.isCompliant).toBe(true);
-      expect(config.fielders.length).toBe(10); // Keeper + 9 fielders
+      expect(config.fielders.length).toBe(11); // Exactly 11 fielders: Bowler + Keeper + 9 outfielders
+      expect(config.fielders.some(f => f.positionKey === 'BOWLER')).toBe(true);
+      expect(config.fielders.some(f => f.positionKey === 'WICKETKEEPER')).toBe(true);
     });
 
     it('generates compliant T20 Middle overs field (Overs 6-15) with max 5 outside circle', () => {

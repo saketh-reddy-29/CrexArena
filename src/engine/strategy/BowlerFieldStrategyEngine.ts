@@ -45,6 +45,7 @@ export interface FielderAssignment {
   isOutsideCircle: boolean;
   isCatching: boolean;
   tacticalRole: string;
+  fieldingRating?: number;
 }
 
 export interface ScoringZoneData {
@@ -117,7 +118,10 @@ export interface FieldStrategyInput {
 // Center = (300, 300), Pitch = y 170-430, Batter Crease = (300, 410)
 // Inner Circle ellipse: rx=160, ry=190. Boundary R=268.
 export const CANONICAL_POSITIONS: Record<string, FieldPositionDef> = {
-  // Wicketkeeper (Constant anchor)
+  // Bowler (Anchored at bowling crease)
+  BOWLER: { key: 'BOWLER', name: 'Bowler', x: 300, y: 190, category: 'RING', ringDistance: 'INNER', isOutsideCircle: false, tacticalRole: 'Delivery & Return Catch / Bowler Crease' },
+
+  // Wicketkeeper (Constant anchor behind striker)
   WICKETKEEPER: { key: 'WICKETKEEPER', name: 'Wicketkeeper', x: 300, y: 460, category: 'CATCHING', ringDistance: 'CLOSE', isOutsideCircle: false, tacticalRole: 'Primary Catcher / Stumps Guard' },
 
   // Slip Cordon (Off-side Catchers behind square)
@@ -483,39 +487,58 @@ export class BowlerFieldStrategyEngine {
     selectedKeys = this.enforceLegSideBalance(selectedKeys.slice(0, 9), isLeftHander, legSideLimit);
 
     // ─────────────────────────────────────────────────────────────────────────
-    // 2. ASSIGN REAL FIELDERS FROM SQUAD
+    // 2. ASSIGN REAL FIELDERS FROM SQUAD (EXACTLY 11 PLAYERS)
     // ─────────────────────────────────────────────────────────────────────────
     const availableSquad = (fieldingSquad && fieldingSquad.length >= 11)
       ? fieldingSquad
       : this.getDefaultFieldingSquad();
 
-    // Player 0: Bowler (Anchor at bowler crease)
-    // Player 1: Wicketkeeper (Anchor at stumps)
-    // Players 2..10: The 9 dynamic fielders
+    // Identify active keeper, bowler, and the remaining 9 outfielders
     const keeper = availableSquad.find(p => p.role === 'Wicketkeeper') || availableSquad[1];
-    const otherPlayers = availableSquad.filter(p => p.id !== bowler?.id && p.id !== keeper.id);
+    const bowlerPlayer = bowler || availableSquad.find(p => p.id !== keeper.id) || availableSquad[0];
+    const otherPlayers = availableSquad.filter(p => p.id !== bowlerPlayer.id && p.id !== keeper.id);
 
-    // Build the 9 fielders
+    // Build exactly 11 fielders: 1 Bowler + 1 Keeper + 9 Dynamic Fielders
     const fielders: FielderAssignment[] = [];
     const prevFielders = previousConfig?.fielders || [];
 
-    // Add Wicketkeeper
+    // Player 0: Bowler (Anchor at bowler crease)
+    const bowlerBase = CANONICAL_POSITIONS.BOWLER;
+    const bowlerTarget = { x: bowlerBase.x, y: bowlerBase.y };
+    const prevBowler = prevFielders.find(f => f.positionKey === 'BOWLER' || f.id === bowlerPlayer.id);
+    fielders.push({
+      id: bowlerPlayer.id,
+      name: bowlerPlayer.name,
+      role: bowlerPlayer.role || 'Bowler',
+      positionKey: bowlerBase.key,
+      positionName: bowlerBase.name,
+      currentPos: prevBowler ? { ...prevBowler.targetPos } : { ...bowlerTarget },
+      targetPos: { ...bowlerTarget },
+      isOutsideCircle: false,
+      isCatching: false,
+      tacticalRole: bowlerBase.tacticalRole,
+      fieldingRating: (bowlerPlayer as any).stats?.bowling || bowlerPlayer.rating || 88,
+    });
+
+    // Player 1: Wicketkeeper (Anchor at stumps)
     const wkBase = CANONICAL_POSITIONS.WICKETKEEPER;
     const wkTarget = isLeftHander ? this.mirrorForLeftHander(wkBase, true) : { x: wkBase.x, y: wkBase.y };
+    const prevKeeper = prevFielders.find(f => f.positionKey === 'WICKETKEEPER' || f.id === keeper.id);
     fielders.push({
       id: keeper.id,
       name: keeper.name,
-      role: keeper.role,
+      role: keeper.role || 'Wicketkeeper',
       positionKey: wkBase.key,
       positionName: wkBase.name,
-      currentPos: { ...wkTarget },
+      currentPos: prevKeeper ? { ...prevKeeper.targetPos } : { ...wkTarget },
       targetPos: { ...wkTarget },
       isOutsideCircle: false,
       isCatching: true,
       tacticalRole: wkBase.tacticalRole,
+      fieldingRating: (keeper as any).stats?.batting || keeper.rating || 85,
     });
 
-    // Add 9 Dynamic Fielders
+    // Players 2..10: Add 9 Dynamic Outfielders
     selectedKeys.slice(0, 9).forEach((posKey, idx) => {
       const pDef = CANONICAL_POSITIONS[posKey] || CANONICAL_POSITIONS.MID_OFF;
       const assignedPlayer = otherPlayers[idx] || otherPlayers[idx % otherPlayers.length];
@@ -528,7 +551,7 @@ export class BowlerFieldStrategyEngine {
       fielders.push({
         id: assignedPlayer.id,
         name: assignedPlayer.name,
-        role: assignedPlayer.role,
+        role: assignedPlayer.role || 'Batsman',
         positionKey: pDef.key,
         positionName: pDef.name,
         currentPos,
@@ -536,6 +559,7 @@ export class BowlerFieldStrategyEngine {
         isOutsideCircle: pDef.isOutsideCircle,
         isCatching: pDef.category === 'CATCHING',
         tacticalRole: pDef.tacticalRole,
+        fieldingRating: (assignedPlayer as any).stats?.fielding || assignedPlayer.rating || 85,
       });
     });
 
@@ -557,9 +581,10 @@ export class BowlerFieldStrategyEngine {
     // 4. COMPLIANCE & TACTICAL METRICS
     // ─────────────────────────────────────────────────────────────────────────
     const actualOutside = fielders.filter(f => f.isOutsideCircle).length;
-    const offSide = fielders.filter(f => isLeftHander ? f.targetPos.x > 300 : f.targetPos.x < 300).length;
-    const legSide = fielders.filter(f => isLeftHander ? f.targetPos.x < 300 : f.targetPos.x > 300).length;
-    const isCompliant = actualOutside <= maxOutsideCircle && legSide <= legSideLimit;
+    const offSide = fielders.filter(f => f.positionKey !== 'BOWLER' && f.positionKey !== 'WICKETKEEPER' && (isLeftHander ? f.targetPos.x > 300 : f.targetPos.x < 300)).length;
+    const legSide = fielders.filter(f => f.positionKey !== 'BOWLER' && f.positionKey !== 'WICKETKEEPER' && (isLeftHander ? f.targetPos.x < 300 : f.targetPos.x > 300)).length;
+    const behindSquareLeg = fielders.filter(f => f.positionKey !== 'BOWLER' && f.positionKey !== 'WICKETKEEPER' && (isLeftHander ? f.targetPos.x < 300 : f.targetPos.x > 300) && f.targetPos.y > 410).length;
+    const isCompliant = actualOutside <= maxOutsideCircle && legSide <= legSideLimit && behindSquareLeg <= 2;
 
     // ─────────────────────────────────────────────────────────────────────────
     // 5. SCORING ZONES CALCULATION (360° Wagon Wheel)
@@ -610,6 +635,7 @@ export class BowlerFieldStrategyEngine {
 
   /**
    * Law 28.3 — never station more than the legal maximum on the leg side.
+   * Law 28.4 — never station more than 2 outfielders behind square on the leg side.
    * Over-limit leg-side positions are swapped for same-category off-side slots.
    */
   private static enforceLegSideBalance(keys: string[], isLeftHander: boolean, limit: number): string[] {
@@ -634,6 +660,24 @@ export class BowlerFieldStrategyEngine {
       if (!fallback) break;
       adjusted[legIdx] = fallback;
     }
+
+    // Law 28.4 — max 2 behind square on leg side
+    const isBehindSquareLegKey = (k: string): boolean => {
+      const def = CANONICAL_POSITIONS[k];
+      if (!def) return false;
+      const p = BowlerFieldStrategyEngine.mirrorForLeftHander(def, isLeftHander);
+      return isOnLegSide(p.x, isLeftHander) && p.y > 410;
+    };
+    guard = 0;
+    while (adjusted.filter(isBehindSquareLegKey).length > 2 && guard++ < 16) {
+      const idx = adjusted.findIndex(isBehindSquareLegKey);
+      if (idx < 0) break;
+      const fallback = ['SQUARE_LEG', 'MID_WICKET', 'MID_ON', 'COVER'].find(k => !adjusted.includes(k))
+        ?? OFF_SIDE_FALLBACKS.find(k => !adjusted.includes(k));
+      if (fallback) adjusted[idx] = fallback;
+      else break;
+    }
+
     return adjusted;
   }
 
@@ -670,7 +714,7 @@ export class BowlerFieldStrategyEngine {
       const prev = prevById.get(f.id);
       if (!prev) continue;
       f.currentPos = { ...prev.targetPos };
-      if (f.positionKey === 'WICKETKEEPER') continue;
+      if (f.positionKey === 'WICKETKEEPER' || f.positionKey === 'BOWLER') continue;
       const dist = Math.hypot(f.currentPos.x - f.targetPos.x, f.currentPos.y - f.targetPos.y);
       if (dist > MOVE_THRESHOLD) movers.push({ f, prev, dist });
     }
@@ -678,15 +722,20 @@ export class BowlerFieldStrategyEngine {
     const isProjectedLegal = (settled: Set<FielderAssignment>): boolean => {
       let outside = 0;
       let leg = 0;
+      let behindSquare = 0;
       for (const f of fielders) {
-        if (f.positionKey === 'WICKETKEEPER') continue;
+        if (f.positionKey === 'WICKETKEEPER' || f.positionKey === 'BOWLER') continue;
         const anchor = settled.has(f) ? f : prevById.get(f.id) ?? f;
         const pos = settled.has(f) ? f.targetPos : anchor.targetPos;
         if (anchor.isOutsideCircle) outside += 1;
-        if (isOnLegSide(pos.x, opts.isLeftHander)) leg += 1;
+        if (isOnLegSide(pos.x, opts.isLeftHander)) {
+          leg += 1;
+          if (pos.y > 410) behindSquare += 1;
+        }
       }
       if (opts.restricted && outside > opts.maxOutsideCircle) return false;
-      return leg <= opts.legSideLimit;
+      if (leg > opts.legSideLimit) return false;
+      return behindSquare <= 2;
     };
 
     const recordChanges = (selected: Mover[]) => {

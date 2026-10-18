@@ -207,6 +207,12 @@ export interface Fixture {
   fixtureStatus?: FixtureStatus;
   format?: MatchFormat;
   scorecard?: MatchScorecard;
+  /**
+   * Set once a result has been committed. Acts as the permanent replay lock:
+   * a finalised fixture can never be started, watched or simulated again, even
+   * if its coarse status is somehow left inconsistent.
+   */
+  finalized?: boolean;
   conditions?: MatchConditions;
   /** Full persisted pitch/ground/weather/toss-report bundle, seeded per fixture. */
   conditionReport?: MatchConditionReport;

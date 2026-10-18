@@ -155,6 +155,9 @@ export class BallLifecycleController {
   canReleaseDelivery(): boolean {
     return this.state === 'READY';
   }
+  canReleaseNextDelivery(): boolean {
+    return this.canReleaseDelivery();
+  }
   /** True once the ball is back with the bowler (retrieval chain complete). */
   isRetrievalComplete(): boolean {
     return this.state === 'BALL_READY' || this.state === 'DELIVERY_COMPLETE' || this.state === 'READY';
@@ -227,6 +230,36 @@ export class BallLifecycleController {
       this.ballPosition = { ...this.bowlerPosition };
       this.collectingFielderId = null;
       return true;
+    }
+    return false;
+  }
+
+  /** Ball has left the bowler's hand (alias: releaseBall). */
+  releaseBall(): boolean {
+    return this.ballEnteredPlay();
+  }
+
+  /** Ball has been collected/stopped (alias: collectBall). */
+  collectBall(at?: Point, fielderId?: string | null): boolean {
+    return this.ballCollected(at, fielderId);
+  }
+
+  /** The collected ball is now being returned toward the bowler (alias: returnBall). */
+  returnBall(): boolean {
+    return this.startReturn();
+  }
+
+  /** The ball has arrived at the bowler (alias: bowlerReceives). */
+  bowlerReceives(): boolean {
+    return this.ballArrivedAtBowler();
+  }
+
+  /** Reset back to READY for next delivery if complete. */
+  resetForNextDelivery(): boolean {
+    if (this.state === 'READY') return true;
+    if (this.state === 'DELIVERY_COMPLETE') return this.transition('READY');
+    if (this.state === 'BALL_READY') {
+      return this.completeDelivery() && this.completeDelivery();
     }
     return false;
   }

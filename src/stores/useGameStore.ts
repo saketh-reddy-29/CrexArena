@@ -20,6 +20,12 @@ import {
   createSeriesConfig,
   generateSeriesFixtures,
 } from '../engine/competition/seriesEngine';
+import {
+  canStartFixture,
+  isFixtureLive,
+  isUserFixture,
+  getFixtureProgress,
+} from '../engine/competition/seasonProgression';
 import { buildMatchConditionsReport, hashSeed } from '../engine/conditions';
 import type { MatchConditionReport, MatchFormatKey } from '../engine/conditions';
 
@@ -60,6 +66,7 @@ export enum GameState {
   PLAYING_XI_BUILDER = 'playing_xi_builder',
   MATCH_SIMULATION = 'match_simulation',
   PRE_MATCH = 'pre_match',
+  MATCH_RESULT = 'match_result',
 }
 
 export type ArenaTab = 'OVERVIEW' | 'MATCHES' | 'TEAMS' | 'TABLE' | 'PLAYERS' | 'PLAYER_STATS' | 'TEAM_STATS' | 'AUCTION' | 'SQUAD' | 'PLAYOFFS' | 'SERIES';
@@ -172,6 +179,8 @@ interface GameStore {
   playerFatigue: Record<string, number>;
   fixturePlayingXIs: Record<string, { team1XI: string[]; team2XI: string[] }>;
   liveMatchState: Record<string, any> | null;
+  /** Fixture currently opened in the read-only result/scorecard view. */
+  viewingMatchId: string | null;
   selectedFormat: ArenaFormat | null;
   activeTab: ArenaTab;
   viewedPlayerId: string | null;
@@ -217,6 +226,8 @@ interface GameStore {
   updateMatchResult: (matchId: string, scorecard: MatchScorecard) => void;
   setCurrentMatch: (matchId: string | null) => void;
   setCurrentMatchToss: (toss: { winnerId: string; decision: TossDecision } | null) => void;
+  /** Opens a completed fixture's read-only scorecard (replay-proof). */
+  setViewingMatch: (matchId: string | null) => void;
   /**
    * Transitions a scheduled fixture into the in-progress (LIVE) lifecycle
    * state and focuses it as the current match. Refuses to (re)start a match
@@ -269,6 +280,7 @@ export const useGameStore = create<GameStore>()(
       playerFatigue: {},
       fixturePlayingXIs: {},
       liveMatchState: null,
+      viewingMatchId: null,
       activeTab: 'OVERVIEW',
       viewedPlayerId: null,
       seriesConfig: null,
@@ -318,13 +330,27 @@ export const useGameStore = create<GameStore>()(
         return { gameState: prevState, stateHistory: newHistory };
       }),
       setCurrentMatch: (matchId) => set({ currentMatchId: matchId }),
+      setViewingMatch: (matchId) => set({ viewingMatchId: matchId }),
       setCurrentMatchToss: (toss) => set({ currentMatchToss: toss }),
       startMatch: (matchId) => {
         const state = get();
         const fixture = state.fixtures.find(f => f.id === matchId);
         if (!fixture) return false;
+        if (fixture.finalized) return false;
         if (fixture.status === MatchStatus.COMPLETED || fixture.status === MatchStatus.ABANDONED) {
           return false;
+        }
+        // Progressive scheduling: only fixtures on the current match-day may
+        // enter their LIVE lifecycle. Finished games are replay-proof.
+        if (!canStartFixture(fixture, state.fixtures, state.selectedFranchiseId).allowed) {
+          return false;
+        }
+        // A user may only have one of their own fixtures live at a time.
+        if (isUserFixture(fixture, state.selectedFranchiseId)) {
+          const anotherLiveUserMatch = state.fixtures.some(
+            (f) => f.id !== fixture.id && isFixtureLive(f) && isUserFixture(f, state.selectedFranchiseId),
+          );
+          if (anotherLiveUserMatch) return false;
         }
         set({
           currentMatchId: matchId,
@@ -519,6 +545,7 @@ export const useGameStore = create<GameStore>()(
         playerFatigue: {},
         fixturePlayingXIs: {},
         liveMatchState: null,
+        viewingMatchId: null,
         seriesConfig: null,
         activeTab: 'OVERVIEW',
         viewedPlayerId: null,
@@ -576,6 +603,11 @@ export const useGameStore = create<GameStore>()(
       }),
 
       generateSeasonFixtures: () => set((state) => {
+        // Idempotent: a season is generated exactly once. Re-entrancy from
+        // React effects or a refresh must never regenerate an in-progress
+        // season (which would erase results and break progression).
+        if (state.fixtures.length > 0) return state;
+
         const fixtureList = FixtureScheduler.generateTournamentSchedule(
           state.franchises,
           state.selectedFormat || 'T20',
@@ -639,6 +671,7 @@ export const useGameStore = create<GameStore>()(
         // Immutability: once a match is finalised its result is locked. A
         // second (or duplicate) submission is a no-op — this is the
         // idempotency guarantee that prevents double-counted statistics.
+        if (existingFixture.finalized) return state;
         if (
           (existingFixture.status === MatchStatus.COMPLETED || existingFixture.status === MatchStatus.ABANDONED) &&
           existingFixture.scorecard
@@ -657,6 +690,7 @@ export const useGameStore = create<GameStore>()(
                 status: finalStatus,
                 fixtureStatus: finalFixtureStatus,
                 scorecard,
+                finalized: true,
                 endTime: f.endTime ?? Date.now(),
               }
             : f
@@ -934,9 +968,20 @@ export const useGameStore = create<GameStore>()(
         const fixture = state.fixtures.find(f => f.id === matchId);
         if (!fixture) return state;
         // Never re-simulate a finished match — its result is immutable.
+        if (fixture.finalized) return state;
         if (fixture.status === MatchStatus.COMPLETED || fixture.status === MatchStatus.ABANDONED) {
           return state;
         }
+        // Already live (reserved by a watch session or a prior skip) — do not
+        // run a second concurrent simulation of the same fixture.
+        if (fixture.status === MatchStatus.LIVE || fixture.fixtureStatus === 'LIVE') {
+          return state;
+        }
+        // Progressive scheduling: only current match-day fixtures may resolve.
+        const progression = getFixtureProgress(fixture, state.fixtures, state.selectedFranchiseId);
+        if (progression.state === 'LOCKED' || progression.state === 'COMPLETED') return state;
+        // A skip resolves AI fixtures only; the user's own match must be played.
+        if (progression.isUserFixture) return state;
 
         const team1Id = fixture.team1Id;
         const team2Id = fixture.team2Id;
@@ -1136,7 +1181,15 @@ export const useGameStore = create<GameStore>()(
         };
 
         setTimeout(() => get().updateMatchResult(matchId, scorecard), 0);
-        return state;
+        // Reserve the fixture immediately so a duplicate skip/watch cannot
+        // start a second simulation before the result callback lands.
+        return {
+          fixtures: state.fixtures.map(f =>
+            f.id === matchId
+              ? { ...f, fixtureStatus: 'LIVE' as FixtureStatus, startTime: f.startTime ?? Date.now() }
+              : f
+          ),
+        };
       });
       },
 
@@ -1201,6 +1254,10 @@ export const useGameStore = create<GameStore>()(
         franchises: state.franchises,
         activeTab: state.activeTab,
         seriesConfig: state.seriesConfig,
+        // Persist the in-progress ball-by-ball state so a mid-match refresh
+        // resumes exactly where it left off (spec: persistence & recovery).
+        liveMatchState: state.liveMatchState,
+        viewingMatchId: state.viewingMatchId,
       }),
       storage: {
         getItem: (name) => {

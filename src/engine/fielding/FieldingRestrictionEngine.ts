@@ -40,7 +40,12 @@ export type FieldViolationCode =
   | 'TOO_MANY_OUTSIDE'
   | 'MISSING_WICKETKEEPER'
   | 'MISSING_BOWLER'
-  | 'TOO_MANY_LEG_SIDE';
+  | 'TOO_MANY_LEG_SIDE'
+  | 'TOO_MANY_BEHIND_SQUARE_LEG'
+  | 'OUT_OF_BOUNDS'
+  | 'PROHIBITED_REGION'
+  | 'DUPLICATE_PLAYERS'
+  | 'OVERLAPPING_FIELDERS';
 
 export interface FieldValidationViolation {
   code: FieldViolationCode;
@@ -61,8 +66,14 @@ export interface FieldValidationOptions {
   requireWicketkeeper?: boolean;
   /** Enforce that a bowler is present (default false). */
   requireBowler?: boolean;
-  /** Maximum fielders on the leg side (default disabled). */
+  /** Maximum fielders on the leg side (default 5, Law 28.3). */
   maxLegSide?: number;
+  /** Maximum outfielders behind square leg (default 2, Law 28.4). */
+  maxBehindSquareLeg?: number;
+  /** Enforce boundary boundary distance (default true). */
+  enforceBounds?: boolean;
+  /** Enforce pitch playing strip clearance (default true). */
+  enforcePitchClearance?: boolean;
   /** Batter handedness, used for leg-side counting. */
   isLeftHanded?: boolean;
 }
@@ -80,10 +91,13 @@ export interface FieldValidationResult {
   legSideCount: number;
   /** Active Law 28.3 leg-side maximum. */
   legSideLimit: number;
+  /** Active Law 28.4 behind square leg count and limit. */
+  behindSquareLegCount: number;
+  maxBehindSquareLeg: number;
   /** Fielders currently outside the circle (ids). */
   outsideFielderIds: string[];
   violations: FieldValidationViolation[];
-  /** Short human-readable summary, e.g. "Powerplay restriction: maximum 2 fielders outside the circle. 3 outside. Move 1 fielder inside." */
+  /** Short human-readable summary. */
   message: string;
 }
 
@@ -262,7 +276,28 @@ export function countOutsideCircle(fielders: FielderPosition[]): number {
 
 export function isBowlerOrKeeper(f: FielderPosition): boolean {
   const role = (f.role || '').toLowerCase();
-  return role === 'bowler' || role === 'wicketkeeper' || role === 'wicket-keeper' || role === 'keeper';
+  const name = (f.name || '').toLowerCase();
+  const id = (f.id || '').toLowerCase();
+  return (
+    role === 'bowler' ||
+    role === 'wicketkeeper' ||
+    role === 'wicket-keeper' ||
+    role === 'keeper' ||
+    id === 'bowl' ||
+    id === 'bowler' ||
+    id === 'wk' ||
+    id === 'keeper' ||
+    name.includes('wicketkeeper') ||
+    name.includes('keeper')
+  );
+}
+
+/**
+ * Law 28.4 — behind square on the leg side.
+ * Popping crease is at y=410. Behind square is y > 410 on the leg side.
+ */
+export function isBehindSquareLeg(x: number, y: number, isLeftHanded: boolean): boolean {
+  return isOnLegSide(x, isLeftHanded) && y > 410;
 }
 
 /** Counts outfielders on the leg side (excludes bowler + wicketkeeper). */
@@ -270,6 +305,14 @@ export function countOnLegSide(fielders: FielderPosition[], isLeftHanded: boolea
   return fielders.filter((f) => {
     if (isBowlerOrKeeper(f)) return false;
     return isOnLegSide(f.x, isLeftHanded);
+  }).length;
+}
+
+/** Counts outfielders behind the popping crease on the leg side (Law 28.4). */
+export function countBehindSquareLeg(fielders: FielderPosition[], isLeftHanded: boolean): number {
+  return fielders.filter((f) => {
+    if (isBowlerOrKeeper(f)) return false;
+    return isBehindSquareLeg(f.x, f.y, isLeftHanded);
   }).length;
 }
 
@@ -284,6 +327,7 @@ export function validateField(input: FieldValidationInput): FieldValidationResul
   const options = input.options ?? {};
   const phase = getFieldingPhase(format, over, options.overrides, input.totalOvers, input.season);
   const legSideLimit = options.maxLegSide !== undefined ? options.maxLegSide : getLegSideLimit(format, input.season);
+  const behindSquareLegLimit = options.maxBehindSquareLeg !== undefined ? options.maxBehindSquareLeg : 2;
 
   const isLeftHanded = options.isLeftHanded ?? false;
   const outsideFielderIds: string[] = [];
@@ -291,9 +335,20 @@ export function validateField(input: FieldValidationInput): FieldValidationResul
   let inside = 0;
   let offSide = 0;
   let legSide = 0;
+  let behindSquareLeg = 0;
+
+  const seenIds = new Set<string>();
+  const duplicateIds = new Set<string>();
 
   for (const f of fielders) {
+    if (seenIds.has(f.id)) {
+      duplicateIds.add(f.id);
+    } else {
+      seenIds.add(f.id);
+    }
+
     if (isBowlerOrKeeper(f)) continue;
+
     const isOutside = f.isOutsideCircle !== undefined ? f.isOutsideCircle : isOutsideCircle(f.x, f.y);
     if (isOutside) {
       outside += 1;
@@ -301,8 +356,15 @@ export function validateField(input: FieldValidationInput): FieldValidationResul
     } else {
       inside += 1;
     }
-    if (isOnLegSide(f.x, isLeftHanded)) legSide += 1;
-    else offSide += 1;
+
+    if (isOnLegSide(f.x, isLeftHanded)) {
+      legSide += 1;
+      if (isBehindSquareLeg(f.x, f.y, isLeftHanded)) {
+        behindSquareLeg += 1;
+      }
+    } else {
+      offSide += 1;
+    }
   }
 
   const violations: FieldValidationViolation[] = [];
@@ -319,7 +381,17 @@ export function validateField(input: FieldValidationInput): FieldValidationResul
     });
   }
 
-  // 2. Outside-circle limit (only when the format/phase is restricted)
+  // 2. Duplicate players check
+  if (duplicateIds.size > 0) {
+    violations.push({
+      code: 'DUPLICATE_PLAYERS',
+      message: `Fielding configuration contains duplicate player assignments: ${Array.from(duplicateIds).join(', ')}.`,
+      actual: duplicateIds.size,
+      fielderIds: Array.from(duplicateIds),
+    });
+  }
+
+  // 3. Outside-circle limit (only when the format/phase is restricted)
   if (phase.restricted && outside > phase.maxOutsideCircle) {
     violations.push({
       code: 'TOO_MANY_OUTSIDE',
@@ -330,9 +402,9 @@ export function validateField(input: FieldValidationInput): FieldValidationResul
     });
   }
 
-  // 3. Optional: keeper / bowler presence
-  const hasKeeper = fielders.some((f) => /wicket/.test((f.role || '').toLowerCase()));
-  const hasBowler = fielders.some((f) => (f.role || '').toLowerCase() === 'bowler');
+  // 4. Optional: keeper / bowler presence
+  const hasKeeper = fielders.some((f) => /wicket|keeper/.test((f.role || '').toLowerCase()) || f.id === 'wk');
+  const hasBowler = fielders.some((f) => (f.role || '').toLowerCase() === 'bowler' || f.id === 'bowl' || f.id === 'bowler');
   if (options.requireWicketkeeper && !hasKeeper) {
     violations.push({ code: 'MISSING_WICKETKEEPER', message: 'A wicketkeeper must be assigned to the fielding side.' });
   }
@@ -340,7 +412,7 @@ export function validateField(input: FieldValidationInput): FieldValidationResul
     violations.push({ code: 'MISSING_BOWLER', message: 'A bowler must be assigned to the fielding side.' });
   }
 
-  // 4. Leg-side limit (Law 28.3) — enabled by default for every format.
+  // 5. Leg-side limit (Law 28.3)
   if (legSideLimit !== undefined && legSide > legSideLimit) {
     violations.push({
       code: 'TOO_MANY_LEG_SIDE',
@@ -348,6 +420,47 @@ export function validateField(input: FieldValidationInput): FieldValidationResul
       limit: legSideLimit,
       actual: legSide,
     });
+  }
+
+  // 6. Law 28.4 — maximum 2 fielders behind square on the leg side
+  if (behindSquareLegLimit !== undefined && behindSquareLeg > behindSquareLegLimit) {
+    violations.push({
+      code: 'TOO_MANY_BEHIND_SQUARE_LEG',
+      message: `No more than ${behindSquareLegLimit} fielders may be behind square on the leg side (Law 28.4). Current: ${behindSquareLeg}.`,
+      limit: behindSquareLegLimit,
+      actual: behindSquareLeg,
+    });
+  }
+
+  // 7. Bounds check (fielders must stay inside the boundary rope)
+  if (options.enforceBounds) {
+    const outOfBoundsFielders = fielders.filter(
+      (f) => Math.hypot(f.x - FIELD_CENTER.x, f.y - FIELD_CENTER.y) > BOUNDARY_RADIUS + 3
+    );
+    if (outOfBoundsFielders.length > 0) {
+      violations.push({
+        code: 'OUT_OF_BOUNDS',
+        message: `${outOfBoundsFielders.length} fielder(s) placed beyond the boundary rope.`,
+        limit: BOUNDARY_RADIUS,
+        actual: outOfBoundsFielders.length,
+        fielderIds: outOfBoundsFielders.map((f) => f.id),
+      });
+    }
+  }
+
+  // 8. Pitch strip clearance (outfielders cannot stand on the pitch playing corridor)
+  if (options.enforcePitchClearance) {
+    const onPitchFielders = fielders.filter(
+      (f) => !isBowlerOrKeeper(f) && f.x >= 282 && f.x <= 318 && f.y >= 195 && f.y <= 405
+    );
+    if (onPitchFielders.length > 0) {
+      violations.push({
+        code: 'PROHIBITED_REGION',
+        message: `${onPitchFielders.length} fielder(s) placed on the central pitch playing corridor.`,
+        actual: onPitchFielders.length,
+        fielderIds: onPitchFielders.map((f) => f.id),
+      });
+    }
   }
 
   const message = violations.length
@@ -366,10 +479,75 @@ export function validateField(input: FieldValidationInput): FieldValidationResul
     offSideCount: offSide,
     legSideCount: legSide,
     legSideLimit,
+    behindSquareLegCount: behindSquareLeg,
+    maxBehindSquareLeg: behindSquareLegLimit,
     outsideFielderIds,
     violations,
     message,
   };
+}
+
+/**
+ * Automatically corrects an illegal or out-of-spec field formation, returning
+ * an adjusted set of 11 compliant fielder positions.
+ */
+export function autoCorrectField(input: FieldValidationInput): FielderPosition[] {
+  const { format, over, fielders } = input;
+  const isLeftHanded = input.options?.isLeftHanded ?? false;
+  const phase = getFieldingPhase(format, over, input.options?.overrides, input.totalOvers, input.season);
+  const legSideLimit = input.options?.maxLegSide !== undefined ? input.options.maxLegSide : getLegSideLimit(format, input.season);
+
+  const corrected: FielderPosition[] = fielders.map((f) => ({ ...f }));
+
+  // 1. Clamp within boundary
+  for (const f of corrected) {
+    const dist = Math.hypot(f.x - FIELD_CENTER.x, f.y - FIELD_CENTER.y);
+    if (dist > BOUNDARY_RADIUS - 6) {
+      const angle = Math.atan2(f.y - FIELD_CENTER.y, f.x - FIELD_CENTER.x);
+      f.x = Math.round(FIELD_CENTER.x + (BOUNDARY_RADIUS - 12) * Math.cos(angle));
+      f.y = Math.round(FIELD_CENTER.y + (BOUNDARY_RADIUS - 12) * Math.sin(angle));
+    }
+    // Prohibited pitch corridor: shift off if an outfielder stands on the central pitch strip
+    if (!isBowlerOrKeeper(f) && f.x >= 280 && f.x <= 320 && f.y >= 195 && f.y <= 405) {
+      f.x = f.x < 300 ? 250 : 350;
+    }
+  }
+
+  // 2. Adjust circle limits if restricted
+  if (phase.restricted) {
+    let outsideOutfielders = corrected.filter((f) => !isBowlerOrKeeper(f) && isOutsideCircle(f.x, f.y));
+    while (outsideOutfielders.length > phase.maxOutsideCircle) {
+      const mover = outsideOutfielders.pop();
+      if (!mover) break;
+      // Pull inward inside the 30-yard circle
+      const angle = Math.atan2(mover.y - FIELD_CENTER.y, mover.x - FIELD_CENTER.x);
+      mover.x = Math.round(FIELD_CENTER.x + (INNER_CIRCLE.rx * 0.75) * Math.cos(angle));
+      mover.y = Math.round(FIELD_CENTER.y + (INNER_CIRCLE.ry * 0.75) * Math.sin(angle));
+      mover.isOutsideCircle = false;
+    }
+  }
+
+  // 3. Adjust leg-side count (Law 28.3)
+  let legSideOutfielders = corrected.filter((f) => !isBowlerOrKeeper(f) && isOnLegSide(f.x, isLeftHanded));
+  while (legSideOutfielders.length > legSideLimit) {
+    const mover = legSideOutfielders.pop();
+    if (!mover) break;
+    // Mirror to off-side
+    mover.x = 600 - mover.x;
+  }
+
+  // 4. Adjust Law 28.4 (max 2 behind square leg)
+  let behindSquareLegOutfielders = corrected.filter(
+    (f) => !isBowlerOrKeeper(f) && isBehindSquareLeg(f.x, f.y, isLeftHanded)
+  );
+  while (behindSquareLegOutfielders.length > 2) {
+    const mover = behindSquareLegOutfielders.pop();
+    if (!mover) break;
+    // Move forward of square
+    mover.y = 385;
+  }
+
+  return corrected;
 }
 
 /**

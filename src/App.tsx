@@ -12,6 +12,7 @@ import SquadPlanner from './components/SquadPlanner';
 import PlayersView from './components/PlayersView';
 import TeamsView from './components/TeamsView';
 import PreMatch from './components/PreMatch';
+import MatchResultView from './components/MatchResultView';
 import QuickMatchSetup from './components/QuickMatchSetup';
 import TeamSelection from './components/TeamSelection';
 import BoardSelection from './components/BoardSelection';
@@ -43,6 +44,7 @@ export default function App() {
       
       {gameState === GameState.PRE_MATCH && <PreMatch />}
       {gameState === GameState.MATCH_SIMULATION && <LiveMatchCenter />}
+      {gameState === GameState.MATCH_RESULT && <MatchResultView />}
 
       {![
         GameState.LANDING,
@@ -52,6 +54,7 @@ export default function App() {
         GameState.PLAYING_XI_BUILDER,
         GameState.PRE_MATCH,
         GameState.MATCH_SIMULATION,
+        GameState.MATCH_RESULT,
       ].includes(gameState) && (
         <div className="flex min-h-screen items-center justify-center text-white">
           <div className="text-center">
