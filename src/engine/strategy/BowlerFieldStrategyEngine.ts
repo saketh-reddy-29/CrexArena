@@ -118,61 +118,61 @@ export interface FieldStrategyInput {
 }
 
 // ─── CANONICAL 3D FIELD POSITION REGISTRY (600 x 600 Ground Space) ───────────
-// Center = (300, 300), Pitch = y 170-430, Batter Crease = (300, 410)
+// Center = (300, 300), Pitch = y 170-430, Batter Crease = (300, 190) (North), Bowler Crease = (300, 410) (South)
 // Inner Circle ellipse: rx=160, ry=190. Boundary R=268.
 export const CANONICAL_POSITIONS: Record<string, FieldPositionDef> = {
-  // Bowler (Anchored at bowling crease)
-  BOWLER: { key: 'BOWLER', name: 'Bowler', x: 300, y: 190, category: 'RING', ringDistance: 'INNER', isOutsideCircle: false, tacticalRole: 'Delivery & Return Catch / Bowler Crease' },
+  // Bowler (Anchored at bowling crease, South end)
+  BOWLER: { key: 'BOWLER', name: 'Bowler', x: 300, y: 410, category: 'RING', ringDistance: 'INNER', isOutsideCircle: false, tacticalRole: 'Delivery & Return Catch / Bowler Crease' },
 
-  // Wicketkeeper (Constant anchor behind striker)
-  WICKETKEEPER: { key: 'WICKETKEEPER', name: 'Wicketkeeper', x: 300, y: 460, category: 'CATCHING', ringDistance: 'CLOSE', isOutsideCircle: false, tacticalRole: 'Primary Catcher / Stumps Guard' },
+  // Wicketkeeper (Constant anchor behind striker, North end)
+  WICKETKEEPER: { key: 'WICKETKEEPER', name: 'Wicketkeeper', x: 300, y: 140, category: 'CATCHING', ringDistance: 'CLOSE', isOutsideCircle: false, tacticalRole: 'Primary Catcher / Stumps Guard' },
 
   // Slip Cordon (Off-side Catchers behind square with natural, non-overlapping spacing)
-  FIRST_SLIP: { key: 'FIRST_SLIP', name: '1st Slip', x: 255, y: 476, category: 'CATCHING', ringDistance: 'CLOSE', isOutsideCircle: false, tacticalRole: 'Edge Catcher' },
-  SECOND_SLIP: { key: 'SECOND_SLIP', name: '2nd Slip', x: 224, y: 494, category: 'CATCHING', ringDistance: 'CLOSE', isOutsideCircle: false, tacticalRole: 'Edge Catcher' },
-  THIRD_SLIP: { key: 'THIRD_SLIP', name: '3rd Slip', x: 194, y: 512, category: 'CATCHING', ringDistance: 'CLOSE', isOutsideCircle: false, tacticalRole: 'Attacking Edge Trap' },
-  FOURTH_SLIP: { key: 'FOURTH_SLIP', name: '4th Slip', x: 165, y: 530, category: 'CATCHING', ringDistance: 'CLOSE', isOutsideCircle: false, tacticalRole: 'Deep Cordon Catcher' },
-  GULLY: { key: 'GULLY', name: 'Gully', x: 175, y: 440, category: 'CATCHING', ringDistance: 'CLOSE', isOutsideCircle: false, tacticalRole: 'Squarer Edge Intercept' },
-  FLY_SLIP: { key: 'FLY_SLIP', name: 'Fly Slip', x: 220, y: 530, category: 'CATCHING', ringDistance: 'OUTER', isOutsideCircle: true, tacticalRole: 'Upper Cut / Ramp Trap' },
-  LEG_SLIP: { key: 'LEG_SLIP', name: 'Leg Slip', x: 345, y: 474, category: 'CATCHING', ringDistance: 'CLOSE', isOutsideCircle: false, tacticalRole: 'Glance / Turn Catcher' },
+  FIRST_SLIP: { key: 'FIRST_SLIP', name: '1st Slip', x: 255, y: 124, category: 'CATCHING', ringDistance: 'CLOSE', isOutsideCircle: false, tacticalRole: 'Edge Catcher' },
+  SECOND_SLIP: { key: 'SECOND_SLIP', name: '2nd Slip', x: 224, y: 106, category: 'CATCHING', ringDistance: 'CLOSE', isOutsideCircle: false, tacticalRole: 'Edge Catcher' },
+  THIRD_SLIP: { key: 'THIRD_SLIP', name: '3rd Slip', x: 194, y: 88, category: 'CATCHING', ringDistance: 'CLOSE', isOutsideCircle: false, tacticalRole: 'Attacking Edge Trap' },
+  FOURTH_SLIP: { key: 'FOURTH_SLIP', name: '4th Slip', x: 165, y: 70, category: 'CATCHING', ringDistance: 'CLOSE', isOutsideCircle: false, tacticalRole: 'Deep Cordon Catcher' },
+  GULLY: { key: 'GULLY', name: 'Gully', x: 175, y: 160, category: 'CATCHING', ringDistance: 'CLOSE', isOutsideCircle: false, tacticalRole: 'Squarer Edge Intercept' },
+  FLY_SLIP: { key: 'FLY_SLIP', name: 'Fly Slip', x: 220, y: 70, category: 'CATCHING', ringDistance: 'OUTER', isOutsideCircle: true, tacticalRole: 'Upper Cut / Ramp Trap' },
+  LEG_SLIP: { key: 'LEG_SLIP', name: 'Leg Slip', x: 345, y: 126, category: 'CATCHING', ringDistance: 'CLOSE', isOutsideCircle: false, tacticalRole: 'Glance / Turn Catcher' },
 
   // Close Infield Helmet Catchers
-  SILLY_POINT: { key: 'SILLY_POINT', name: 'Silly Point', x: 245, y: 390, category: 'CATCHING', ringDistance: 'CLOSE', isOutsideCircle: false, tacticalRole: 'Bat-Pad Off Trap' },
-  SHORT_LEG: { key: 'SHORT_LEG', name: 'Short Leg', x: 355, y: 390, category: 'CATCHING', ringDistance: 'CLOSE', isOutsideCircle: false, tacticalRole: 'Bat-Pad Leg Trap' },
-  SILLY_MID_OFF: { key: 'SILLY_MID_OFF', name: 'Silly Mid-Off', x: 265, y: 335, category: 'CATCHING', ringDistance: 'CLOSE', isOutsideCircle: false, tacticalRole: 'Drive Choker' },
-  SILLY_MID_ON: { key: 'SILLY_MID_ON', name: 'Silly Mid-On', x: 335, y: 335, category: 'CATCHING', ringDistance: 'CLOSE', isOutsideCircle: false, tacticalRole: 'On-Drive Choker' },
+  SILLY_POINT: { key: 'SILLY_POINT', name: 'Silly Point', x: 245, y: 210, category: 'CATCHING', ringDistance: 'CLOSE', isOutsideCircle: false, tacticalRole: 'Bat-Pad Off Trap' },
+  SHORT_LEG: { key: 'SHORT_LEG', name: 'Short Leg', x: 355, y: 210, category: 'CATCHING', ringDistance: 'CLOSE', isOutsideCircle: false, tacticalRole: 'Bat-Pad Leg Trap' },
+  SILLY_MID_OFF: { key: 'SILLY_MID_OFF', name: 'Silly Mid-Off', x: 265, y: 265, category: 'CATCHING', ringDistance: 'CLOSE', isOutsideCircle: false, tacticalRole: 'Drive Choker' },
+  SILLY_MID_ON: { key: 'SILLY_MID_ON', name: 'Silly Mid-On', x: 335, y: 265, category: 'CATCHING', ringDistance: 'CLOSE', isOutsideCircle: false, tacticalRole: 'On-Drive Choker' },
 
   // 30-Yard Ring Infield (Single-Savers)
-  BACKWARD_POINT: { key: 'BACKWARD_POINT', name: 'Backward Point', x: 175, y: 420, category: 'RING', ringDistance: 'INNER', isOutsideCircle: false, tacticalRole: 'Cut & Steer Stopper' },
-  POINT: { key: 'POINT', name: 'Point', x: 155, y: 395, category: 'RING', ringDistance: 'INNER', isOutsideCircle: false, tacticalRole: 'Square Cut Sentry' },
-  COVER_POINT: { key: 'COVER_POINT', name: 'Cover Point', x: 185, y: 335, category: 'RING', ringDistance: 'INNER', isOutsideCircle: false, tacticalRole: 'Punch Intercept' },
-  COVER: { key: 'COVER', name: 'Cover', x: 170, y: 285, category: 'RING', ringDistance: 'INNER', isOutsideCircle: false, tacticalRole: 'Off-Drive Stopper' },
-  EXTRA_COVER: { key: 'EXTRA_COVER', name: 'Extra Cover', x: 215, y: 255, category: 'RING', ringDistance: 'INNER', isOutsideCircle: false, tacticalRole: 'Lofted Drive Patrol' },
-  MID_OFF: { key: 'MID_OFF', name: 'Mid-Off', x: 245, y: 195, category: 'RING', ringDistance: 'INNER', isOutsideCircle: false, tacticalRole: 'Straight Drive Control' },
-  MID_ON: { key: 'MID_ON', name: 'Mid-On', x: 355, y: 195, category: 'RING', ringDistance: 'INNER', isOutsideCircle: false, tacticalRole: 'Straight On-Drive Control' },
-  MID_WICKET: { key: 'MID_WICKET', name: 'Mid-Wicket', x: 425, y: 285, category: 'RING', ringDistance: 'INNER', isOutsideCircle: false, tacticalRole: 'Flick & Pull Stopper' },
-  FORWARD_SQUARE_LEG: { key: 'FORWARD_SQUARE_LEG', name: 'Forward Square Leg', x: 425, y: 350, category: 'RING', ringDistance: 'INNER', isOutsideCircle: false, tacticalRole: 'Short Midwicket / Pad Saver' },
-  SQUARE_LEG: { key: 'SQUARE_LEG', name: 'Square Leg', x: 440, y: 405, category: 'RING', ringDistance: 'INNER', isOutsideCircle: false, tacticalRole: 'Clip / Sweep Sentry' },
-  BACKWARD_SQUARE_LEG: { key: 'BACKWARD_SQUARE_LEG', name: 'Backward Square Leg', x: 420, y: 440, category: 'RING', ringDistance: 'INNER', isOutsideCircle: false, tacticalRole: 'Square Leg Glance Intercept' },
-  SHORT_FINE_LEG: { key: 'SHORT_FINE_LEG', name: 'Short Fine Leg', x: 385, y: 465, category: 'RING', ringDistance: 'INNER', isOutsideCircle: false, tacticalRole: 'Glance Single Stopper' },
-  SHORT_THIRD_MAN: { key: 'SHORT_THIRD_MAN', name: 'Short Third Man', x: 210, y: 470, category: 'RING', ringDistance: 'INNER', isOutsideCircle: false, tacticalRole: 'Edge & Guide Saver' },
+  BACKWARD_POINT: { key: 'BACKWARD_POINT', name: 'Backward Point', x: 175, y: 180, category: 'RING', ringDistance: 'INNER', isOutsideCircle: false, tacticalRole: 'Cut & Steer Stopper' },
+  POINT: { key: 'POINT', name: 'Point', x: 155, y: 205, category: 'RING', ringDistance: 'INNER', isOutsideCircle: false, tacticalRole: 'Square Cut Sentry' },
+  COVER_POINT: { key: 'COVER_POINT', name: 'Cover Point', x: 185, y: 265, category: 'RING', ringDistance: 'INNER', isOutsideCircle: false, tacticalRole: 'Punch Intercept' },
+  COVER: { key: 'COVER', name: 'Cover', x: 170, y: 315, category: 'RING', ringDistance: 'INNER', isOutsideCircle: false, tacticalRole: 'Off-Drive Stopper' },
+  EXTRA_COVER: { key: 'EXTRA_COVER', name: 'Extra Cover', x: 215, y: 345, category: 'RING', ringDistance: 'INNER', isOutsideCircle: false, tacticalRole: 'Lofted Drive Patrol' },
+  MID_OFF: { key: 'MID_OFF', name: 'Mid-Off', x: 245, y: 405, category: 'RING', ringDistance: 'INNER', isOutsideCircle: false, tacticalRole: 'Straight Drive Control' },
+  MID_ON: { key: 'MID_ON', name: 'Mid-On', x: 355, y: 405, category: 'RING', ringDistance: 'INNER', isOutsideCircle: false, tacticalRole: 'Straight On-Drive Control' },
+  MID_WICKET: { key: 'MID_WICKET', name: 'Mid-WICKET', x: 425, y: 315, category: 'RING', ringDistance: 'INNER', isOutsideCircle: false, tacticalRole: 'Flick & Pull Stopper' },
+  FORWARD_SQUARE_LEG: { key: 'FORWARD_SQUARE_LEG', name: 'Forward Square Leg', x: 425, y: 250, category: 'RING', ringDistance: 'INNER', isOutsideCircle: false, tacticalRole: 'Short Midwicket / Pad Saver' },
+  SQUARE_LEG: { key: 'SQUARE_LEG', name: 'Square Leg', x: 440, y: 195, category: 'RING', ringDistance: 'INNER', isOutsideCircle: false, tacticalRole: 'Clip / Sweep Sentry' },
+  BACKWARD_SQUARE_LEG: { key: 'BACKWARD_SQUARE_LEG', name: 'Backward Square Leg', x: 420, y: 160, category: 'RING', ringDistance: 'INNER', isOutsideCircle: false, tacticalRole: 'Square Leg Glance Intercept' },
+  SHORT_FINE_LEG: { key: 'SHORT_FINE_LEG', name: 'Short Fine Leg', x: 385, y: 135, category: 'RING', ringDistance: 'INNER', isOutsideCircle: false, tacticalRole: 'Glance Single Stopper' },
+  SHORT_THIRD_MAN: { key: 'SHORT_THIRD_MAN', name: 'Short Third Man', x: 210, y: 130, category: 'RING', ringDistance: 'INNER', isOutsideCircle: false, tacticalRole: 'Edge & Guide Saver' },
 
   // Deep Outfield Boundary Sweepers (Boundary Protectors)
-  DEEP_THIRD: { key: 'DEEP_THIRD', name: 'Deep Third', x: 160, y: 520, category: 'BOUNDARY', ringDistance: 'OUTER', isOutsideCircle: true, tacticalRole: 'Fine Boundary Third Sentry' },
-  DEEP_THIRD_MAN: { key: 'DEEP_THIRD_MAN', name: 'Deep Third Man', x: 145, y: 495, category: 'BOUNDARY', ringDistance: 'OUTER', isOutsideCircle: true, tacticalRole: 'Upper Edge Boundary Patrol' },
-  DEEP_BACKWARD_POINT: { key: 'DEEP_BACKWARD_POINT', name: 'Deep Backward Point', x: 95, y: 455, category: 'BOUNDARY', ringDistance: 'OUTER', isOutsideCircle: true, tacticalRole: 'Upper Cut Boundary Sentry' },
-  DEEP_POINT: { key: 'DEEP_POINT', name: 'Deep Point', x: 75, y: 385, category: 'BOUNDARY', ringDistance: 'OUTER', isOutsideCircle: true, tacticalRole: 'Square Cut Boundary Guard' },
-  DEEP_COVER: { key: 'DEEP_COVER', name: 'Deep Cover', x: 95, y: 220, category: 'BOUNDARY', ringDistance: 'OUTER', isOutsideCircle: true, tacticalRole: 'Lofted Cover Sweeper' },
-  SWEEPER_COVER: { key: 'SWEEPER_COVER', name: 'Deep Cover Sweeper', x: 80, y: 260, category: 'BOUNDARY', ringDistance: 'OUTER', isOutsideCircle: true, tacticalRole: 'Deep Off-Side Sentry' },
-  EXTRA_COVER_BOUNDARY: { key: 'EXTRA_COVER_BOUNDARY', name: 'Extra Cover Boundary', x: 135, y: 135, category: 'BOUNDARY', ringDistance: 'OUTER', isOutsideCircle: true, tacticalRole: 'Lofted Extra Cover Sweeper' },
-  LONG_OFF: { key: 'LONG_OFF', name: 'Long-Off', x: 235, y: 75, category: 'BOUNDARY', ringDistance: 'OUTER', isOutsideCircle: true, tacticalRole: 'Straight Boundary Guard' },
-  LONG_ON: { key: 'LONG_ON', name: 'Long-On', x: 365, y: 75, category: 'BOUNDARY', ringDistance: 'OUTER', isOutsideCircle: true, tacticalRole: 'Straight Boundary Guard' },
-  COW_CORNER: { key: 'COW_CORNER', name: 'Cow Corner', x: 480, y: 165, category: 'BOUNDARY', ringDistance: 'OUTER', isOutsideCircle: true, tacticalRole: 'Slog Sweep Boundary Patrol' },
-  DEEP_LEG_SIDE: { key: 'DEEP_LEG_SIDE', name: 'Deep Leg Side', x: 475, y: 320, category: 'BOUNDARY', ringDistance: 'OUTER', isOutsideCircle: true, tacticalRole: 'Wide Midwicket Deep Sentry' },
-  DEEP_MID_WICKET: { key: 'DEEP_MID_WICKET', name: 'Deep Mid-Wicket', x: 515, y: 240, category: 'BOUNDARY', ringDistance: 'OUTER', isOutsideCircle: true, tacticalRole: 'Pull Shot Boundary Guard' },
-  DEEP_SQUARE_LEG: { key: 'DEEP_SQUARE_LEG', name: 'Deep Square Leg', x: 525, y: 395, category: 'BOUNDARY', ringDistance: 'OUTER', isOutsideCircle: true, tacticalRole: 'Hook / Pull Sweeper' },
-  DEEP_BACKWARD_SQUARE_LEG: { key: 'DEEP_BACKWARD_SQUARE_LEG', name: 'Deep Backward Square Leg', x: 495, y: 465, category: 'BOUNDARY', ringDistance: 'OUTER', isOutsideCircle: true, tacticalRole: 'Hook / Pull Deep Sweeper' },
-  DEEP_FINE_LEG: { key: 'DEEP_FINE_LEG', name: 'Deep Fine Leg', x: 410, y: 495, category: 'BOUNDARY', ringDistance: 'OUTER', isOutsideCircle: true, tacticalRole: 'Hook / Glance Boundary Guard' },
+  DEEP_THIRD: { key: 'DEEP_THIRD', name: 'Deep Third', x: 160, y: 80, category: 'BOUNDARY', ringDistance: 'OUTER', isOutsideCircle: true, tacticalRole: 'Fine Boundary Third Sentry' },
+  DEEP_THIRD_MAN: { key: 'DEEP_THIRD_MAN', name: 'Deep Third Man', x: 145, y: 105, category: 'BOUNDARY', ringDistance: 'OUTER', isOutsideCircle: true, tacticalRole: 'Upper Edge Boundary Patrol' },
+  DEEP_BACKWARD_POINT: { key: 'DEEP_BACKWARD_POINT', name: 'Deep Backward Point', x: 95, y: 145, category: 'BOUNDARY', ringDistance: 'OUTER', isOutsideCircle: true, tacticalRole: 'Upper Cut Boundary Sentry' },
+  DEEP_POINT: { key: 'DEEP_POINT', name: 'Deep Point', x: 75, y: 215, category: 'BOUNDARY', ringDistance: 'OUTER', isOutsideCircle: true, tacticalRole: 'Square Cut Boundary Guard' },
+  DEEP_COVER: { key: 'DEEP_COVER', name: 'Deep Cover', x: 95, y: 380, category: 'BOUNDARY', ringDistance: 'OUTER', isOutsideCircle: true, tacticalRole: 'Lofted Cover Sweeper' },
+  SWEEPER_COVER: { key: 'SWEEPER_COVER', name: 'Deep Cover Sweeper', x: 80, y: 340, category: 'BOUNDARY', ringDistance: 'OUTER', isOutsideCircle: true, tacticalRole: 'Deep Off-Side Sentry' },
+  EXTRA_COVER_BOUNDARY: { key: 'EXTRA_COVER_BOUNDARY', name: 'Extra Cover Boundary', x: 135, y: 465, category: 'BOUNDARY', ringDistance: 'OUTER', isOutsideCircle: true, tacticalRole: 'Lofted Extra Cover Sweeper' },
+  LONG_OFF: { key: 'LONG_OFF', name: 'Long-Off', x: 235, y: 525, category: 'BOUNDARY', ringDistance: 'OUTER', isOutsideCircle: true, tacticalRole: 'Straight Boundary Guard' },
+  LONG_ON: { key: 'LONG_ON', name: 'Long-On', x: 365, y: 525, category: 'BOUNDARY', ringDistance: 'OUTER', isOutsideCircle: true, tacticalRole: 'Straight Boundary Guard' },
+  COW_CORNER: { key: 'COW_CORNER', name: 'Cow Corner', x: 480, y: 435, category: 'BOUNDARY', ringDistance: 'OUTER', isOutsideCircle: true, tacticalRole: 'Slog Sweep Boundary Patrol' },
+  DEEP_LEG_SIDE: { key: 'DEEP_LEG_SIDE', name: 'Deep Leg Side', x: 475, y: 280, category: 'BOUNDARY', ringDistance: 'OUTER', isOutsideCircle: true, tacticalRole: 'Wide Midwicket Deep Sentry' },
+  DEEP_MID_WICKET: { key: 'DEEP_MID_WICKET', name: 'Deep Mid-Wicket', x: 515, y: 360, category: 'BOUNDARY', ringDistance: 'OUTER', isOutsideCircle: true, tacticalRole: 'Pull Shot Boundary Guard' },
+  DEEP_SQUARE_LEG: { key: 'DEEP_SQUARE_LEG', name: 'Deep Square Leg', x: 525, y: 205, category: 'BOUNDARY', ringDistance: 'OUTER', isOutsideCircle: true, tacticalRole: 'Hook / Pull Sweeper' },
+  DEEP_BACKWARD_SQUARE_LEG: { key: 'DEEP_BACKWARD_SQUARE_LEG', name: 'Deep Backward Square Leg', x: 495, y: 135, category: 'BOUNDARY', ringDistance: 'OUTER', isOutsideCircle: true, tacticalRole: 'Hook / Pull Deep Sweeper' },
+  DEEP_FINE_LEG: { key: 'DEEP_FINE_LEG', name: 'Deep Fine Leg', x: 410, y: 105, category: 'BOUNDARY', ringDistance: 'OUTER', isOutsideCircle: true, tacticalRole: 'Hook / Glance Boundary Guard' },
 };
 
 // ─── PHASE BOUNDARY RESOLUTION (reduced-overs aware) ─────────────────────────
@@ -217,7 +217,7 @@ export const HOT_ZONE_ARCS: Record<string, [number, number]> = {
 
 /** Angle (deg) of a point from the batter's crease, flipped for left-handers. */
 export function zoneAngleFromBatter(p: Point, isLeftHanded: boolean): number {
-  const deg = Math.atan2(p.x - 300, -(p.y - 410)) * (180 / Math.PI);
+  const deg = Math.atan2(p.x - 300, p.y - 190) * (180 / Math.PI);
   return isLeftHanded ? -deg : deg;
 }
 
@@ -652,7 +652,7 @@ export class BowlerFieldStrategyEngine {
     const actualOutside = fielders.filter(f => f.isOutsideCircle).length;
     const offSide = fielders.filter(f => f.positionKey !== 'BOWLER' && f.positionKey !== 'WICKETKEEPER' && (isLeftHander ? f.targetPos.x > 300 : f.targetPos.x < 300)).length;
     const legSide = fielders.filter(f => f.positionKey !== 'BOWLER' && f.positionKey !== 'WICKETKEEPER' && (isLeftHander ? f.targetPos.x < 300 : f.targetPos.x > 300)).length;
-    const behindSquareLeg = fielders.filter(f => f.positionKey !== 'BOWLER' && f.positionKey !== 'WICKETKEEPER' && (isLeftHander ? f.targetPos.x < 300 : f.targetPos.x > 300) && f.targetPos.y > 410).length;
+    const behindSquareLeg = fielders.filter(f => f.positionKey !== 'BOWLER' && f.positionKey !== 'WICKETKEEPER' && (isLeftHander ? f.targetPos.x < 300 : f.targetPos.x > 300) && f.targetPos.y < 190).length;
     const isCompliant = actualOutside <= maxOutsideCircle && legSide <= legSideLimit && behindSquareLeg <= 2;
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -736,7 +736,7 @@ export class BowlerFieldStrategyEngine {
       const def = CANONICAL_POSITIONS[k];
       if (!def) return false;
       const p = BowlerFieldStrategyEngine.mirrorForLeftHander(def, isLeftHander);
-      return isOnLegSide(p.x, isLeftHander) && p.y > 410;
+      return isOnLegSide(p.x, isLeftHander) && p.y < 190;
     };
     guard = 0;
     while (adjusted.filter(isBehindSquareLegKey).length > 2 && guard++ < 16) {
@@ -800,7 +800,7 @@ export class BowlerFieldStrategyEngine {
         if (anchor.isOutsideCircle) outside += 1;
         if (isOnLegSide(pos.x, opts.isLeftHander)) {
           leg += 1;
-          if (pos.y > 410) behindSquare += 1;
+          if (pos.y < 190) behindSquare += 1;
         }
       }
       if (opts.restricted && outside > opts.maxOutsideCircle) return false;
@@ -906,11 +906,11 @@ export class BowlerFieldStrategyEngine {
     ];
 
     return zones.map(z => {
-      // Find fielders stationed within this angular cone from batter crease (300, 410)
+      // Find fielders stationed within this angular cone from batter crease (300, 190)
       const hasCoverage = fielders.some(f => {
         const dx = f.targetPos.x - 300;
-        const dy = f.targetPos.y - 410;
-        const deg = Math.atan2(dx, -dy) * (180 / Math.PI);
+        const dy = f.targetPos.y - 190;
+        const deg = Math.atan2(dx, dy) * (180 / Math.PI);
         return deg >= z.angleRange[0] && deg <= z.angleRange[1];
       });
 

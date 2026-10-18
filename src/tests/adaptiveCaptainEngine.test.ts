@@ -55,18 +55,18 @@ function fieldFor(presetKey: string, striker: Player, format: ArenaFormat = 'T20
 
 describe('AdaptiveCaptainEngine — field-aware tactical model', () => {
   it('classifies ground angles into the correct wagon-wheel zones', () => {
-    expect(classifyZone(zoneAngleDeg(235, 75, false))).toBe('LONG_OFF');
-    expect(classifyZone(zoneAngleDeg(170, 285, false))).toBe('COVER');
-    expect(classifyZone(zoneAngleDeg(155, 395, false))).toBe('POINT_SQUARE');
-    expect(classifyZone(zoneAngleDeg(425, 285, false))).toBe('MID_WICKET_COW');
-    expect(classifyZone(zoneAngleDeg(440, 405, false))).toBe('SQUARE_LEG');
-    expect(classifyZone(zoneAngleDeg(145, 495, false))).toBe('THIRD_MAN_GULLY');
+    expect(classifyZone(zoneAngleDeg(235, 525, false))).toBe('LONG_OFF');
+    expect(classifyZone(zoneAngleDeg(170, 315, false))).toBe('COVER');
+    expect(classifyZone(zoneAngleDeg(155, 205, false))).toBe('POINT_SQUARE');
+    expect(classifyZone(zoneAngleDeg(425, 315, false))).toBe('MID_WICKET_COW');
+    expect(classifyZone(zoneAngleDeg(440, 195, false))).toBe('SQUARE_LEG');
+    expect(classifyZone(zoneAngleDeg(145, 105, false))).toBe('THIRD_MAN_GULLY');
   });
 
   it('mirrors zone classification for a left-hander', () => {
     // A cover position for a RHB becomes a leg-side arc for a LHB.
-    const rhb = zoneAngleDeg(170, 285, false);
-    const lhb = zoneAngleDeg(170, 285, true);
+    const rhb = zoneAngleDeg(170, 315, false);
+    const lhb = zoneAngleDeg(170, 315, true);
     expect(rhb).toBeLessThan(0);
     expect(lhb).toBeGreaterThan(0);
     expect(isLeftHandedBatter(lefty)).toBe(true);

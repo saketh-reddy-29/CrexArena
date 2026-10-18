@@ -161,13 +161,13 @@ describe('BallLifecycleController — retrieval simulation (fast mode)', () => {
 
 describe('BallLifecycleController — no teleport', () => {
   it('ball ends at the bowler position once returned', () => {
-    const c = new BallLifecycleController({ bowlerHome: { x: 300, y: 190 } });
+    const c = new BallLifecycleController({ bowlerHome: { x: 300, y: 410 } });
     c.beginDelivery();
     c.ballEnteredPlay();
     c.ballCollected({ x: 120, y: 120 }, 'deep');
     c.startReturn();
     c.ballArrivedAtBowler();
-    expect(c.getBallPosition()).toEqual({ x: 300, y: 190 });
+    expect(c.getBallPosition()).toEqual({ x: 300, y: 410 });
   });
 
   it('reports human-readable status messages per state', () => {
@@ -190,6 +190,6 @@ describe('BallLifecycleController — no teleport', () => {
     c.reset();
     expect(c.getState()).toBe('READY');
     expect(c.getHistory()).toEqual(['READY' as BallLifecycleState]);
-    expect(c.getBallPosition()).toEqual({ x: 300, y: 190 });
+    expect(c.getBallPosition()).toEqual({ x: 300, y: 410 });
   });
 });

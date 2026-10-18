@@ -171,14 +171,14 @@ describe('Section 1 & 2: Complete 2D Ground & All 11 Fielding Player Positions',
     const bowler = config.fielders.find((f) => f.positionKey === 'BOWLER')!;
     const keeper = config.fielders.find((f) => f.positionKey === 'WICKETKEEPER')!;
 
-    // Bowler at bowling crease y=190
+    // Bowler at bowling crease y=410
     expect(bowler.targetPos.x).toBe(300);
-    expect(bowler.targetPos.y).toBe(190);
+    expect(bowler.targetPos.y).toBe(410);
     expect(bowler.isOutsideCircle).toBe(false);
 
-    // Wicketkeeper behind striker stumps y=460
+    // Wicketkeeper behind striker stumps y=140
     expect(keeper.targetPos.x).toBe(300);
-    expect(keeper.targetPos.y).toBe(460);
+    expect(keeper.targetPos.y).toBe(140);
     expect(keeper.isOutsideCircle).toBe(false);
   });
 });
@@ -359,7 +359,7 @@ describe('Section 5: Central Field Validator & Leg-Side Law 28.3 & 28.4', () => 
           f.positionKey !== 'BOWLER' &&
           f.positionKey !== 'WICKETKEEPER' &&
           f.targetPos.x > 300 &&
-          f.targetPos.y > 410
+          f.targetPos.y < 190
       );
       expect(behindSquare.length).toBeLessThanOrEqual(2);
     }
@@ -512,12 +512,12 @@ describe('Section 7 & 8: Fielding Interception & Ball Lifecycle Gating', () => {
       fieldingSquad: testSquad,
     });
 
-    // Straight drive down the ground toward long-on (x=365, y=75)
+    // Straight drive down the ground toward long-on (x=365, y=525)
     const ballPath = {
-      start: { x: 300, y: 190 },
-      bounce: { x: 300, y: 300 },
-      contact: { x: 300, y: 410 },
-      target: { x: 365, y: 75 },
+      start: { x: 300, y: 410 },
+      bounce: { x: 300, y: 270 },
+      contact: { x: 300, y: 190 },
+      target: { x: 365, y: 525 },
       isAerial: false,
       apexHeight: 0,
     };

@@ -8,12 +8,12 @@ import {
 } from '../engine/fielding/FieldingInterceptionEngine';
 import { BallTrajectoryPath } from '../types/delivery';
 
-const CONTACT = { x: 300, y: 410 };
+const CONTACT = { x: 300, y: 190 };
 
 function groundPath(target: { x: number; y: number }): BallTrajectoryPath {
   return {
-    start: { x: 300, y: 190 },
-    bounce: { x: 300, y: 300 },
+    start: { x: 300, y: 410 },
+    bounce: { x: 300, y: 270 },
     contact: CONTACT,
     target,
     isAerial: false,
@@ -23,8 +23,8 @@ function groundPath(target: { x: number; y: number }): BallTrajectoryPath {
 
 function aerialPath(target: { x: number; y: number }): BallTrajectoryPath {
   return {
-    start: { x: 300, y: 190 },
-    bounce: { x: 300, y: 300 },
+    start: { x: 300, y: 410 },
+    bounce: { x: 300, y: 270 },
     contact: CONTACT,
     target,
     isAerial: true,

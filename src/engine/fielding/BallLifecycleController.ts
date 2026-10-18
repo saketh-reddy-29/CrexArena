@@ -126,8 +126,8 @@ export class BallLifecycleController {
   constructor(opts?: { initialBall?: Point; bowlerHome?: Point }) {
     this.state = 'READY';
     this.history = ['READY'];
-    this.releasePoint = opts?.initialBall ?? { x: 300, y: 190 };
-    this.bowlerHome = opts?.bowlerHome ?? { x: 300, y: 190 };
+    this.releasePoint = opts?.initialBall ?? { x: 300, y: 410 };
+    this.bowlerHome = opts?.bowlerHome ?? { x: 300, y: 410 };
     this.ballPosition = { ...this.releasePoint };
     this.bowlerPosition = { ...this.bowlerHome };
   }

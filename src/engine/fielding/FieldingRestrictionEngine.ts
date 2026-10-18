@@ -294,10 +294,10 @@ export function isBowlerOrKeeper(f: FielderPosition): boolean {
 
 /**
  * Law 28.4 — behind square on the leg side.
- * Popping crease is at y=410. Behind square is y > 410 on the leg side.
+ * Popping crease is at y=190. Behind square is y < 190 on the leg side.
  */
 export function isBehindSquareLeg(x: number, y: number, isLeftHanded: boolean): boolean {
-  return isOnLegSide(x, isLeftHanded) && y > 410;
+  return isOnLegSide(x, isLeftHanded) && y < 190;
 }
 
 /** Counts outfielders on the leg side (excludes bowler + wicketkeeper). */

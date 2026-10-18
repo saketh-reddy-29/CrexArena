@@ -185,16 +185,16 @@ describe('Intelligent Field Placement Engine with Batter Scoring-Zone Analytics'
   // oriented zones.
   // ───────────────────────────────────────────────────────────────────────────
   it('Scenario 3: Right-handed and left-handed batters have correctly mirrored angles & coordinates', () => {
-    // Point on physical left side of ground (x = 180, y = 350)
+    // Point on physical left side of ground (x = 180, y = 260)
     // For RHB: this is off-side (negative angle, point/cover area)
-    const angleRight = calculateBatterRelativeAngle({ x: 180, y: 350 }, false);
-    const zoneRight = getCanonicalZoneFromPoint({ x: 180, y: 350 }, false);
+    const angleRight = calculateBatterRelativeAngle({ x: 180, y: 260 }, false);
+    const zoneRight = getCanonicalZoneFromPoint({ x: 180, y: 260 }, false);
     expect(angleRight).toBeLessThan(0);
     expect(zoneRight).toBe('COVER_POINT');
 
     // For LHB: the same coordinate is on the leg-side (positive angle, midwicket / cow corner area)
-    const angleLeft = calculateBatterRelativeAngle({ x: 180, y: 350 }, true);
-    const zoneLeft = getCanonicalZoneFromPoint({ x: 180, y: 350 }, true);
+    const angleLeft = calculateBatterRelativeAngle({ x: 180, y: 260 }, true);
+    const zoneLeft = getCanonicalZoneFromPoint({ x: 180, y: 260 }, true);
     expect(angleLeft).toBeGreaterThan(0);
     expect(zoneLeft).toBe('COW_CORNER');
 
@@ -343,7 +343,7 @@ describe('Intelligent Field Placement Engine with Batter Scoring-Zone Analytics'
 
       // Verify no more than 2 behind square on leg side
       const behindSquareLeg = config.fielders.filter(
-        f => f.positionKey !== 'BOWLER' && f.positionKey !== 'WICKETKEEPER' && f.targetPos.x > 300 && f.targetPos.y > 410
+        f => f.positionKey !== 'BOWLER' && f.positionKey !== 'WICKETKEEPER' && f.targetPos.x > 300 && f.targetPos.y < 190
       );
       expect(behindSquareLeg.length).toBeLessThanOrEqual(2);
     });

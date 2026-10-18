@@ -190,8 +190,8 @@ export function classifyBatterArchetype(batter: Player | null): BatterArchetype 
 /** Angle of a ground point as seen from the batter crease, in the batter's own frame. */
 export function zoneAngleDeg(x: number, y: number, isLeftHanded: boolean): number {
   const dx = x - 300;
-  const dy = y - 410;
-  let deg = Math.atan2(dx, -dy) * (180 / Math.PI);
+  const dy = y - 190;
+  let deg = Math.atan2(dx, dy) * (180 / Math.PI);
   if (isLeftHanded) deg = -deg;
   return deg;
 }

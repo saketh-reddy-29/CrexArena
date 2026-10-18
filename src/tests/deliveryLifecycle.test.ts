@@ -67,8 +67,8 @@ describe('Authoritative Delivery Lifecycle & DeliveryResult Verification', () =>
     expect(res.wicket).toBe(false);
     expect(res.strikeRotated).toBe(false);
     expect(res.ballPath).toBeDefined();
-    expect(res.ballPath.start.y).toBe(190);
-    expect(res.ballPath.contact.y).toBe(410);
+    expect(res.ballPath.start.y).toBe(410);
+    expect(res.ballPath.contact.y).toBe(190);
   });
 
   it('2. SINGLE: 1 run, legal delivery, strike rotated', () => {

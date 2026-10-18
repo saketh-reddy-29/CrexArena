@@ -21,10 +21,10 @@ describe('Cricket Action Visualizer Physics & Trajectory Engine', () => {
   };
 
   it('computes continuous Bezier trajectory without NaN or out-of-bound jumps', () => {
-    const start = { x: 300, y: 190 };
-    const c1 = { x: 308, y: 250 };
-    const c2 = { x: 295, y: 310 };
-    const end = { x: 300, y: 410 };
+    const start = { x: 300, y: 410 };
+    const c1 = { x: 308, y: 350 };
+    const c2 = { x: 295, y: 250 };
+    const end = { x: 300, y: 190 };
 
     for (let i = 0; i <= 100; i++) {
       const t = i / 100;
@@ -38,8 +38,8 @@ describe('Cricket Action Visualizer Physics & Trajectory Engine', () => {
   });
 
   it('verifies aerial six arc maintains realistic parabolic height', () => {
-    const startY = 410;
-    const endY = 70;
+    const startY = 190;
+    const endY = 530;
     const arcMax = 45;
 
     for (let i = 0; i <= 100; i++) {

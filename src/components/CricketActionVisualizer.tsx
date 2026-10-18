@@ -145,9 +145,9 @@ interface FielderLiveState {
 
 // 600 x 600 Circular Field Constants
 const PITCH_CENTER: Point = { x: 300, y: 300 };
-const BOWLER_CREASE: Point = { x: 300, y: 190 };
-const BATTER_CREASE: Point = { x: 300, y: 410 };
-const NON_STRIKER_CREASE: Point = { x: 300, y: 200 };
+const BOWLER_CREASE: Point = { x: 300, y: 410 };
+const BATTER_CREASE: Point = { x: 300, y: 190 };
+const NON_STRIKER_CREASE: Point = { x: 300, y: 400 };
 const BOUNDARY_RADIUS = 268;
 
 export const clampFielderCoordinate = (p: Point): Point => {
@@ -357,7 +357,7 @@ export default function CricketActionVisualizer({
   const [playbackStage, setPlaybackStage] = useState<'IDLE' | 'BOWLER_RELEASE' | 'PITCH_BOUNCE' | 'BAT_CONTACT' | 'BALL_TRAVEL' | 'OUTCOME'>('IDLE');
   
   // Interactive entities
-  const [bowlerPos, setBowlerPos] = useState<Point>({ x: 300, y: 120 });
+  const [bowlerPos, setBowlerPos] = useState<Point>({ x: 300, y: 475 });
   const [strikerPos, setStrikerPos] = useState<Point>(BATTER_CREASE);
   const [nonStrikerPos, setNonStrikerPos] = useState<Point>(NON_STRIKER_CREASE);
   const [batRotation, setBatRotation] = useState<number>(0);
@@ -365,6 +365,11 @@ export default function CricketActionVisualizer({
   const [boundaryEffect, setBoundaryEffect] = useState<{ x: number; y: number; active: boolean; isSix?: boolean } | null>(null);
   const [impactBurst, setImpactBurst] = useState<Point | null>(null);
   const [resultBanner, setResultBanner] = useState<string | null>(null);
+  const [activeFielderAction, setActiveFielderAction] = useState<{
+    fielderId: string;
+    action: string;
+    currentPos: Point;
+  } | null>(null);
 
   // Drag and drop tweaking
   const [draggedFielderId, setDraggedFielderId] = useState<string | null>(null);
@@ -394,10 +399,10 @@ export default function CricketActionVisualizer({
         shotType: lastBall.runs === 6 ? 'LOFTED_SIX' : lastBall.runs === 4 ? 'DRIVE_FOUR' : 'DEFENSE',
         targetZone: lastBall.runs === 6 ? 'LONG_ON' : 'PITCH',
         ballPath: {
-          start: { x: 300, y: 190 },
-          bounce: { x: 300, y: 330 },
-          contact: { x: 300, y: 410 },
-          target: lastBall.runs === 6 ? { x: 360, y: 55 } : lastBall.runs === 4 ? { x: 170, y: 285 } : { x: 300, y: 460 },
+          start: { x: 300, y: 410 },
+          bounce: { x: 300, y: 270 },
+          contact: { x: 300, y: 190 },
+          target: lastBall.runs === 6 ? { x: 360, y: 545 } : lastBall.runs === 4 ? { x: 170, y: 315 } : { x: 300, y: 140 },
           isAerial: lastBall.runs === 6,
         },
         resultType: (lastBall.isWicket ? 'WICKET' : lastBall.runs === 6 ? 'SIX' : lastBall.runs === 4 ? 'FOUR' : lastBall.runs > 0 ? 'SINGLE' : 'DOT') as any,
@@ -674,7 +679,7 @@ export default function CricketActionVisualizer({
 
     // Animate the return: the ball travels from the intercept/boundary point back to the bowler.
     const from = interception.interceptPoint;
-    const bowlerHome = { x: 300, y: 190 };
+    const bowlerHome = { x: 300, y: 410 };
     const distToBowler = Math.hypot(from.x - bowlerHome.x, from.y - bowlerHome.y);
     const baseMs = Math.min(850, Math.max(320, distToBowler * 2.0));
     const speedMult = speed === 1 ? 1 : speed === 1.5 ? 1.4 : 2.2;
@@ -705,6 +710,7 @@ export default function CricketActionVisualizer({
         fieldMoveAnimFrameRef.current = requestAnimationFrame(frame);
       } else {
         // Ball is back with the bowler: retrieval complete, next delivery may now be released.
+        setActiveFielderAction(null);
         onBallLifecycleChangeRef.current?.('BALL_READY', interception);
         onPlaybackCompleteRef.current?.();
       }
@@ -745,8 +751,9 @@ export default function CricketActionVisualizer({
     setImpactBurst(null);
     setResultBanner(null);
     setBallTrail([]);
+    setActiveFielderAction(null);
 
-    setBowlerPos({ x: 300, y: 120 });
+    setBowlerPos({ x: 300, y: 475 });
     setStrikerPos(BATTER_CREASE);
     setNonStrikerPos(NON_STRIKER_CREASE);
     setBallPos(path.start);
@@ -774,7 +781,7 @@ export default function CricketActionVisualizer({
       if (progress < 0.22) {
         setPlaybackStage('BOWLER_RELEASE');
         const pNorm = progress / 0.22;
-        const bY = 120 + (pNorm * 65);
+        const bY = 475 - (pNorm * 65);
         setBowlerPos({ x: 300, y: bY });
 
         // Ball remains in bowler's hand
@@ -782,17 +789,17 @@ export default function CricketActionVisualizer({
         curY = bY;
         curScale = 1;
       }
-      // â”€â”€ Stage 2: Bowler Crease to Pitch Bounce (0.22 - 0.45)
+      // Stage 2: Bowler Crease to Pitch Bounce (0.22 - 0.45)
       else if (progress < 0.45) {
         setPlaybackStage('BOWLER_RELEASE');
-        setBowlerPos({ x: 300, y: 185 });
+        setBowlerPos({ x: 300, y: 410 });
         const pRelease = (progress - 0.22) / 0.23;
 
         curX = path.start.x + (path.bounce.x - path.start.x) * pRelease;
         curY = path.start.y + (path.bounce.y - path.start.y) * pRelease;
         curScale = 1 + Math.sin(pRelease * Math.PI) * 0.22;
       }
-      // â”€â”€ Stage 3: Pitch Bounce to Bat Contact (0.45 - 0.58)
+      // Stage 3: Pitch Bounce to Bat Contact (0.45 - 0.58)
       else if (progress < 0.58) {
         setPlaybackStage('PITCH_BOUNCE');
         const pBounce = (progress - 0.45) / 0.13;
@@ -801,7 +808,7 @@ export default function CricketActionVisualizer({
         // Batter swing anticipation
         setBatRotation(Math.sin(pBounce * Math.PI) * -38);
       }
-      // â”€â”€ Stage 4: Bat Contact to Target Zone / Boundary (0.58 - 0.90)
+      // Stage 4: Bat Contact to Target Zone / Boundary (0.58 - 0.90)
       else if (progress < 0.90) {
         setPlaybackStage('BALL_TRAVEL');
         const pTravel = (progress - 0.58) / 0.32;
@@ -826,17 +833,49 @@ export default function CricketActionVisualizer({
 
         setBatRotation(Math.sin((1 - pTravel) * Math.PI) * 25);
 
-        // Batters running between wickets
+        // Batters running between wickets (Striker: 190 -> 400, Non-Striker: 400 -> 190)
         if (delivery.totalRuns > 0 && !delivery.wicket) {
           const runSpeed = Math.min(1, pTravel * (delivery.totalRuns >= 2 ? 1.8 : 1.1));
-          const sY = BATTER_CREASE.y - (runSpeed * (BATTER_CREASE.y - NON_STRIKER_CREASE.y));
-          const nsY = NON_STRIKER_CREASE.y + (runSpeed * (BATTER_CREASE.y - NON_STRIKER_CREASE.y));
+          const sY = BATTER_CREASE.y + (runSpeed * (NON_STRIKER_CREASE.y - BATTER_CREASE.y));
+          const nsY = NON_STRIKER_CREASE.y - (runSpeed * (NON_STRIKER_CREASE.y - BATTER_CREASE.y));
           setStrikerPos({ x: 300, y: sY });
           setNonStrikerPos({ x: 300, y: nsY });
         }
 
         if (delivery.wicket && delivery.wicketType === 'Bowled') {
           setBailsFlying(true);
+        }
+
+        // Physical responding fielder movement toward ball trajectory
+        const fieldingTarget = path.target;
+        const candidateFielders = fielders.filter(
+          f => f.positionKey !== 'BOWLER' && f.positionKey !== 'WICKETKEEPER'
+        );
+        let bestFielder = candidateFielders[0];
+        let bestDist = 9999;
+        for (const f of candidateFielders) {
+          const d = Math.hypot(f.targetX - fieldingTarget.x, f.targetY - fieldingTarget.y);
+          if (d < bestDist) {
+            bestDist = d;
+            bestFielder = f;
+          }
+        }
+
+        if (bestFielder) {
+          const moveFrac = Math.min(1, pTravel * 1.25);
+          const fCurX = bestFielder.targetX + (fieldingTarget.x - bestFielder.targetX) * moveFrac;
+          const fCurY = bestFielder.targetY + (fieldingTarget.y - bestFielder.targetY) * moveFrac;
+          let actionLabel = '🏃 INTERCEPT';
+          if (path.isAerial && delivery.wicket) actionLabel = '🧤 CATCH ATTEMPT';
+          else if (bestDist > 45) actionLabel = '⚡ CHASE';
+          else if (bestDist < 18) actionLabel = '💨 DIVE STOP';
+          else actionLabel = '🛑 GROUND STOP';
+
+          setActiveFielderAction({
+            fielderId: bestFielder.id,
+            action: actionLabel,
+            currentPos: { x: fCurX, y: fCurY },
+          });
         }
       }
       // â”€â”€ Stage 5: Outcome & Boundary Wave (0.90 - 1.00)
@@ -1435,40 +1474,40 @@ export default function CricketActionVisualizer({
               stroke="rgba(0,0,0,0.4)"
               strokeWidth="1"
             />
-            {/* Bowler Run-Up Approach Strip */}
+            {/* Bowler Run-Up Approach Strip (South end) */}
             <g opacity="0.4">
-              <rect x="290" y="115" width="20" height="55" fill="none" stroke="rgba(255,255,255,0.2)" strokeWidth="1" strokeDasharray="3 3" />
-              <line x1="300" y1="115" x2="300" y2="170" stroke="rgba(255,255,255,0.25)" strokeWidth="1" strokeDasharray="2 2" />
-              <text x="300" y="145" textAnchor="middle" fill="rgba(255,255,255,0.35)" fontSize="6" fontWeight="700">RUN-UP</text>
+              <rect x="290" y="430" width="20" height="55" fill="none" stroke="rgba(255,255,255,0.2)" strokeWidth="1" strokeDasharray="3 3" />
+              <line x1="300" y1="430" x2="300" y2="485" stroke="rgba(255,255,255,0.25)" strokeWidth="1" strokeDasharray="2 2" />
+              <text x="300" y="460" textAnchor="middle" fill="rgba(255,255,255,0.35)" fontSize="6" fontWeight="700">RUN-UP</text>
             </g>
 
-            {/* Bowling Crease (y=190) & Popping Crease (y=410) */}
-            <line x1="272" y1="190" x2="328" y2="190" stroke="white" strokeWidth="1.8" />
-            <line x1="272" y1="410" x2="328" y2="410" stroke="white" strokeWidth="2.2" />
+            {/* Popping Crease (Striker North y=190) & Bowling Crease (Bowler South y=410) */}
+            <line x1="272" y1="190" x2="328" y2="190" stroke="white" strokeWidth="2.2" />
+            <line x1="272" y1="410" x2="328" y2="410" stroke="white" strokeWidth="1.8" />
             <line x1="284" y1="174" x2="284" y2="190" stroke="white" strokeWidth="1.2" />
             <line x1="316" y1="174" x2="316" y2="190" stroke="white" strokeWidth="1.2" />
             <line x1="284" y1="410" x2="284" y2="426" stroke="white" strokeWidth="1.2" />
             <line x1="316" y1="410" x2="316" y2="426" stroke="white" strokeWidth="1.2" />
 
-            {/* Stumps & Bails (Bowler End y=182, Striker End y=418) */}
+            {/* Stumps & Bails (Striker End North y=182, Bowler End South y=418) */}
             <g transform="translate(300, 182)">
               <line x1="-3" y1="0" x2="-3" y2="8" stroke="#FEF08A" strokeWidth="2" strokeLinecap="round" />
               <line x1="0" y1="0" x2="0" y2="8" stroke="#FEF08A" strokeWidth="2" strokeLinecap="round" />
               <line x1="3" y1="0" x2="3" y2="8" stroke="#FEF08A" strokeWidth="2" strokeLinecap="round" />
-              <line x1="-4" y1="0" x2="4" y2="0" stroke="#FDE047" strokeWidth="1.5" />
+              {bailsFlying ? (
+                <g className="animate-ping">
+                  <line x1="-8" y1="-6" x2="-2" y2="-4" stroke="#F87171" strokeWidth="2" />
+                  <line x1="2" y1="-4" x2="8" y2="-6" stroke="#F87171" strokeWidth="2" />
+                </g>
+              ) : (
+                <line x1="-4" y1="0" x2="4" y2="0" stroke="#FDE047" strokeWidth="1.5" />
+              )}
             </g>
             <g transform="translate(300, 418)">
               <line x1="-3" y1="-8" x2="-3" y2="0" stroke="#FEF08A" strokeWidth="2" strokeLinecap="round" />
               <line x1="0" y1="-8" x2="0" y2="0" stroke="#FEF08A" strokeWidth="2" strokeLinecap="round" />
               <line x1="3" y1="-8" x2="3" y2="0" stroke="#FEF08A" strokeWidth="2" strokeLinecap="round" />
-              {bailsFlying ? (
-                <g className="animate-ping">
-                  <line x1="-8" y1="-14" x2="-2" y2="-12" stroke="#F87171" strokeWidth="2" />
-                  <line x1="2" y1="-12" x2="8" y2="-14" stroke="#F87171" strokeWidth="2" />
-                </g>
-              ) : (
-                <line x1="-4" y1="-8" x2="4" y2="-8" stroke="#FDE047" strokeWidth="1.5" />
-              )}
+              <line x1="-4" y1="-8" x2="4" y2="-8" stroke="#FDE047" strokeWidth="1.5" />
             </g>
 
             {/* Pitch Legend Indicator (Off / Leg side) */}
@@ -1511,10 +1550,10 @@ export default function CricketActionVisualizer({
               const isBowler = fielder.positionKey === 'BOWLER' || fielder.role?.toLowerCase() === 'bowler';
               const isWicketkeeper = fielder.positionKey === 'WICKETKEEPER' || fielder.role?.toLowerCase().includes('keeper');
               const isSelected = inspectedFielder?.id === fielder.id;
-
-              // When bowler is running up or delivering: use animated bowlerPos
-              const posX = isBowler ? bowlerPos.x : fielder.currentX;
-              const posY = isBowler ? bowlerPos.y : fielder.currentY;
+              const isFielderActing = activeFielderAction?.fielderId === fielder.id;
+              // When bowler is running up or delivering: use animated bowlerPos. If fielder is actively reacting, use animated action pos.
+              const posX = isBowler ? bowlerPos.x : (isFielderActing && activeFielderAction) ? activeFielderAction.currentPos.x : fielder.currentX;
+              const posY = isBowler ? bowlerPos.y : (isFielderActing && activeFielderAction) ? activeFielderAction.currentPos.y : fielder.currentY;
 
               const initials = fielder.name
                 .split(' ')
@@ -1635,18 +1674,45 @@ export default function CricketActionVisualizer({
                       </g>
                     );
                   })()}
+
+                  {/* Active fielding reaction badge (Chase, Intercept, Dive, Stop, Catch) */}
+                  {isFielderActing && activeFielderAction && (
+                    <g transform="translate(0, -18)">
+                      <rect
+                        x="-38"
+                        y="-8"
+                        width="76"
+                        height="15"
+                        rx="4"
+                        fill="#020617"
+                        stroke="#38BDF8"
+                        strokeWidth="1.2"
+                        opacity="0.95"
+                      />
+                      <text
+                        textAnchor="middle"
+                        y="2.5"
+                        fill="#38BDF8"
+                        fontSize="6"
+                        fontWeight="900"
+                        letterSpacing="0.4"
+                      >
+                        {activeFielderAction.action}
+                      </text>
+                    </g>
+                  )}
                 </g>
               );
             })}
 
-            {/* 7. Non-Striker Batter Marker */}
+            {/* 7. Non-Striker Batter Marker (South bowling end, y=400) */}
             <g transform={`translate(${nonStrikerPos.x + 16}, ${nonStrikerPos.y})`}>
               <circle r="8.5" fill="#0284C7" stroke="white" strokeWidth="1.6" />
               <circle r="3" fill="white" />
               <text y="14" textAnchor="middle" fill="#7DD3FC" fontSize="6.5" fontWeight="900">Non-Str</text>
             </g>
 
-            {/* 8. Striker Batter & Bat Marker */}
+            {/* 8. Striker Batter & Bat Marker (North batting end, y=190) */}
             <g transform={`translate(${strikerPos.x}, ${strikerPos.y})`}>
               <circle r="9" fill="#2563EB" stroke="white" strokeWidth="1.8" />
               <circle r="3.5" fill="white" />
@@ -1654,13 +1720,13 @@ export default function CricketActionVisualizer({
                 x1="0"
                 y1="0"
                 x2="13"
-                y2="-6"
+                y2="6"
                 stroke="#F59E0B"
                 strokeWidth="3"
                 strokeLinecap="round"
                 transform={`rotate(${batRotation})`}
               />
-              <text y="15" textAnchor="middle" fill="#93C5FD" fontSize="6.5" fontWeight="900">Striker</text>
+              <text y="-13" textAnchor="middle" fill="#93C5FD" fontSize="6.5" fontWeight="900">Striker</text>
             </g>
 
             {/* 10. Visible Ball Motion Trail */}

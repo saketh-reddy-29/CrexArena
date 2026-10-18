@@ -198,13 +198,13 @@ export const CANONICAL_ZONE_LIST: CanonicalZoneId[] = [
 ];
 
 /**
- * Returns angular degree from batter crease (300, 410) in the batter's frame.
+ * Returns angular degree from batter crease (300, 190) in the batter's frame.
  * Mirrored automatically for left-handed batters.
  */
 export function calculateBatterRelativeAngle(point: Point, isLeftHanded: boolean): number {
   const dx = point.x - 300;
-  const dy = point.y - 410;
-  let deg = Math.atan2(dx, -dy) * (180 / Math.PI);
+  const dy = point.y - 190;
+  let deg = Math.atan2(dx, dy) * (180 / Math.PI);
   if (isLeftHanded) {
     deg = -deg;
   }

@@ -251,15 +251,15 @@ function MiniGround({ positionKeys, size = 120, selected = false, aiSelected = f
         stroke={ringColor} strokeWidth={0.8} strokeDasharray="3 2" opacity={0.7} />
       <rect x={toX(294)} y={toY(172)} width={toX(12)} height={toY(238)} rx={1}
         fill="#c4a35a" stroke="#a0784a" strokeWidth={0.6} />
-      <line x1={toX(294) - 5} y1={toY(410)} x2={toX(294) + toX(12) + 5} y2={toY(410)}
+      <line x1={toX(294) - 5} y1={toY(190)} x2={toX(294) + toX(12) + 5} y2={toY(190)}
         stroke="#fff" strokeWidth={0.9} opacity={0.9} />
-      <line x1={toX(294) - 3} y1={toY(190)} x2={toX(294) + toX(12) + 3} y2={toY(190)}
+      <line x1={toX(294) - 3} y1={toY(410)} x2={toX(294) + toX(12) + 3} y2={toY(410)}
         stroke="#fff" strokeWidth={0.6} opacity={0.65} />
       {[-2.5, 0, 2.5].map((o, i) => (
-        <rect key={`sb${i}`} x={cx + toX(o) - 0.6} y={toY(410)} width={1.2} height={toY(10)} fill="#f9fafb" />
+        <rect key={`sb${i}`} x={cx + toX(o) - 0.6} y={toY(182)} width={1.2} height={toY(10)} fill="#f9fafb" />
       ))}
       {[-2.5, 0, 2.5].map((o, i) => (
-        <rect key={`sw${i}`} x={cx + toX(o) - 0.6} y={toY(182)} width={1.2} height={toY(10)} fill="#f9fafb" />
+        <rect key={`sw${i}`} x={cx + toX(o) - 0.6} y={toY(410)} width={1.2} height={toY(10)} fill="#f9fafb" />
       ))}
       {positionKeys.map(key => {
         const pos: FieldPositionDef | undefined = CANONICAL_POSITIONS[key];

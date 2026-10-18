@@ -50,21 +50,22 @@ export interface DeliverySimulationInput {
 export class DeliveryResultFactory {
   private static readonly BOUNDARY_RADIUS = 268;
   private static readonly GROUND_CENTER = 300;
-  private static readonly BATTER_CREASE_Y = 410;
-  private static readonly BOWLER_CREASE_Y = 190;
+  private static readonly BATTER_CREASE_Y = 190;
+  private static readonly BOWLER_CREASE_Y = 410;
 
   /**
-   * Helper: compute mathematical ray boundary intersection from batter crease (300, 410)
+   * Helper: compute mathematical ray boundary intersection from striker crease (300, 190)
    */
   public static getBoundaryPoint(shotAngleDeg: number, distanceFactor: number = 1.0): Point {
     const rad = shotAngleDeg * (Math.PI / 180);
     const dx = Math.sin(rad);
-    const dy = -Math.cos(rad);
+    const dy = Math.cos(rad);
     
-    // (t*dx)^2 + (110 + t*dy)^2 = R^2
-    const b = 220 * dy;
+    // (t*dx)^2 + (t*dy - 110)^2 = R^2
+    // t^2 - 220 * dy * t + (12100 - R^2) = 0
+    const b = -220 * dy;
     const c = 12100 - (this.BOUNDARY_RADIUS * this.BOUNDARY_RADIUS);
-    const disc = Math.sqrt(b * b - 4 * c);
+    const disc = Math.sqrt(Math.max(0, b * b - 4 * c));
     const tBoundary = (-b + disc) / 2;
     const t = Math.max(25, tBoundary * distanceFactor);
     
@@ -238,7 +239,11 @@ export class DeliveryResultFactory {
       isWicket,
       wicketType,
       rawOutcome.extraType,
-      isLeftHander
+      isLeftHander,
+      input.fieldConfiguration,
+      striker,
+      bowler,
+      input.bowlingPlan
     );
 
     // 4. Strike rotation logic
@@ -333,12 +338,16 @@ export class DeliveryResultFactory {
     isWicket: boolean,
     wicketType?: string,
     extraType?: string,
-    isLeftHander: boolean = false
+    isLeftHander: boolean = false,
+    fieldConfig?: FieldConfiguration | null,
+    striker?: Player | null,
+    bowler?: Player | null,
+    bowlingPlan?: any
   ): { ballPath: BallTrajectoryPath; shotType: string; targetZone: string } {
-    const start: Point = { x: 300, y: this.BOWLER_CREASE_Y };
-    let bounce: Point = { x: 300, y: 330 };
-    let contact: Point = { x: 300, y: this.BATTER_CREASE_Y };
-    let target: Point = { x: 300, y: 460 };
+    const start: Point = { x: 300, y: this.BOWLER_CREASE_Y }; // 410 (South bowling crease)
+    let bounce: Point = { x: 300, y: 270 }; // Pitch bounce
+    let contact: Point = { x: 300, y: this.BATTER_CREASE_Y }; // 190 (North striker crease)
+    let target: Point = { x: 300, y: 140 }; // Behind striker stumps at wicketkeeper
     let shotType = 'FORWARD_DEFENSE';
     let targetZone = 'WICKETKEEPER';
     let isAerial = false;
@@ -346,68 +355,68 @@ export class DeliveryResultFactory {
 
     if (resultType === 'WIDE') {
       const isOffSide = Math.random() > 0.4;
-      bounce = { x: isOffSide ? 335 : 265, y: 320 };
-      contact = { x: isOffSide ? 345 : 255, y: 410 };
-      target = { x: isOffSide ? 355 : 245, y: 465 };
+      bounce = { x: isOffSide ? 335 : 265, y: 280 };
+      contact = { x: isOffSide ? 345 : 255, y: 190 };
+      target = { x: isOffSide ? 355 : 245, y: 135 };
       shotType = 'WIDE_LEAVE';
       targetZone = isOffSide ? 'WIDE_OFF' : 'WIDE_LEG';
     } else if (resultType === 'NO_BALL') {
-      bounce = { x: 300, y: 290 }; // High full toss or front foot overstep
-      contact = { x: 300, y: 410 };
+      bounce = { x: 300, y: 310 }; // High full toss or front foot overstep
+      contact = { x: 300, y: 190 };
       target = this.getBoundaryPoint(35, 0.6);
       shotType = 'NO_BALL_HIT';
       targetZone = 'MID_WICKET';
     } else if (isWicket) {
       if (wicketType === 'Bowled') {
-        bounce = { x: 300, y: 340 };
-        contact = { x: 300, y: 415 };
-        target = { x: 300, y: 422 }; // Stumps
+        bounce = { x: 300, y: 260 };
+        contact = { x: 300, y: 185 };
+        target = { x: 300, y: 178 }; // North Stumps at 182
         shotType = 'MISSED_DEFENSE';
         targetZone = 'STUMPS';
       } else if (wicketType === 'LBW') {
-        bounce = { x: 300, y: 335 };
-        contact = { x: 300, y: 410 };
-        target = { x: 300, y: 412 }; // Batter pads
+        bounce = { x: 300, y: 265 };
+        contact = { x: 300, y: 190 };
+        target = { x: 300, y: 188 }; // Batter pads in front of stumps
         shotType = 'PAD_INTERCEPT';
         targetZone = 'STUMPS';
       } else if (wicketType === 'Caught Behind') {
-        bounce = { x: 298, y: 335 };
-        contact = { x: 295, y: 410 };
-        target = { x: 300, y: 460 }; // Keeper gloves
+        bounce = { x: 298, y: 265 };
+        contact = { x: 295, y: 190 };
+        target = { x: 300, y: 140 }; // Keeper gloves behind stumps
         shotType = 'FEATHER_EDGE';
         targetZone = 'WICKETKEEPER';
       } else if (wicketType === 'Caught') {
         const catchingZones = [
-          { name: '1st Slip', pos: { x: 265, y: 472 }, shot: 'OUTSIDE_EDGE' },
-          { name: 'Gully', pos: { x: 190, y: 450 }, shot: 'SQUARER_EDGE' },
-          { name: 'Cover', pos: { x: 170, y: 285 }, shot: 'LOFTED_DRIVE' },
-          { name: 'Mid-Off', pos: { x: 245, y: 195 }, shot: 'MISHIT_DRIVE' },
-          { name: 'Mid-On', pos: { x: 355, y: 195 }, shot: 'CHIPPED_ON_DRIVE' },
-          { name: 'Deep Mid-Wicket', pos: { x: 515, y: 240 }, shot: 'SKIED_PULL' },
-          { name: 'Long-Off', pos: { x: 235, y: 75 }, shot: 'HOLE_OUT_DEEP' },
+          { name: '1st Slip', pos: { x: 255, y: 124 }, shot: 'OUTSIDE_EDGE' },
+          { name: 'Gully', pos: { x: 175, y: 160 }, shot: 'SQUARER_EDGE' },
+          { name: 'Cover', pos: { x: 170, y: 315 }, shot: 'LOFTED_DRIVE' },
+          { name: 'Mid-Off', pos: { x: 245, y: 405 }, shot: 'MISHIT_DRIVE' },
+          { name: 'Mid-On', pos: { x: 355, y: 405 }, shot: 'CHIPPED_ON_DRIVE' },
+          { name: 'Deep Mid-WICKET', pos: { x: 515, y: 360 }, shot: 'SKIED_PULL' },
+          { name: 'Long-Off', pos: { x: 235, y: 525 }, shot: 'HOLE_OUT_DEEP' },
         ];
         const selected = catchingZones[Math.floor(Math.random() * catchingZones.length)];
-        bounce = { x: 300, y: 330 };
-        contact = { x: 300, y: 410 };
+        bounce = { x: 300, y: 270 };
+        contact = { x: 300, y: 190 };
         target = selected.pos;
         shotType = selected.shot;
         targetZone = selected.name;
         isAerial = true;
         apexHeight = 55;
       } else if (wicketType === 'Stumped') {
-        bounce = { x: 302, y: 340 };
-        contact = { x: 300, y: 420 };
-        target = { x: 300, y: 455 };
+        bounce = { x: 302, y: 260 };
+        contact = { x: 300, y: 180 };
+        target = { x: 300, y: 145 };
         shotType = 'STEP_OUT_MISS';
         targetZone = 'WICKETKEEPER';
       } else if (wicketType === 'Run Out') {
-        bounce = { x: 300, y: 330 };
-        contact = { x: 300, y: 410 };
-        target = { x: 245, y: 195 }; // Direct hit from mid-off
+        bounce = { x: 300, y: 270 };
+        contact = { x: 300, y: 190 };
+        target = { x: 245, y: 405 }; // Direct hit from mid-off
         shotType = 'HURRIED_SINGLE';
         targetZone = 'STUMPS';
       } else {
-        target = { x: 300, y: 420 };
+        target = { x: 300, y: 180 };
         shotType = 'DISMISSAL';
         targetZone = 'STUMPS';
       }
@@ -439,10 +448,55 @@ export class DeliveryResultFactory {
         { angle: 95, shot: 'SQUARE_LEG_FLICK_FOUR', zone: 'SQUARE_LEG' },
         { angle: 140, shot: 'FINE_LEG_GLANCE_FOUR', zone: 'FINE_LEG' },
       ];
-      const selected = fourOptions[Math.floor(Math.random() * fourOptions.length)];
-      target = this.getBoundaryPoint(selected.angle, 0.98);
-      shotType = selected.shot;
-      targetZone = selected.zone;
+
+      // Dynamic gap detection: evaluate angular gaps between fielders
+      let chosenAngle: number | null = null;
+      let chosenShot = 'COVER_DRIVE_FOUR';
+      let chosenZone = 'COVER';
+
+      if (fieldConfig?.fielders && fieldConfig.fielders.length >= 7) {
+        const outfielders = fieldConfig.fielders.filter(
+          f => f.positionKey !== 'BOWLER' && f.positionKey !== 'WICKETKEEPER'
+        );
+        const angles = outfielders.map(f => {
+          const fx = isLeftHander ? 600 - f.targetPos.x : f.targetPos.x;
+          return Math.atan2(fx - 300, f.targetPos.y - 190) * (180 / Math.PI);
+        }).sort((a, b) => a - b);
+
+        const gaps: Array<{ mid: number; size: number }> = [];
+        for (let i = 0; i < angles.length; i++) {
+          const a1 = angles[i];
+          const a2 = i === angles.length - 1 ? angles[0] + 360 : angles[i + 1];
+          const size = a2 - a1;
+          if (size >= 28) {
+            let mid = a1 + size / 2;
+            while (mid > 180) mid -= 360;
+            while (mid < -180) mid += 360;
+            gaps.push({ mid, size });
+          }
+        }
+        if (gaps.length > 0) {
+          const chosenGap = gaps[Math.floor(Math.random() * gaps.length)];
+          const jitter = (Math.random() - 0.5) * Math.min(10, chosenGap.size * 0.3);
+          chosenAngle = Math.round(chosenGap.mid + jitter);
+          const closest = fourOptions.reduce((prev, curr) =>
+            Math.abs(curr.angle - (chosenAngle ?? 0)) < Math.abs(prev.angle - (chosenAngle ?? 0)) ? curr : prev
+          );
+          chosenShot = closest.shot;
+          chosenZone = closest.zone;
+        }
+      }
+
+      if (chosenAngle === null) {
+        const selected = fourOptions[Math.floor(Math.random() * fourOptions.length)];
+        chosenAngle = selected.angle;
+        chosenShot = selected.shot;
+        chosenZone = selected.zone;
+      }
+
+      target = this.getBoundaryPoint(chosenAngle, 0.98);
+      shotType = chosenShot;
+      targetZone = chosenZone;
     } else if (runs >= 1 && runs <= 3) {
       const distFactor = runs === 3 ? 0.76 : runs === 2 ? 0.58 : 0.38;
       const runningOptions = [
@@ -461,11 +515,11 @@ export class DeliveryResultFactory {
     } else {
       // Dot ball
       const dotOptions = [
-        { pos: { x: 300, y: 460 }, shot: 'BEATEN_OUTSIDE_OFF', zone: 'WICKETKEEPER' },
-        { pos: { x: 296, y: 390 }, shot: 'SOLID_FORWARD_DEFENSE', zone: 'PITCH' },
-        { pos: { x: 304, y: 395 }, shot: 'BACKFOOT_DEFENSE', zone: 'PITCH' },
-        { pos: { x: 175, y: 400 }, shot: 'POINT_STOP', zone: 'POINT' },
-        { pos: { x: 245, y: 220 }, shot: 'MID_OFF_STOP', zone: 'MID_OFF' },
+        { pos: { x: 300, y: 140 }, shot: 'BEATEN_OUTSIDE_OFF', zone: 'WICKETKEEPER' },
+        { pos: { x: 296, y: 210 }, shot: 'SOLID_FORWARD_DEFENSE', zone: 'PITCH' },
+        { pos: { x: 304, y: 205 }, shot: 'BACKFOOT_DEFENSE', zone: 'PITCH' },
+        { pos: { x: 175, y: 200 }, shot: 'POINT_STOP', zone: 'POINT' },
+        { pos: { x: 245, y: 380 }, shot: 'MID_OFF_STOP', zone: 'MID_OFF' },
       ];
       const selected = dotOptions[Math.floor(Math.random() * dotOptions.length)];
       target = selected.pos;
