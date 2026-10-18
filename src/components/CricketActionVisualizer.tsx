@@ -20,8 +20,10 @@ import {
   Bug,
   AlertTriangle,
   X,
-  Info
+  Info,
+  Cpu,
 } from 'lucide-react';
+import FieldSetupDashboard from './FieldSetupDashboard';
 import { PitchType, WeatherCondition } from '../types/match';
 import { Player } from '../types/common';
 import { ArenaFormat } from '../engine/models/ArenaState';
@@ -250,6 +252,7 @@ export default function CricketActionVisualizer({
   const [zoneFormatFilter, setZoneFormatFilter] = useState<'ALL' | ArenaFormat>('ALL');
   const [zoneBowlingFilter, setZoneBowlingFilter] = useState<'ALL' | 'PACE' | 'SPIN'>('ALL');
   const [showHeatmapOnField, setShowHeatmapOnField] = useState<boolean>(true);
+  const [showFieldSetupModal, setShowFieldSetupModal] = useState<boolean>(false);
 
   // Edit Field gate: fielders can only be dragged while editing is enabled
   const [internalEditField, setInternalEditField] = useState<boolean>(false);
@@ -593,6 +596,43 @@ export default function CricketActionVisualizer({
     setInternalPresetKey(propFieldPresetKey);
     triggerTacticalRecalculation(propFieldPresetKey || undefined);
   }, [propFieldPresetKey, internalPresetKey, triggerTacticalRecalculation]);
+
+  // ─── AUTOMATIC AI FIELD SELECTION & TACTICAL RECALCULATION ───
+  // When activePresetKey is null (AI Auto-Pilot mode), automatically re-evaluate
+  // the field configuration whenever:
+  // 1. Striker changes (handedness flips, or batter's historical scoring memory zones differ)
+  // 2. Bowler changes (pace vs spin, right-arm vs left-arm)
+  // 3. Match phase boundary is reached (e.g. over 6 or 15 in T20, 10 or 40 in ODI)
+  // 4. A wicket falls (tail-ender bouncer trap or collapse pressure)
+  const prevAutoStrikerIdRef = useRef<string | null>(striker?.id || null);
+  const prevAutoBowlerIdRef = useRef<string | null>(bowler?.id || null);
+  const prevAutoWicketsRef = useRef<number>(score?.wickets || 0);
+  const prevAutoPhaseOverRef = useRef<number>(score?.overs || 0);
+
+  useEffect(() => {
+    if (activePresetKey) return; // Respect explicit user manual lock
+
+    const strikerChanged = Boolean(striker?.id && striker.id !== prevAutoStrikerIdRef.current);
+    const bowlerChanged = Boolean(bowler?.id && bowler.id !== prevAutoBowlerIdRef.current);
+    const currentWickets = score?.wickets || 0;
+    const wicketFell = currentWickets !== prevAutoWicketsRef.current;
+
+    const currentOver = score?.overs || 0;
+    const isPhaseBoundary =
+      (selectedFormat === 'T20' && (currentOver === 6 || currentOver === 15)) ||
+      (selectedFormat === 'ODI' && (currentOver === 10 || currentOver === 40)) ||
+      (selectedFormat === 'TEST' && currentOver === 16);
+    const phaseChanged = isPhaseBoundary && currentOver !== prevAutoPhaseOverRef.current;
+
+    prevAutoStrikerIdRef.current = striker?.id || null;
+    prevAutoBowlerIdRef.current = bowler?.id || null;
+    prevAutoWicketsRef.current = currentWickets;
+    prevAutoPhaseOverRef.current = currentOver;
+
+    if (strikerChanged || bowlerChanged || wicketFell || phaseChanged) {
+      triggerTacticalRecalculation();
+    }
+  }, [striker?.id, bowler?.id, score?.wickets, score?.overs, activePresetKey, selectedFormat, triggerTacticalRecalculation]);
 
   // Report the initial (possibly restored) formation once on mount so the parent
   // and the persisted live-match state always know the active field + intent even
@@ -1171,7 +1211,19 @@ export default function CricketActionVisualizer({
               </button>
             )}
 
-            {/* Tactical Presets Dropdown — AI-owned, hidden from the user */}
+            {/* Field Setup Dashboard Modal Trigger */}
+            <button
+              type="button"
+              onClick={() => setShowFieldSetupModal(true)}
+              title="Open Complete 2D Ground & Formation Library (45+ Placements)"
+              className="px-2 py-1 sm:px-2.5 sm:py-1.5 rounded-xl text-[9px] sm:text-xs font-black backdrop-blur-md shadow-lg border border-white/15 bg-slate-950/90 text-cyan-300 hover:text-white hover:bg-slate-900 flex items-center gap-1 transition-all"
+            >
+              <Cpu className="w-2.5 h-2.5 sm:w-3 sm:h-3 text-violet-400" />
+              <span className="hidden sm:inline">Field Setup</span>
+              <span className="sm:hidden">Setup</span>
+            </button>
+
+            {/* Tactical Presets Dropdown */}
             {manualControlsEnabled && (
               <select
                 value={activePresetKey || ''}
@@ -1180,10 +1232,10 @@ export default function CricketActionVisualizer({
                   setActivePresetKey(val || null);
                   triggerTacticalRecalculation(val || undefined);
                 }}
-                className="bg-slate-950/90 backdrop-blur-md text-slate-200 text-[9px] sm:text-xs font-bold px-1.5 sm:px-2.5 py-1 sm:py-1.5 rounded-xl border border-white/15 focus:outline-none focus:border-cyan-400 shadow-lg cursor-pointer max-w-[85px] sm:max-w-none truncate"
+                className="bg-slate-950/90 backdrop-blur-md text-slate-200 text-[9px] sm:text-xs font-bold px-1.5 sm:px-2.5 py-1 sm:py-1.5 rounded-xl border border-white/15 focus:outline-none focus:border-cyan-400 shadow-lg cursor-pointer max-w-[95px] sm:max-w-none truncate"
                 title="Select Field Preset"
               >
-                <option value="">Default Preset</option>
+                <option value="">🤖 AI Auto-Select</option>
                 {Object.entries(BowlerFieldStrategyEngine.PRESET_OVERLAYS).map(([pKey, pDef]) => (
                   <option key={pKey} value={pKey}>
                     {pDef.name.split('(')[0].trim()}
@@ -2033,10 +2085,10 @@ export default function CricketActionVisualizer({
                 setActivePresetKey(null);
                 triggerTacticalRecalculation();
               }}
-              className="flex-1 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 border border-white/10 text-white text-[11px] font-bold flex items-center justify-center gap-1.5 transition-colors"
+              className="flex-1 py-2 rounded-xl bg-violet-950/40 hover:bg-violet-900/60 border border-violet-500/30 text-violet-200 text-[11px] font-bold flex items-center justify-center gap-1.5 transition-colors"
             >
-              <RefreshCw className="w-3.5 h-3.5 text-cyan-400" />
-              Auto Field
+              <Cpu className="w-3.5 h-3.5 text-violet-400" />
+              AI Auto-Select
             </button>
             <button
               onClick={() => {
@@ -2109,45 +2161,90 @@ export default function CricketActionVisualizer({
 
         <div className="p-3 sm:p-4">
           {activeBottomTab === 'FIELD_MAP' && (
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
-              <div className="bg-white/[0.03] p-3 rounded-xl border border-white/5">
-                <span className="text-[10px] font-bold text-slate-400 block uppercase">30-Yard Ring Split</span>
-                <span className="text-base font-black text-cyan-400">
-                  {11 - fieldConfig.actualOutsideCircle - 2} Inside / {fieldConfig.actualOutsideCircle} Outside
-                </span>
-                <span className="text-[9px] text-slate-500 block mt-0.5">
-                  Max allowed deep: {fieldConfig.maxOutsideCircle}
-                </span>
-              </div>
-              <div className="bg-white/[0.03] p-3 rounded-xl border border-white/5">
-                <span className="text-[10px] font-bold text-slate-400 block uppercase">Side Balance</span>
-                <span className={cn(
-                  "text-base font-black",
-                  fieldConfig.legSideCount > (fieldConfig.legSideLimit ?? 5) ? "text-red-400" : "text-white"
-                )}>
-                  {fieldConfig.offSideCount} Off / {fieldConfig.legSideCount} Leg
-                </span>
-                <span className="text-[9px] text-slate-500 block mt-0.5">
-                  Max leg side: {fieldConfig.legSideLimit ?? 5} (Law 28.3)
-                </span>
-              </div>
-              <div className="bg-white/[0.03] p-3 rounded-xl border border-white/5">
-                <div className="flex items-center justify-between">
-                  <span className="text-[10px] font-bold text-slate-400 uppercase">Format Restrictions</span>
-                  <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-cyan-500/15 text-cyan-300 border border-cyan-500/30">{selectedFormat}</span>
+            <div className="space-y-3">
+              {/* AI Autonomous Field Selection Banner */}
+              <div className="bg-gradient-to-r from-violet-950/40 to-blue-950/30 p-2.5 rounded-xl border border-violet-500/25 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <div className="w-7 h-7 rounded-lg bg-violet-600/30 border border-violet-500/40 flex items-center justify-center shrink-0">
+                    <Cpu className="w-4 h-4 text-violet-400" />
+                  </div>
+                  <div className="truncate">
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[9px] font-black uppercase tracking-wider text-violet-300">
+                        {activePresetKey ? 'Manual Preset Locked' : 'AI Autonomous Field Selection'}
+                      </span>
+                      {!activePresetKey && (
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                      )}
+                    </div>
+                    <span className="text-xs font-black text-white truncate block">
+                      {fieldConfig.name} <span className="text-slate-400 font-normal text-[11px]">— {fieldConfig.tacticalIntent}</span>
+                    </span>
+                  </div>
                 </div>
-                <span className={cn("text-xs font-black", fieldConfig.isCompliant ? "text-emerald-400" : "text-red-400")}>
-                  {fieldConfig.isCompliant ? 'Fully Compliant' : 'Illegal Formation'}
-                </span>
-                <span className="text-[9px] text-slate-500 block mt-0.5">{fieldConfig.phase}</span>
-                <span className="text-[9px] text-slate-500 block">
-                  {fieldConfig.changedFielders.length} moved{fieldConfig.movementLimited ? ' (budget capped)' : ''}
-                </span>
+                <div className="flex items-center gap-2 shrink-0 self-end sm:self-center">
+                  {activePresetKey && (
+                    <button
+                      onClick={() => {
+                        setActivePresetKey(null);
+                        triggerTacticalRecalculation();
+                      }}
+                      className="px-2.5 py-1 rounded-lg bg-violet-600/30 hover:bg-violet-600/50 text-violet-200 text-[10px] font-bold border border-violet-500/40 flex items-center gap-1 transition-colors"
+                    >
+                      <Cpu className="w-2.5 h-2.5" />
+                      Reset to AI
+                    </button>
+                  )}
+                  <button
+                    onClick={() => setShowFieldSetupModal(true)}
+                    className="px-3 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-white text-[10px] font-bold border border-white/10 flex items-center gap-1 transition-colors"
+                  >
+                    View 45+ Presets
+                    <ChevronRight className="w-3 h-3 text-slate-400" />
+                  </button>
+                </div>
               </div>
-              <div className="bg-white/[0.03] p-3 rounded-xl border border-white/5">
-                <span className="text-[10px] font-bold text-slate-400 block uppercase">Interactive Tweak</span>
-                <span className="text-xs font-black text-purple-400">Drag & Drop Active</span>
-                <span className="text-[9px] text-slate-500 block mt-0.5">Max 2 fielders move per update</span>
+
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+                <div className="bg-white/[0.03] p-3 rounded-xl border border-white/5">
+                  <span className="text-[10px] font-bold text-slate-400 block uppercase">30-Yard Ring Split</span>
+                  <span className="text-base font-black text-cyan-400">
+                    {11 - fieldConfig.actualOutsideCircle - 2} Inside / {fieldConfig.actualOutsideCircle} Outside
+                  </span>
+                  <span className="text-[9px] text-slate-500 block mt-0.5">
+                    Max allowed deep: {fieldConfig.maxOutsideCircle}
+                  </span>
+                </div>
+                <div className="bg-white/[0.03] p-3 rounded-xl border border-white/5">
+                  <span className="text-[10px] font-bold text-slate-400 block uppercase">Side Balance</span>
+                  <span className={cn(
+                    "text-base font-black",
+                    fieldConfig.legSideCount > (fieldConfig.legSideLimit ?? 5) ? "text-red-400" : "text-white"
+                  )}>
+                    {fieldConfig.offSideCount} Off / {fieldConfig.legSideCount} Leg
+                  </span>
+                  <span className="text-[9px] text-slate-500 block mt-0.5">
+                    Max leg side: {fieldConfig.legSideLimit ?? 5} (Law 28.3)
+                  </span>
+                </div>
+                <div className="bg-white/[0.03] p-3 rounded-xl border border-white/5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-bold text-slate-400 uppercase">Format Restrictions</span>
+                    <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-cyan-500/15 text-cyan-300 border border-cyan-500/30">{selectedFormat}</span>
+                  </div>
+                  <span className={cn("text-xs font-black", fieldConfig.isCompliant ? "text-emerald-400" : "text-red-400")}>
+                    {fieldConfig.isCompliant ? 'Fully Compliant' : 'Illegal Formation'}
+                  </span>
+                  <span className="text-[9px] text-slate-500 block mt-0.5">{fieldConfig.phase}</span>
+                  <span className="text-[9px] text-slate-500 block">
+                    {fieldConfig.changedFielders.length} moved{fieldConfig.movementLimited ? ' (budget capped)' : ''}
+                  </span>
+                </div>
+                <div className="bg-white/[0.03] p-3 rounded-xl border border-white/5">
+                  <span className="text-[10px] font-bold text-slate-400 block uppercase">Interactive Tweak</span>
+                  <span className="text-xs font-black text-purple-400">Drag & Drop Active</span>
+                  <span className="text-[9px] text-slate-500 block mt-0.5">Max 2 fielders move per update</span>
+                </div>
               </div>
             </div>
           )}
@@ -2557,6 +2654,49 @@ export default function CricketActionVisualizer({
               </div>
             </div>
           )}
+        </div>
+      )}
+
+      {/* Complete 2D Ground & Formation Library (45+ Placements) Modal */}
+      {showFieldSetupModal && (
+        <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex flex-col">
+          <div className="shrink-0 flex items-center justify-between px-4 py-2.5 bg-slate-900 border-b border-white/10">
+            <div className="flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-violet-400 animate-pulse" />
+              <span className="text-xs font-black uppercase tracking-wider text-slate-200">
+                Interactive 2D Field Setup & Tactical Library
+              </span>
+            </div>
+            <button
+              onClick={() => setShowFieldSetupModal(false)}
+              className="px-3 py-1 bg-white/10 hover:bg-white/20 text-white rounded-lg text-xs font-bold transition-colors"
+            >
+              ✕ Close
+            </button>
+          </div>
+          <div className="flex-1 overflow-y-auto">
+            <FieldSetupDashboard
+              currentFormat={selectedFormat}
+              currentOver={score?.overs || 0}
+              currentBall={score?.balls || 0}
+              teamA={bowler?.name || 'Bowling Team'}
+              teamB={striker?.name || 'Batting Team'}
+              fieldSettled={!isFieldChanging}
+              liveContext={{
+                isSpinner: BowlerFieldStrategyEngine.isSpinBowler(bowler),
+                isLeftHander,
+                wickets: score?.wickets || 0,
+                batterId: striker?.id,
+                bowlerName: bowler?.name,
+                batterName: striker?.name,
+              }}
+              onFormationSelect={(presetKey) => {
+                setActivePresetKey(presetKey);
+                triggerTacticalRecalculation(presetKey);
+                setShowFieldSetupModal(false);
+              }}
+            />
+          </div>
         </div>
       )}
     </div>

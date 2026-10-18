@@ -23,9 +23,28 @@ export default function ArenaHub() {
     setGameState,
     franchises,
     selectedFranchiseId,
+    liveMatchState,
   } = useGameStore();
 
   const team = franchises.find(f => f.id === selectedFranchiseId);
+
+  // Derive live context from persisted match state for FieldSetupDashboard
+  const liveCtx = React.useMemo(() => {
+    const ls = liveMatchState ?? {};
+    return {
+      isSpinner:        ls.currentBowlerIsSpin    ?? false,
+      isLeftHander:     ls.strikerIsLeftHand       ?? false,
+      wickets:          ls.wickets                  ?? 0,
+      partnershipRuns:  ls.partnershipRuns          ?? 0,
+      batterId:         ls.strikerId                ?? undefined,
+      batterStyle:      ls.strikerStyle              ?? undefined,
+      highRequiredRate: ls.requiredRate && ls.currentRunRate
+                          ? ls.requiredRate > ls.currentRunRate + 2
+                          : false,
+      bowlerName:       ls.currentBowlerName        ?? undefined,
+      batterName:       ls.strikerName              ?? undefined,
+    };
+  }, [liveMatchState]);
   const isIPL = selectedFormat === 'IPL';
   const isTest = selectedFormat === 'TEST';
 
@@ -107,7 +126,11 @@ export default function ArenaHub() {
           <FieldSetupDashboard
             currentFormat={selectedFormat as 'T20' | 'ODI' | 'TEST' | 'IPL'}
             teamA={team?.shortName ?? team?.name ?? 'Team A'}
-            teamB="Opponent"
+            teamB={String((liveMatchState as any)?.opposingTeamName ?? 'Opponent')}
+            currentOver={Number((liveMatchState as any)?.overs ?? 0)}
+            currentBall={Number((liveMatchState as any)?.balls ?? 0)}
+            fieldSettled={Boolean((liveMatchState as any)?.fieldSettled)}
+            liveContext={liveCtx}
           />
         );
       default:
