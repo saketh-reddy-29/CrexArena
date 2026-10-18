@@ -38,6 +38,7 @@ import { MatchStatus, PitchType, WeatherCondition, type InningsData, type Player
 import { getIntlTeamLogoUrl } from '../data/crexIntlTeams';
 import CricketActionVisualizer, { AnimationSpeed } from './CricketActionVisualizer';
 import PlayerSelectionDrawer from './PlayerSelectionDrawer';
+import FieldSetupDashboard from './FieldSetupDashboard';
 import { ArenaFormat } from '../engine/models/ArenaState';
 import { DeliveryLifecycle, DeliveryResult } from '../types/delivery';
 import { DeliveryResultFactory } from '../engine/core/DeliveryResultFactory';
@@ -90,7 +91,7 @@ function resolveTeamLogo(team?: { shortName: string; logo?: string } | null): st
   return getIntlTeamLogoUrl(team.shortName) || IPL_TEAM_LOGOS[team.shortName] || team.logo || '';
 }
 
-type Tab = 'Live' | 'Scorecard' | 'Commentary' | 'Tactics' | 'Stats';
+type Tab = 'Live' | 'Scorecard' | 'Commentary' | 'Tactics' | 'Field Setup' | 'Stats';
 
 type TacticalMenuKey = 'BATTING' | 'BOWLING' | 'FIELD';
 
@@ -2050,7 +2051,7 @@ export default function LiveMatchCenter() {
       ═══════════════════════════════════════════════════════════════════════ */}
       <nav className="bg-white border-b border-slate-200 shadow-xs px-3 sm:px-6 sticky top-[57px] z-30">
         <div className="mx-auto max-w-7xl flex items-center gap-1 sm:gap-2 overflow-x-auto no-scrollbar">
-          {(['Live', 'Scorecard', 'Commentary', 'Tactics', 'Stats'] as Tab[]).map((tab) => (
+          {(['Live', 'Scorecard', 'Commentary', 'Tactics', 'Field Setup', 'Stats'] as Tab[]).map((tab) => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
@@ -2061,7 +2062,7 @@ export default function LiveMatchCenter() {
                   : "border-transparent text-slate-600 hover:text-slate-900"
               )}
             >
-              {tab === 'Live' ? '🔴 Live Match' : tab}
+              {tab === 'Live' ? '🔴 Live Match' : tab === 'Field Setup' ? '🏏 Field Setup' : tab}
             </button>
           ))}
         </div>
@@ -2078,12 +2079,20 @@ export default function LiveMatchCenter() {
           {/* ── LEFT COLUMN: 2D FIELD VISUALIZATION (~2/3) ── */}
           <div className="lg:col-span-8 space-y-3">
             <div className="bg-white rounded-2xl border border-slate-200/90 shadow-sm overflow-hidden">
-              <div className="px-4 py-2.5 bg-slate-50 border-b border-slate-200 flex items-center justify-between gap-2">
+              <div className="px-4 py-2 bg-slate-50 border-b border-slate-200 flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2">
                   <span className="text-xs font-black text-slate-800 uppercase tracking-wide">Live 2D Field</span>
                   <span className="text-[10px] text-slate-400 font-semibold">(Interactive)</span>
                 </div>
-                <span className="text-[10px] text-slate-500 font-medium hidden sm:inline">Toggle “Edit Field” on the map to drag fielders</span>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('Field Setup')}
+                    className="px-2.5 py-1 rounded-xl bg-violet-600 hover:bg-violet-700 text-white text-[11px] font-black uppercase flex items-center gap-1.5 shadow-sm transition-all"
+                  >
+                    <span>🏏 Field Setup (45+ Formations)</span>
+                  </button>
+                </div>
               </div>
 
               <div className="p-1 bg-[#060913] rounded-b-2xl overflow-hidden">
@@ -2702,6 +2711,34 @@ export default function LiveMatchCenter() {
             </div>
           </div>
         </div>
+
+        {/* ─────────────────────────────────────────────────────────────────
+            TAB: FIELD SETUP — 2D GROUND FORMATION LIBRARY (45+ PRESETS)
+        ───────────────────────────────────────────────────────────────── */}
+        <div className={cn('space-y-4', activeTab !== 'Field Setup' && 'hidden')}>
+          <FieldSetupDashboard
+            currentFormat={(selectedFormat as any) || 'T20'}
+            currentOver={Math.floor((inning?.balls || 0) / 6)}
+            currentBall={(inning?.balls || 0) % 6}
+            teamA={bowlingTeam.name}
+            teamB={battingTeam.name}
+            fieldSettled={true}
+            liveContext={{
+              isSpinner: currentBowler ? Boolean(currentBowler.bowlingStyle?.toLowerCase().includes('spin') || currentBowler.bowlingStyle?.toLowerCase().includes('break')) : false,
+              isLeftHander: striker?.battingHand === 'Left',
+              wickets: inning?.wickets || 0,
+              partnershipRuns: inning?.partnershipRuns,
+              batterId: striker?.id,
+              bowlerName: currentBowler?.name,
+              batterName: striker?.name,
+            }}
+            onFormationSelect={(key) => {
+              setFieldPresetKey(key);
+              setActiveTab('Live');
+            }}
+          />
+        </div>
+
         {/* ─────────────────────────────────────────────────────────────────
             TAB 5: STATS — MATCH ANALYTICS + LEAGUE STANDINGS
         ───────────────────────────────────────────────────────────────── */}

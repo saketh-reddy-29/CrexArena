@@ -127,14 +127,14 @@ export const CANONICAL_POSITIONS: Record<string, FieldPositionDef> = {
   // Wicketkeeper (Constant anchor behind striker)
   WICKETKEEPER: { key: 'WICKETKEEPER', name: 'Wicketkeeper', x: 300, y: 460, category: 'CATCHING', ringDistance: 'CLOSE', isOutsideCircle: false, tacticalRole: 'Primary Catcher / Stumps Guard' },
 
-  // Slip Cordon (Off-side Catchers behind square)
-  FIRST_SLIP: { key: 'FIRST_SLIP', name: '1st Slip', x: 265, y: 472, category: 'CATCHING', ringDistance: 'CLOSE', isOutsideCircle: false, tacticalRole: 'Edge Catcher' },
-  SECOND_SLIP: { key: 'SECOND_SLIP', name: '2nd Slip', x: 240, y: 486, category: 'CATCHING', ringDistance: 'CLOSE', isOutsideCircle: false, tacticalRole: 'Edge Catcher' },
-  THIRD_SLIP: { key: 'THIRD_SLIP', name: '3rd Slip', x: 215, y: 500, category: 'CATCHING', ringDistance: 'CLOSE', isOutsideCircle: false, tacticalRole: 'Attacking Edge Trap' },
-  FOURTH_SLIP: { key: 'FOURTH_SLIP', name: '4th Slip', x: 190, y: 514, category: 'CATCHING', ringDistance: 'CLOSE', isOutsideCircle: false, tacticalRole: 'Deep Cordon Catcher' },
-  GULLY: { key: 'GULLY', name: 'Gully', x: 190, y: 450, category: 'CATCHING', ringDistance: 'CLOSE', isOutsideCircle: false, tacticalRole: 'Squarer Edge Intercept' },
-  FLY_SLIP: { key: 'FLY_SLIP', name: 'Fly Slip', x: 220, y: 525, category: 'CATCHING', ringDistance: 'OUTER', isOutsideCircle: true, tacticalRole: 'Upper Cut / Ramp Trap' },
-  LEG_SLIP: { key: 'LEG_SLIP', name: 'Leg Slip', x: 345, y: 470, category: 'CATCHING', ringDistance: 'CLOSE', isOutsideCircle: false, tacticalRole: 'Glance / Turn Catcher' },
+  // Slip Cordon (Off-side Catchers behind square with natural, non-overlapping spacing)
+  FIRST_SLIP: { key: 'FIRST_SLIP', name: '1st Slip', x: 255, y: 476, category: 'CATCHING', ringDistance: 'CLOSE', isOutsideCircle: false, tacticalRole: 'Edge Catcher' },
+  SECOND_SLIP: { key: 'SECOND_SLIP', name: '2nd Slip', x: 224, y: 494, category: 'CATCHING', ringDistance: 'CLOSE', isOutsideCircle: false, tacticalRole: 'Edge Catcher' },
+  THIRD_SLIP: { key: 'THIRD_SLIP', name: '3rd Slip', x: 194, y: 512, category: 'CATCHING', ringDistance: 'CLOSE', isOutsideCircle: false, tacticalRole: 'Attacking Edge Trap' },
+  FOURTH_SLIP: { key: 'FOURTH_SLIP', name: '4th Slip', x: 165, y: 530, category: 'CATCHING', ringDistance: 'CLOSE', isOutsideCircle: false, tacticalRole: 'Deep Cordon Catcher' },
+  GULLY: { key: 'GULLY', name: 'Gully', x: 175, y: 440, category: 'CATCHING', ringDistance: 'CLOSE', isOutsideCircle: false, tacticalRole: 'Squarer Edge Intercept' },
+  FLY_SLIP: { key: 'FLY_SLIP', name: 'Fly Slip', x: 220, y: 530, category: 'CATCHING', ringDistance: 'OUTER', isOutsideCircle: true, tacticalRole: 'Upper Cut / Ramp Trap' },
+  LEG_SLIP: { key: 'LEG_SLIP', name: 'Leg Slip', x: 345, y: 474, category: 'CATCHING', ringDistance: 'CLOSE', isOutsideCircle: false, tacticalRole: 'Glance / Turn Catcher' },
 
   // Close Infield Helmet Catchers
   SILLY_POINT: { key: 'SILLY_POINT', name: 'Silly Point', x: 245, y: 390, category: 'CATCHING', ringDistance: 'CLOSE', isOutsideCircle: false, tacticalRole: 'Bat-Pad Off Trap' },

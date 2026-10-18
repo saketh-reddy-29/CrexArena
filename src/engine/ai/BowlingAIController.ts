@@ -143,11 +143,17 @@ export function chooseLegalFieldPresetKey(
     return mapped;
   }
 
-  const ranked = validKeys
+  const fmt = String(format).toUpperCase();
+  const formatPrefix = fmt === 'TEST' ? 'TEST_' : fmt === 'ODI' ? 'ODI_' : 'T20_';
+  const formatMatchingKeys = validKeys.filter(k => k.startsWith(formatPrefix) || k === 'BALANCED_RING');
+  const candidates = formatMatchingKeys.length > 0 ? formatMatchingKeys : validKeys;
+
+  const ranked = candidates
     .filter((k) => presetOutsideCount(k) <= max)
     .sort((a, b) => presetOutsideCount(b) - presetOutsideCount(a));
 
-  return ranked[0] ?? 'ATTACKING_SLIP_CORDON';
+  const fallback = fmt === 'TEST' ? 'TEST_NEW_BALL_PACE' : fmt === 'ODI' ? 'ODI_PP_PACE' : 'T20_PP_PACE';
+  return ranked[0] ?? fallback;
 }
 
 /**
@@ -342,7 +348,35 @@ export function decideBowlingChange(input: BowlingAIInput): BowlingAIDecision {
     trigger: input.trigger,
     bowlerIsSpin: bowler ? isSpinBowler(bowler) : undefined,
   });
-  let presetKey = chooseLegalFieldPresetKey(setupDecision.presetKey, input.format, input.over, input.totalOvers);
+
+  // Map generic captain setups to realistic format-specific presets:
+  let captainPresetKey = setupDecision.presetKey;
+  const fmt = String(input.format).toUpperCase();
+  if (fmt === 'T20' || fmt === 'IPL') {
+    if (captainPresetKey === 'ATTACKING_SLIP_CORDON') {
+      const isSpinner = bowler ? isSpinBowler(bowler) : false;
+      const isLeftHander = input.striker?.battingHand === 'Left';
+      captainPresetKey = setupDecision.phase === 'POWERPLAY'
+        ? (isSpinner ? (isLeftHander ? 'T20_PP_SPIN_LEFT' : 'T20_PP_SPIN_RIGHT') : (input.over <= 2 ? 'T20_PP_LEFT_ARM_PACE' : 'T20_PP_PACE'))
+        : (isSpinner ? 'T20_MID_SPIN_ATTACK' : 'T20_MID_PACE_ATTACK');
+    } else if (captainPresetKey === 'DEATH_YORKER_SHIELD') {
+      captainPresetKey = 'T20_DEATH_YORKER';
+    }
+  } else if (fmt === 'ODI') {
+    if (captainPresetKey === 'ATTACKING_SLIP_CORDON') {
+      const isSpinner = bowler ? isSpinBowler(bowler) : false;
+      captainPresetKey = setupDecision.phase === 'POWERPLAY'
+        ? (isSpinner ? 'ODI_PP_SPIN' : 'ODI_PP_PACE')
+        : (isSpinner ? 'ODI_MID_SPIN_ATTACK' : 'ODI_MID_PACE_BALANCED');
+    } else if (captainPresetKey === 'DEATH_YORKER_SHIELD') {
+      captainPresetKey = 'ODI_DEATH_YORKER';
+    }
+  } else if (fmt === 'TEST') {
+    if (captainPresetKey === 'ATTACKING_SLIP_CORDON') {
+      captainPresetKey = 'TEST_NEW_BALL_PACE';
+    }
+  }
+  let presetKey = chooseLegalFieldPresetKey(captainPresetKey, input.format, input.over, input.totalOvers);
 
   // Boundary-prevention refinement (Section 12-A): when the batter has just
   // hurt us or a new batter is in, look at *their* scoring zones and move the

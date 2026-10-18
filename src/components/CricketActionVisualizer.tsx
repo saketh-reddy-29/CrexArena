@@ -1188,6 +1188,18 @@ export default function CricketActionVisualizer({
                 Labels
               </button>
             </div>
+
+            {/* Field Setup Dashboard Modal Trigger on Ground */}
+            <button
+              type="button"
+              onClick={() => setShowFieldSetupModal(true)}
+              className="bg-slate-950/85 hover:bg-slate-900 backdrop-blur-md px-2.5 py-1 sm:px-3 sm:py-1.5 rounded-xl border border-violet-500/30 shadow-lg text-[9px] sm:text-[10px] font-black text-violet-300 hover:text-white flex items-center gap-1 transition-all"
+              title="Open Complete 2D Ground & Formation Library (45+ Placements)"
+            >
+              <Cpu className="w-3 h-3 text-violet-400" />
+              <span className="hidden sm:inline">Field Setup</span>
+              <span className="sm:hidden">Field</span>
+            </button>
           </div>
 
           {/* Field Strategy Preset & Field Status Badge */}
@@ -1567,31 +1579,62 @@ export default function CricketActionVisualizer({
                     {initials}
                   </text>
 
-                  {/* Position Label Pill */}
-                  {(effectiveDisplayMode === 'LABELS' || isSelected) && (
-                    <g transform={`translate(0, ${posY > 470 ? -15 : 15})`}>
-                      <rect
-                        x="-26"
-                        y="-7.5"
-                        width="52"
-                        height="14"
-                        rx="4"
-                        fill="#0B132B"
-                        stroke={isSelected ? "#F59E0B" : roleColor}
-                        strokeWidth={isSelected ? "1.2" : "0.8"}
-                        opacity="0.94"
-                      />
-                      <text
-                        textAnchor="middle"
-                        y="2.8"
-                        fill="#F8FAFC"
-                        fontSize="6.8"
-                        fontWeight="800"
-                      >
-                        {fielder.role.length > 11 ? fielder.role.substring(0, 10) + '…' : fielder.role}
-                      </text>
-                    </g>
-                  )}
+                  {/* Position Label Pill with Smart Collision Avoidance */}
+                  {(effectiveDisplayMode === 'LABELS' || isSelected) && (() => {
+                    let labelOffsetX = 0;
+                    let labelOffsetY = posY > 480 ? -14 : 14;
+
+                    if (fielder.positionKey === 'WICKETKEEPER') {
+                      labelOffsetX = 0;
+                      labelOffsetY = 16;
+                    } else if (fielder.positionKey === 'FIRST_SLIP') {
+                      labelOffsetX = isLeftHander ? 14 : -14;
+                      labelOffsetY = 15;
+                    } else if (fielder.positionKey === 'SECOND_SLIP') {
+                      labelOffsetX = isLeftHander ? 18 : -18;
+                      labelOffsetY = -15;
+                    } else if (fielder.positionKey === 'THIRD_SLIP') {
+                      labelOffsetX = isLeftHander ? 20 : -20;
+                      labelOffsetY = 15;
+                    } else if (fielder.positionKey === 'FOURTH_SLIP') {
+                      labelOffsetX = isLeftHander ? 22 : -22;
+                      labelOffsetY = -15;
+                    } else if (fielder.positionKey === 'GULLY') {
+                      labelOffsetX = isLeftHander ? 18 : -18;
+                      labelOffsetY = -15;
+                    } else if (fielder.positionKey === 'LEG_SLIP') {
+                      labelOffsetX = isLeftHander ? -16 : 16;
+                      labelOffsetY = 15;
+                    }
+
+                    const labelText = fielder.role.length > 11 ? fielder.role.substring(0, 10) + '…' : fielder.role;
+                    const pillWidth = Math.max(34, Math.min(50, labelText.length * 5.2 + 8));
+
+                    return (
+                      <g transform={`translate(${labelOffsetX}, ${labelOffsetY})`}>
+                        <rect
+                          x={-pillWidth / 2}
+                          y="-7"
+                          width={pillWidth}
+                          height="13"
+                          rx="3.5"
+                          fill="#0B132B"
+                          stroke={isSelected ? "#F59E0B" : roleColor}
+                          strokeWidth={isSelected ? "1.2" : "0.8"}
+                          opacity="0.94"
+                        />
+                        <text
+                          textAnchor="middle"
+                          y="2.5"
+                          fill="#F8FAFC"
+                          fontSize="6.5"
+                          fontWeight="800"
+                        >
+                          {labelText}
+                        </text>
+                      </g>
+                    );
+                  })()}
                 </g>
               );
             })}
