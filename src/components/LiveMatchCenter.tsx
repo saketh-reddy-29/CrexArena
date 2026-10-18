@@ -66,6 +66,8 @@ import {
   teamAggregate,
   type TestInningsSummary,
 } from '../engine/formats/test/testMatchFlow';
+import { matchConditionsForDay, summarizeConditionsForLive, describeWeather } from '../engine/conditions';
+import type { MatchConditionsModel, MatchFormatKey } from '../engine/conditions';
 import { cn } from '../lib/utils';
 
 const IPL_TEAM_LOGOS: Record<string, string> = {
@@ -405,7 +407,7 @@ function emptyInnings(battingTeamId: string, bowlingTeamId: string): InningsStat
 }
 
 export default function LiveMatchCenter() {
-  const { currentMatchId, fixtures, franchises, players, selectedFranchiseId, selectedSquadIds, playingXIIds, setSelectedSquadIds, setPlayingXIIds, currentMatchToss, standings, setGameState, updateMatchResult, liveMatchState, saveLiveMatchState, selectedFormat, playerFatigue } = useGameStore();
+  const { currentMatchId, fixtures, franchises, players, selectedFranchiseId, selectedSquadIds, playingXIIds, setSelectedSquadIds, setPlayingXIIds, currentMatchToss, standings, setGameState, updateMatchResult, liveMatchState, saveLiveMatchState, selectedFormat, playerFatigue, ensureMatchConditions } = useGameStore();
   const [activeTab, setActiveTab] = useState<Tab>('Live');
   const [autoPlay, setAutoPlay] = useState(true);
   
@@ -593,6 +595,24 @@ export default function LiveMatchCenter() {
 
   const totalTestBalls = useMemo(() => innings.reduce((sum, inn) => sum + inn.balls, 0), [innings]);
   const testDaySession = useMemo(() => getTestDaySession(totalTestBalls, testRules), [totalTestBalls, testRules]);
+
+  // Persisted per-fixture conditions. Reused for the whole match so a refresh
+  // or resume never changes the pitch/weather. Test deterioration advances
+  // with the day but never re-rolls the underlying surface.
+  const currentFixture = useMemo(
+    () => fixtures.find(f => f.id === currentMatchId) || null,
+    [fixtures, currentMatchId],
+  );
+  const conditionsReport = currentFixture?.conditionReport ?? null;
+  const conditionsModel: MatchConditionsModel | null = useMemo(() => {
+    if (!conditionsReport) return null;
+    if (isTest && testDaySession.day > 1) return matchConditionsForDay(conditionsReport, testDaySession.day);
+    return conditionsReport.model;
+  }, [conditionsReport, isTest, testDaySession.day]);
+  const weatherTextShort = useMemo(() => {
+    if (!conditionsReport) return null;
+    return describeWeather(conditionsReport.weather, (selectedFormat || 'T20') as MatchFormatKey).headline;
+  }, [conditionsReport, selectedFormat]);
   const testDayLimitReached = isTest && isDayLimitReached(totalTestBalls, testRules);
   const testResultDecision = useMemo(
     () => (isTest ? determineTestResult(testSummaries, team1.id, team2.id) : null),
@@ -769,8 +789,11 @@ export default function LiveMatchCenter() {
     setBattingCursor(2);
     setPending('openers');
     setPendingBatterEnd('striker');
-    setPitch(MatchEngine.generatePitch());
-    setWeather(MatchEngine.generateWeather());
+    // Reuse the fixture's persisted, seeded conditions (never regenerate), so
+    // pitch and weather stay identical across refresh / watch / resume.
+    const report = currentMatchId ? ensureMatchConditions(currentMatchId) : null;
+    setPitch(report?.legacyPitchType ?? MatchEngine.generatePitch());
+    setWeather(report?.legacyWeatherCondition ?? MatchEngine.generateWeather());
     setManualBallRequests(0);
     setQueueBowlerAfterBatter(false);
     setResultSubmitted(false);
@@ -1368,6 +1391,7 @@ export default function LiveMatchCenter() {
         bowlingTeamId: bowlingTeam.id,
         drsReviewsRemaining: current.drsReviewsRemaining,
         fieldConfiguration: activeFieldConfiguration,
+        conditions: conditionsModel || undefined,
       });
 
       setCurrentDeliveryResult(deliveryRes);
@@ -1396,6 +1420,7 @@ export default function LiveMatchCenter() {
     manualBallRequests,
     pitch,
     weather,
+    conditionsModel,
     battingTeam,
     bowlingTeam,
     isBallAnimating,
@@ -1740,6 +1765,19 @@ export default function LiveMatchCenter() {
               </div>
             </div>
           </div>
+
+          {/* Compact conditions summary (persisted, per-fixture) */}
+          {conditionsModel && (
+            <div className="flex flex-wrap items-center gap-1.5 pt-2 text-[10px] font-bold text-slate-500">
+              <span className="px-2 py-0.5 rounded bg-blue-50 text-blue-700 border border-blue-200 font-black uppercase tracking-wide">
+                {conditionsReport?.pitch.surface} pitch
+              </span>
+              <span className="px-2 py-0.5 rounded bg-slate-100 text-slate-600 border border-slate-200">
+                {weatherTextShort}
+              </span>
+              <span className="text-slate-400">{summarizeConditionsForLive(conditionsModel)}</span>
+            </div>
+          )}
 
           {/* Test-match day/session strip */}
           {isTest && (

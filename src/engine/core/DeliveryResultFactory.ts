@@ -9,6 +9,7 @@ import {
   BallTrajectoryPath 
 } from '../../types/delivery';
 import type { TacticalDeliveryModel } from '../ai/AdaptiveCaptainEngine';
+import type { MatchConditionsModel } from '../conditions/types';
 import { buildDeliveryModel } from '../ai/AdaptiveCaptainEngine';
 
 export interface DeliverySimulationInput {
@@ -36,6 +37,8 @@ export interface DeliverySimulationInput {
   fieldConfiguration?: FieldConfiguration | null;
   /** Pre-resolved adaptive tactical model (field + reversible pressure). */
   tacticalModel?: TacticalDeliveryModel;
+  /** Per-fixture venue/pitch/weather conditions model (optional refinement). */
+  conditions?: MatchConditionsModel;
 }
 
 export class DeliveryResultFactory {
@@ -147,7 +150,8 @@ export class DeliveryResultFactory {
       input.battingIntent,
       input.bowlingPlan,
       input.batterInningsState,
-      tacticalModel
+      tacticalModel,
+      input.conditions
     );
 
     let isWicket = rawOutcome.isWicket && currentWickets < 10;

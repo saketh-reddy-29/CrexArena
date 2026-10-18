@@ -18,6 +18,7 @@ import { calculateEffectiveRating } from './ratingEngine';
 import { ArenaFormat } from '../stores/useGameStore';
 import { getMatchFormatConfig } from '../engine/config/MatchFormatConfig';
 import type { TacticalDeliveryModel } from '../engine/ai/AdaptiveCaptainEngine';
+import type { MatchConditionsModel } from '../engine/conditions/types';
 
 // ═══════════════════════════════════════════════════════════════════════
 //  IPL Match Engine — Real IPL Rules
@@ -247,6 +248,7 @@ export class MatchEngine {
     extraPlan?: any,
     extraContext?: any,
     tacticalModel?: TacticalDeliveryModel,
+    conditions?: MatchConditionsModel,
   ): BallOutcome {
     if (!batsman || !bowler) {
       return { runs: 0, isWicket: false, isExtra: false, batsmanId: batsman?.id || 'unknown', bowlerId: bowler?.id || 'unknown', commentary: "Match interruption: Missing player data." };
@@ -367,7 +369,25 @@ export class MatchEngine {
     if (pitchType === PitchType.BATTING) mPitch -= 0.12;
     if (weather === WeatherCondition.CLOUDY && isPace && overs < 6) mPitch += 0.10;
     if (weather === WeatherCondition.DEW && !isPowerplay) mPitch -= 0.08;
-    mPitch = this.clamp(mPitch, 0.78, 1.28);
+    // Rich per-fixture conditions (venue dimensions, outfield pace, dew, Test
+    // deterioration) layered on top of the coarse enum logic above. Every
+    // adjustment is a small, bounded refinement — never a forced outcome.
+    if (conditions) {
+      if (isPace) {
+        mPitch += conditions.seamAssist * 0.10;
+        if (overs < 8) mPitch += conditions.swingAssist * 0.08;
+        mPitch += conditions.paceBounce * 0.05;
+      }
+      if (isSpin) {
+        mPitch += conditions.spinAssist * 0.12;
+      }
+      mPitch += conditions.deterioration * (isSpin || isPace ? 0.12 : 0.05);
+      // Dew makes it harder for bowlers to grip the ball later in a day/night game.
+      if (!isPowerplay) mPitch -= conditions.dewGripPenalty * 0.12;
+      // Batting difficulty scales wicket risk modestly around the neutral 0.5.
+      mPitch *= 1 + (conditions.battingDifficulty - 0.5) * 0.12;
+    }
+    mPitch = this.clamp(mPitch, 0.72, 1.34);
 
     // Delivery quality & plan multiplier
     let mPlan = 1.0;
@@ -521,6 +541,18 @@ export class MatchEngine {
     dot -= battingControl * 8;
     four += battingControl * 6;
     six += battingControl * 4;
+
+    // Ground dimensions & outfield pace. Short boundaries and a fast outfield
+    // genuinely produce more boundaries and more runs from ground shots; this
+    // is a bounded weighting change, never a scripted total.
+    if (conditions) {
+      four = Math.max(0.5, four * conditions.boundaryFactor);
+      six = Math.max(0.2, six * conditions.boundaryFactor);
+      two = Math.max(0.5, two * conditions.outfieldFactor);
+      three = Math.max(0.1, three * conditions.outfieldFactor);
+      // A dry, gripping surface with dew later in the day suppresses big hits.
+      if (conditions.dewGripPenalty >= 0.4) six = Math.max(0.2, six * 0.92);
+    }
 
     if (isFreeHit) {
       four += 8;

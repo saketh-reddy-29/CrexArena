@@ -1,4 +1,5 @@
 import { Player } from './common';
+import type { MatchConditionReport } from '../engine/conditions/types';
 
 // ─── Enums ───────────────────────────────────────────────────────────
 
@@ -207,6 +208,8 @@ export interface Fixture {
   format?: MatchFormat;
   scorecard?: MatchScorecard;
   conditions?: MatchConditions;
+  /** Full persisted pitch/ground/weather/toss-report bundle, seeded per fixture. */
+  conditionReport?: MatchConditionReport;
   isPlayoff?: boolean;
   playoffType?: 'Qualifier 1' | 'Eliminator' | 'Qualifier 2' | 'Final';
   venue?: string;

@@ -20,6 +20,8 @@ import {
   createSeriesConfig,
   generateSeriesFixtures,
 } from '../engine/competition/seriesEngine';
+import { buildMatchConditionsReport, hashSeed } from '../engine/conditions';
+import type { MatchConditionReport, MatchFormatKey } from '../engine/conditions';
 
 // Pre-flight cleanup: if localStorage contains bloated old store payload, strip heavy keys immediately
 try {
@@ -227,6 +229,14 @@ interface GameStore {
    * both sides in the standings) and locks it against replay/resimulation.
    */
   abandonMatch: (matchId: string) => void;
+  /**
+   * Guarantees a fixture has a persisted, seeded conditions bundle
+   * (venue + pitch profile + weather profile + derived model + legacy enums).
+   * Idempotent: the same fixture always resolves to the same report, so a page
+   * refresh, a spectator skip or a watch/resume cycle reuses identical pitch,
+   * weather and toss-report data. Returns the report, or null if unknown id.
+   */
+  ensureMatchConditions: (fixtureId: string) => MatchConditionReport | null;
   autoSimulateMatch: (matchId: string) => void;
   generatePlayoffFixtures: () => void;
   setCaptain: (franchiseId: string, captainId: string) => void;
@@ -324,6 +334,9 @@ export const useGameStore = create<GameStore>()(
               : f
           ),
         });
+        // Lock in the conditions bundle before any delivery is simulated so
+        // refreshes/skips reuse the exact same pitch, weather and toss report.
+        get().ensureMatchConditions(matchId);
         return true;
       },
       abandonMatch: (matchId) => {
@@ -362,6 +375,26 @@ export const useGameStore = create<GameStore>()(
         };
 
         get().updateMatchResult(matchId, noResult);
+      },
+      ensureMatchConditions: (fixtureId) => {
+        const state = get();
+        const fixture = state.fixtures.find(f => f.id === fixtureId);
+        if (!fixture) return null;
+
+        // Already persisted → reuse (deterministic across refresh/skip/watch).
+        if (fixture.conditionReport) return fixture.conditionReport;
+
+        const seed = hashSeed(`${fixture.id}|${fixture.venue ?? ''}|${fixture.team1Id}-${fixture.team2Id}`);
+        const format = (fixture.format as MatchFormatKey) || 'T20';
+        const day = typeof fixture.day === 'number' && fixture.day > 0 ? fixture.day : 1;
+        const report = buildMatchConditionsReport(seed, format, fixture.venue, day);
+
+        set(s => ({
+          fixtures: s.fixtures.map(f =>
+            f.id === fixtureId ? { ...f, conditionReport: report } : f
+          ),
+        }));
+        return report;
       },
       saveLiveMatchState: (matchState) => set({ liveMatchState: matchState }),
       setSelectedSquadIds: (ids) => set({ selectedSquadIds: ids }),
@@ -893,7 +926,11 @@ export const useGameStore = create<GameStore>()(
         };
       }),
 
-      autoSimulateMatch: (matchId) => set((state) => {
+      autoSimulateMatch: (matchId) => {
+        // Persist conditions OUTSIDE the set() updater (no nested set) so the
+        // same seeded pitch/weather/toss-report is reused for this fixture.
+        const conditionReport = get().ensureMatchConditions(matchId);
+        set((state) => {
         const fixture = state.fixtures.find(f => f.id === matchId);
         if (!fixture) return state;
         // Never re-simulate a finished match — its result is immutable.
@@ -941,8 +978,9 @@ export const useGameStore = create<GameStore>()(
         const t2Bowlers = getBowlerOrder(state.franchises.find(f => f.id === bowlFirstId)?.squad || []);
         const t1Bowlers = getBowlerOrder(state.franchises.find(f => f.id === batFirstId)?.squad || []);
         
-        const pitch = MatchEngine.generatePitch();
-        const weather = MatchEngine.generateWeather();
+        const pitch = conditionReport?.legacyPitchType ?? MatchEngine.generatePitch();
+        const weather = conditionReport?.legacyWeatherCondition ?? MatchEngine.generateWeather();
+        const conditionsModel = conditionReport?.model;
         const maxOvers = MatchEngine.getOversPerMatch(fixture.format);
 
         const simInnings = (batSquad: string[], bowlSquad: string[], target: number) => {
@@ -997,7 +1035,7 @@ export const useGameStore = create<GameStore>()(
               p1, p2, currentOverProgress, inn.wickets, 
               reqRate, 
               pitch, weather, strikerStats, bowlerStats, [], false, 0, fixture.format,
-              undefined, undefined, undefined, tacticalModel
+              undefined, undefined, undefined, tacticalModel, conditionsModel
             );
             const isLegalDelivery = ball.extraType !== 'Wide' && ball.extraType !== 'No Ball';
             const batterRuns = ball.isExtra ? 0 : ball.runs;
@@ -1099,7 +1137,8 @@ export const useGameStore = create<GameStore>()(
 
         setTimeout(() => get().updateMatchResult(matchId, scorecard), 0);
         return state;
-      }),
+      });
+      },
 
       simulateFullAuction: () => set((state) => {
         const currentFranchises = buildOfficialFranchises(state.players, INITIAL_FRANCHISES);

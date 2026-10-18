@@ -3,12 +3,15 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useGameStore, GameState } from '../stores/useGameStore';
 import { MatchEngine } from '../lib/matchEngine';
 import { TossDecision, PitchType, WeatherCondition } from '../types/match';
-import { ArrowLeft, Users, Trophy, CheckCircle2, ChevronRight, Sparkles, Shield, AlertTriangle, Star, Activity, CloudSun, Wind } from 'lucide-react';
+import { ArrowLeft, Users, Trophy, CheckCircle2, ChevronRight, Sparkles, Shield, AlertTriangle, Star, Activity, CloudSun, Wind, MapPin, Droplets, Gauge, Lightbulb } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { getPlayerImage, handlePlayerImageError } from '../lib/playerImages';
 import { getIntlTeamLogoUrl } from '../data/crexIntlTeams';
 import { getPlayerRating } from '../lib/ratingEngine';
 import { WorkloadRotationEngine } from '../engine/ai/WorkloadRotationEngine';
+import { TossRecommendationEngine, describeGround, describePitch, describeWeather, summarizeConditionsForLive } from '../engine/conditions';
+import type { MatchFormatKey } from '../engine/conditions';
+import type { Player } from '../types/common';
 
 const IPL_TEAM_LOGOS: Record<string, string> = {
   MI:   'https://cricketvectors.akamaized.net/Teams/F.png',
@@ -43,6 +46,7 @@ export default function PreMatch() {
     setCurrentMatchToss,
     setCaptain,
     setGameState,
+    ensureMatchConditions,
   } = useGameStore();
 
   const isIPL = useGameStore((s) => s.selectedFormat === 'IPL');
@@ -70,16 +74,18 @@ export default function PreMatch() {
   const [tossResult, setTossResult] = useState<{ winnerId: string; decision: TossDecision | null } | null>(null);
   const [isFlipping, setIsFlipping] = useState(false);
 
-  // Match Conditions
-  const pitchType = useMemo<PitchType>(() => {
-    if (currentMatch?.conditions?.pitchType) return currentMatch.conditions.pitchType;
-    return MatchEngine.generatePitch();
-  }, [currentMatch]);
+  // Match Conditions — pulled from the fixture's persisted, seeded report so
+  // the same pitch/weather is shown here, live, and after any refresh.
+  useEffect(() => {
+    if (currentMatch && !currentMatch.conditionReport) {
+      ensureMatchConditions(currentMatch.id);
+    }
+  }, [currentMatch, ensureMatchConditions]);
 
-  const weather = useMemo<WeatherCondition>(() => {
-    if (currentMatch?.conditions?.weather) return currentMatch.conditions.weather;
-    return MatchEngine.generateWeather();
-  }, [currentMatch]);
+  const conditionReport = currentMatch?.conditionReport ?? null;
+  const conditions = conditionReport?.model ?? null;
+  const pitchType = conditionReport?.legacyPitchType ?? PitchType.BALANCED;
+  const weather = conditionReport?.legacyWeatherCondition ?? WeatherCondition.SUNNY;
 
   // User Squad
   const userSquad = useMemo(() => {
@@ -151,6 +157,46 @@ export default function PreMatch() {
   const bowlersCount = selectedPlayers.filter((p) => p.role === 'Bowler' || p.role === 'All-rounder').length;
   const isValidXI = selectedIds.length === 11 && keepersCount >= 1 && bowlersCount >= 5;
 
+  // ── Conditions report text + intelligent toss recommendation ──
+  const opponentPlayers = useMemo(
+    () => opponentOptimalSelection.playingXI
+      .map((id) => opponentSquad.find((p) => p.id === id))
+      .filter(Boolean) as Player[],
+    [opponentOptimalSelection, opponentSquad],
+  );
+
+  const strengthOf = (list: Player[]) => {
+    const batters = list.filter((p) => p.role === 'Batsman' || p.role === 'Wicketkeeper' || p.role === 'All-rounder');
+    const bowlers = list.filter((p) => p.role === 'Bowler' || p.role === 'All-rounder');
+    const avg = (arr: Player[], key: 'batting' | 'bowling') =>
+      arr.length ? arr.reduce((s, p) => s + (p.stats?.[key] ?? 60), 0) / arr.length : 60;
+    return { batting: avg(batters, 'batting'), bowling: avg(bowlers, 'bowling') };
+  };
+
+  const evaluateToss = (strength: { batting: number; bowling: number }) => {
+    if (!conditionReport || !conditions) return null;
+    return TossRecommendationEngine.evaluate({
+      format: format as MatchFormatKey,
+      conditions,
+      pitch: conditionReport.pitch,
+      weather: conditionReport.weather,
+      venue: conditionReport.venue,
+      teamBattingDepth: strength.batting,
+      teamBowlingStrength: strength.bowling,
+    });
+  };
+
+  const recommendation = useMemo(
+    () => evaluateToss(strengthOf(selectedPlayers)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [conditionReport, conditions, selectedPlayers, format],
+  );
+
+  const groundText = conditionReport ? describeGround(conditionReport.venue) : '';
+  const pitchText = conditionReport ? describePitch(conditionReport.pitch) : null;
+  const weatherText = conditionReport ? describeWeather(conditionReport.weather, format as MatchFormatKey) : null;
+  const conditionsSummary = conditions ? summarizeConditionsForLive(conditions) : '';
+
   const handleAutoBalance = () => {
     const auto = WorkloadRotationEngine.selectOptimalPlayingXI({
       squad: userSquad,
@@ -180,10 +226,22 @@ export default function PreMatch() {
       setIsFlipping(false);
       const isUserWinner = Math.random() > 0.5;
       const winnerId = isUserWinner ? userTeam.id : opponentTeam.id;
-      // If opponent wins toss, AI decides: on batting pitch bat, on green pitch bowl
+      // If the opponent wins the toss their AI captain reads the persisted
+      // conditions and makes its own call — mostly following the recommendation,
+      // occasionally backing its own judgement. The user always decides for
+      // themselves (see the toss panel below).
       let decision: TossDecision | null = null;
       if (!isUserWinner) {
-        decision = pitchType === PitchType.PACE || weather === WeatherCondition.CLOUDY ? TossDecision.BOWL : TossDecision.BAT;
+        const oppRec = evaluateToss(strengthOf(opponentPlayers));
+        if (oppRec) {
+          const aiFollows = Math.random() > 0.15;
+          const aiChoice = aiFollows
+            ? oppRec.recommendation
+            : oppRec.recommendation === 'BAT' ? 'BOWL' : 'BAT';
+          decision = aiChoice === 'BAT' ? TossDecision.BAT : TossDecision.BOWL;
+        } else {
+          decision = pitchType === PitchType.PACE || weather === WeatherCondition.CLOUDY ? TossDecision.BOWL : TossDecision.BAT;
+        }
       }
       setTossResult({ winnerId, decision });
     }, 1500);
@@ -275,30 +333,84 @@ export default function PreMatch() {
       <main className="flex-1 max-w-6xl w-full mx-auto p-4 sm:p-6 space-y-4">
         
         {/* Conditions Card */}
-        <div className="bg-white rounded-2xl border border-slate-200/90 p-4 shadow-xs grid grid-cols-1 md:grid-cols-3 gap-4 items-center">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center font-black shrink-0">
-              <CloudSun className="w-5 h-5" />
+        <div className="bg-white rounded-2xl border border-slate-200/90 p-4 shadow-xs space-y-3">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-center">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center font-black shrink-0">
+                <Gauge className="w-5 h-5" />
+              </div>
+              <div>
+                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Pitch Deck</span>
+                <span className="text-sm font-black text-slate-900">
+                  {pitchText ? `${pitchText.surface} Wicket` : `${pitchType} Wicket`}
+                </span>
+              </div>
             </div>
-            <div>
-              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Pitch Deck</span>
-              <span className="text-sm font-black text-slate-900">{pitchType} Wicket</span>
+
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center font-black shrink-0">
+                <CloudSun className="w-5 h-5" />
+              </div>
+              <div>
+                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Weather</span>
+                <span className="text-sm font-black text-slate-900">
+                  {weatherText ? weatherText.headline : `${weather} Skies`}
+                </span>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center font-black shrink-0">
+                <MapPin className="w-5 h-5" />
+              </div>
+              <div className="min-w-0">
+                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Ground</span>
+                <span className="text-sm font-black text-slate-900 truncate block">
+                  {conditionReport?.venue.name || currentMatch?.venue || 'Cricket Stadium'}
+                </span>
+              </div>
             </div>
           </div>
 
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center font-black shrink-0">
-              <Wind className="w-5 h-5" />
+          {/* Detailed venue / pitch / weather report */}
+          {conditionReport && pitchText && weatherText ? (
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-[11px] leading-relaxed">
+              <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-200/60">
+                <div className="flex items-center gap-1.5 font-black text-slate-700 mb-1">
+                  <MapPin className="w-3.5 h-3.5" /> Ground & Outfield
+                </div>
+                <p className="text-slate-600 font-medium">{groundText}</p>
+              </div>
+              <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-200/60">
+                <div className="flex items-center gap-1.5 font-black text-slate-700 mb-1">
+                  <Gauge className="w-3.5 h-3.5" /> Pitch Report
+                </div>
+                <p className="text-slate-600 font-medium">{pitchText.detail}</p>
+                <div className="flex flex-wrap gap-1 mt-1.5">
+                  {pitchText.traits.map((t) => (
+                    <span key={t} className="text-[9px] font-bold bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded">{t}</span>
+                  ))}
+                </div>
+              </div>
+              <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-200/60">
+                <div className="flex items-center gap-1.5 font-black text-slate-700 mb-1">
+                  <Droplets className="w-3.5 h-3.5" /> Weather Report
+                </div>
+                <p className="text-slate-600 font-medium">{weatherText.detail}</p>
+                <p className="text-slate-500 font-medium mt-1">{weatherText.swingNote} {weatherText.dewNote}</p>
+              </div>
             </div>
-            <div>
-              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Atmosphere</span>
-              <span className="text-sm font-black text-slate-900">{weather} Skies</span>
+          ) : (
+            <div className="text-xs font-medium text-slate-600 bg-slate-50 p-2.5 rounded-xl border border-slate-200/60">
+              {getPitchAdvice(pitchType)}
             </div>
-          </div>
+          )}
 
-          <div className="text-xs font-medium text-slate-600 bg-slate-50 p-2.5 rounded-xl border border-slate-200/60">
-            {getPitchAdvice(pitchType)}
-          </div>
+          {conditionsSummary && (
+            <div className="text-[10px] font-bold text-slate-500 bg-slate-900/5 px-2.5 py-1.5 rounded-lg border border-slate-200/60">
+              Gameplay influence: {conditionsSummary}
+            </div>
+          )}
         </div>
 
         {step === 'squad' ? (
@@ -534,6 +646,57 @@ export default function PreMatch() {
                 </p>
               </div>
 
+              {/* Intelligent toss advisor (decision support only) */}
+              {recommendation && (
+                <div className="text-left bg-slate-50 border border-slate-200/80 rounded-2xl p-3.5 space-y-2.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-1.5">
+                      <Lightbulb className="w-4 h-4 text-amber-500" />
+                      <span className="text-[10px] font-black uppercase tracking-wider text-slate-500">Toss Advisor</span>
+                    </div>
+                    <span className="text-[10px] font-bold text-slate-400">Confidence {Math.round(recommendation.confidence * 100)}%</span>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <span className={cn(
+                      "px-2.5 py-1 rounded-lg text-xs font-black",
+                      recommendation.recommendation === 'BAT' ? "bg-blue-600 text-white" : "bg-emerald-600 text-white"
+                    )}>
+                      {recommendation.recommendation === 'BAT' ? 'Bat First' : 'Bowl First'}
+                    </span>
+                    <span className="text-[11px] font-medium text-slate-600">
+                      recommended in these conditions
+                    </span>
+                  </div>
+
+                  {/* Bat vs Bowl scores */}
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2 text-[10px] font-bold text-slate-500">
+                      <span className="w-14">Bat {recommendation.batFirstScore}</span>
+                      <div className="flex-1 h-1.5 rounded-full bg-slate-200 overflow-hidden">
+                        <div className="h-full bg-blue-500" style={{ width: `${recommendation.batFirstScore}%` }} />
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2 text-[10px] font-bold text-slate-500">
+                      <span className="w-14">Bowl {recommendation.bowlFirstScore}</span>
+                      <div className="flex-1 h-1.5 rounded-full bg-slate-200 overflow-hidden">
+                        <div className="h-full bg-emerald-500" style={{ width: `${recommendation.bowlFirstScore}%` }} />
+                      </div>
+                    </div>
+                  </div>
+
+                  <ul className="space-y-1">
+                    {recommendation.rationale.map((r, i) => (
+                      <li key={i} className="text-[11px] text-slate-600 font-medium flex gap-1.5">
+                        <span className="text-slate-400">•</span><span>{r}</span>
+                      </li>
+                    ))}
+                  </ul>
+                  <p className="text-[10px] text-slate-400 font-medium italic">{recommendation.alternative}</p>
+                  <p className="text-[9px] text-slate-400">Advisory only — you are free to choose either option.</p>
+                </div>
+              )}
+
               {/* Coin Flip Visual */}
               <div className="py-6 flex justify-center">
                 <motion.div
@@ -577,6 +740,9 @@ export default function PreMatch() {
                           )}
                         >
                           Bat First
+                          {recommendation?.recommendation === 'BAT' && (
+                            <span className="block text-[9px] font-bold text-amber-500">★ Recommended</span>
+                          )}
                         </button>
                         <button
                           onClick={() => setTossResult({ ...tossResult, decision: TossDecision.BOWL })}
@@ -588,12 +754,26 @@ export default function PreMatch() {
                           )}
                         >
                           Bowl First
+                          {recommendation?.recommendation === 'BOWL' && (
+                            <span className="block text-[9px] font-bold text-amber-500">★ Recommended</span>
+                          )}
                         </button>
                       </div>
+                      {recommendation && tossResult.decision && (
+                        (tossResult.decision === TossDecision.BAT ? 'BAT' : 'BOWL') !== recommendation.recommendation && (
+                          <p className="text-[10px] text-amber-600 font-medium text-center">
+                            Going against the advisor's call — brave, but conditions favour {recommendation.recommendation === 'BAT' ? 'batting' : 'bowling'} first.
+                          </p>
+                        )
+                      )}
+                      <p className="text-[9px] text-slate-400 text-center">
+                        Your choice is final and never changes the simulation's fairness.
+                      </p>
                     </div>
                   ) : (
                     <p className="text-xs font-medium text-slate-600">
-                      {opponentTeam.name} decided to <strong className="text-slate-900">{tossResult.decision} first</strong> on this {pitchType} wicket.
+                      {opponentTeam.name} decided to <strong className="text-slate-900">{tossResult.decision} first</strong> on this {pitchType} wicket
+                      {recommendation && ` (their captain's call — advisor leaned ${recommendation.recommendation === 'BAT' ? 'bat-first' : 'bowl-first'})`}.
                     </p>
                   )}
 
