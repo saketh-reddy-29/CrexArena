@@ -70,7 +70,7 @@ export enum GameState {
   MATCH_RESULT = 'match_result',
 }
 
-export type ArenaTab = 'OVERVIEW' | 'MATCHES' | 'TEAMS' | 'TABLE' | 'PLAYERS' | 'PLAYER_STATS' | 'TEAM_STATS' | 'AUCTION' | 'SQUAD' | 'PLAYOFFS' | 'SERIES';
+export type ArenaTab = 'OVERVIEW' | 'MATCHES' | 'TEAMS' | 'TABLE' | 'PLAYERS' | 'PLAYER_STATS' | 'TEAM_STATS' | 'AUCTION' | 'SQUAD' | 'PLAYOFFS' | 'SERIES' | 'FIELD_SETUP';
 export type { ArenaFormat };
 export type TeamStrategy = 'Aggressive' | 'Balanced' | 'Value';
 

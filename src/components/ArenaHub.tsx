@@ -12,6 +12,7 @@ import PlayerStatsView from './stats/PlayerStatsView';
 import TeamStatsView from './stats/TeamStatsView';
 import TopMatchesCarousel from './TopMatchesCarousel';
 import GlobalNavBar from './common/GlobalNavBar';
+import FieldSetupDashboard from './FieldSetupDashboard';
 import { cn } from '../lib/utils';
 
 export default function ArenaHub() {
@@ -55,6 +56,7 @@ export default function ArenaHub() {
 
     tabs.push({ id: 'PLAYER_STATS', label: 'PLAYER STATS' });
     tabs.push({ id: 'TEAM_STATS', label: 'TEAM STATS' });
+    tabs.push({ id: 'FIELD_SETUP', label: '🏏 FIELD SETUP' });
 
     return tabs;
   };
@@ -100,6 +102,14 @@ export default function ArenaHub() {
         return <PlayerStatsView />;
       case 'TEAM_STATS':
         return <TeamStatsView />;
+      case 'FIELD_SETUP':
+        return (
+          <FieldSetupDashboard
+            currentFormat={selectedFormat as 'T20' | 'ODI' | 'TEST' | 'IPL'}
+            teamA={team?.shortName ?? team?.name ?? 'Team A'}
+            teamB="Opponent"
+          />
+        );
       default:
         return <ArenaDashboard />;
     }
