@@ -489,11 +489,37 @@ export default function LiveMatchCenter() {
   // a fresh (possibly illegal) one. See restoreFieldState (§9).
   const restoredFieldState = restoreFieldState(liveMatchState, currentMatchId);
   const [fieldPresetKey, setFieldPresetKey] = useState<string | null>(restoredFieldState?.fieldPresetKey ?? null);
+  const [userLockedFieldPreset, setUserLockedFieldPreset] = useState<boolean>(Boolean(restoredFieldState?.fieldPresetKey));
   // Live, authoritative field configuration reported by the visualizer, plus the
   // batter's recently punished arcs — both feed the fielding AI's movement budget.
   const [liveFieldConfiguration, setLiveFieldConfiguration] = useState<FieldConfiguration | null>(restoredFieldState?.liveFieldConfiguration ?? null);
   const [recentBoundaryZones, setRecentBoundaryZones] = useState<ScoringZoneName[]>([]);
   const [historyDeliveryResults, setHistoryDeliveryResults] = useState<DeliveryResult[]>([]);
+
+  const handleUserFieldPresetChange = useCallback((key: string | null) => {
+    setFieldPresetKey(key);
+    setUserLockedFieldPreset(Boolean(key));
+    if (key) {
+      const newConfig = BowlerFieldStrategyEngine.generateFieldConfiguration({
+        format: (selectedFormat as ArenaFormat) || 'T20',
+        bowler: currentBowler,
+        striker,
+        nonStriker: nonStriker || null,
+        overs: Math.floor((inning?.balls || 0) / 6),
+        balls: inning?.balls || 0,
+        wickets: inning?.wickets || 0,
+        runs: inning?.runs || 0,
+        target: matchTarget > 0 ? matchTarget : undefined,
+        pitch,
+        weather,
+        manualPresetKey: key,
+        fieldingSquad: bowlingSquad,
+        previousConfig: liveFieldConfiguration,
+      });
+      setLiveFieldConfiguration(newConfig);
+      setOpponentTacticalNotice(`Field set: ${BowlerFieldStrategyEngine.PRESET_OVERLAYS[key]?.name || key}`);
+    }
+  }, [selectedFormat, currentBowler, striker, nonStriker, inning, matchTarget, pitch, weather, bowlingSquad, liveFieldConfiguration]);
 
   useEffect(() => {
     if (currentDeliveryResult) {
@@ -916,8 +942,10 @@ export default function LiveMatchCenter() {
       });
       if (decision.bowlerId) setBowlerId(decision.bowlerId);
       if (decision.bowlingPlan) setUserBowlingPlan(decision.bowlingPlan);
-      if (decision.fieldPresetKey) setFieldPresetKey(decision.fieldPresetKey);
-      if (decision.fieldConfiguration) setLiveFieldConfiguration(decision.fieldConfiguration);
+      if (!userLockedFieldPreset) {
+        if (decision.fieldPresetKey) setFieldPresetKey(decision.fieldPresetKey);
+        if (decision.fieldConfiguration) setLiveFieldConfiguration(decision.fieldConfiguration);
+      }
       if (decision.notification) setOpponentTacticalNotice(decision.notification);
       setAiCaptainRecommendation(null);
       setPending(null);
@@ -1163,10 +1191,12 @@ export default function LiveMatchCenter() {
         totalOvers: Math.round(maxBalls / 6),
         trigger: wicket ? 'WICKET_FALL' : 'BOUNDARY_CLUSTER',
       });
-      if (fieldDecision.fieldChanged) {
-        setFieldPresetKey(fieldDecision.fieldPresetKey);
+      if (!userLockedFieldPreset) {
+        if (fieldDecision.fieldChanged) {
+          setFieldPresetKey(fieldDecision.fieldPresetKey);
+        }
+        if (fieldDecision.fieldConfiguration) setLiveFieldConfiguration(fieldDecision.fieldConfiguration);
       }
-      if (fieldDecision.fieldConfiguration) setLiveFieldConfiguration(fieldDecision.fieldConfiguration);
       setOpponentTacticalNotice(
         fieldDecision.notification ||
           `${bowlingTeam.name} AI: ${
@@ -2125,7 +2155,7 @@ export default function LiveMatchCenter() {
                   onBallLifecycleChange={handleBallLifecycleChange}
                   userTeamControlMode="FULL_AUTO"
                   aiCaptainRecommendation={null}
-                  manualControlsEnabled={false}
+                  manualControlsEnabled={true}
                   userBattingIntent={userBattingIntent}
                   onUserBattingIntentChange={setUserBattingIntent}
                   isUserTeamBatting={isMyTeamBatting}
@@ -2148,7 +2178,7 @@ export default function LiveMatchCenter() {
                   replayDeliveryResult={replayDelivery}
                   fieldPresetKey={fieldPresetKey}
                   initialFieldConfiguration={liveFieldConfiguration}
-                  onFieldPresetChange={setFieldPresetKey}
+                  onFieldPresetChange={handleUserFieldPresetChange}
                   onFieldConfigurationChange={setLiveFieldConfiguration}
                   totalOvers={Math.round(maxBalls / 6)}
                   hotZones={recentBoundaryZones}
@@ -2688,11 +2718,15 @@ export default function LiveMatchCenter() {
               </div>
             </div>
 
-            {/* Field Setup — always AI-selected and restriction-validated */}
+            {/* Field Setup — AI-selected or User Custom */}
             <div className="bg-white rounded-2xl border border-slate-200/90 shadow-sm p-3.5 space-y-3">
               <div className="flex items-center justify-between border-b border-slate-100 pb-2">
-                <span className="text-xs font-black text-slate-800 uppercase tracking-wide">AI Field Setup</span>
-                <span className="text-[9px] font-black uppercase px-2 py-0.5 rounded-full bg-cyan-100 text-cyan-700 border border-cyan-200">AI</span>
+                <span className="text-xs font-black text-slate-800 uppercase tracking-wide">Field Formation</span>
+                {userLockedFieldPreset ? (
+                  <span className="text-[9px] font-black uppercase px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 border border-emerald-200">User Custom</span>
+                ) : (
+                  <span className="text-[9px] font-black uppercase px-2 py-0.5 rounded-full bg-cyan-100 text-cyan-700 border border-cyan-200">AI Captain</span>
+                )}
               </div>
               <div className="rounded-xl bg-cyan-50/70 border border-cyan-100 px-3 py-2 space-y-0.5">
                 <span className="text-[9px] font-black uppercase text-cyan-500 block">Active Formation</span>
@@ -2705,8 +2739,32 @@ export default function LiveMatchCenter() {
                   </span>
                 )}
               </div>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('Field Setup')}
+                  className="flex-1 py-1.5 px-3 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-[11px] font-black uppercase text-center cursor-pointer transition-all"
+                >
+                  Change Field
+                </button>
+                {userLockedFieldPreset && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setUserLockedFieldPreset(false);
+                      setFieldPresetKey(null);
+                      setOpponentTacticalNotice('Field reset to AI Captain tactical defaults.');
+                    }}
+                    className="py-1.5 px-3 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-[11px] font-bold uppercase cursor-pointer transition-all"
+                  >
+                    Reset to AI
+                  </button>
+                )}
+              </div>
               <p className="text-[9px] text-slate-400 leading-snug">
-                The bowling captain sets the field automatically and every formation is validated against the format's fielding restrictions.
+                {userLockedFieldPreset
+                  ? 'Custom field active. You control fielder positioning while bowling.'
+                  : 'The AI captain sets the field automatically, validated against the format’s fielding restrictions.'}
               </p>
             </div>
           </div>
@@ -2733,7 +2791,7 @@ export default function LiveMatchCenter() {
               batterName: striker?.name,
             }}
             onFormationSelect={(key) => {
-              setFieldPresetKey(key);
+              handleUserFieldPresetChange(key);
               setActiveTab('Live');
             }}
           />

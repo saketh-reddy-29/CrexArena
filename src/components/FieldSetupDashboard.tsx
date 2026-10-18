@@ -347,7 +347,17 @@ function FormationCard({ formation, isSelected, isAISelected, isManualOverride, 
 
 // ─── Formation Detail Panel ───────────────────────────────────────────────────
 
-function FormationDetailPanel({ presetKey, aiReason, onClose }: { presetKey: string; aiReason?: string; onClose: () => void }) {
+function FormationDetailPanel({
+  presetKey,
+  aiReason,
+  onClose,
+  onApply,
+}: {
+  presetKey: string;
+  aiReason?: string;
+  onClose: () => void;
+  onApply?: (key: string) => void;
+}) {
   const preset = BowlerFieldStrategyEngine.PRESET_OVERLAYS[presetKey];
   if (!preset) return null;
   const outside = preset.keys.filter(k => CANONICAL_POSITIONS[k]?.isOutsideCircle).length;
@@ -413,6 +423,22 @@ function FormationDetailPanel({ presetKey, aiReason, onClose }: { presetKey: str
               );
             })}
           </div>
+
+          {onApply && (
+            <div className="pt-2 border-t border-slate-700/60">
+              <button
+                type="button"
+                onClick={() => {
+                  onApply(presetKey);
+                  onClose();
+                }}
+                className="w-full py-2.5 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-black text-xs uppercase tracking-wider flex items-center justify-center gap-1.5 shadow-lg shadow-cyan-500/20 transition-all cursor-pointer"
+              >
+                <CheckCircle2 className="w-4 h-4" />
+                <span>Apply This Formation</span>
+              </button>
+            </div>
+          )}
         </div>
       </div>
     </>
@@ -603,13 +629,8 @@ export default function FieldSetupDashboard({
 
     setAiKey(result.key);
     setAiReason(result.reason);
-
-    // Automatically report AI's selection to parent if not manually overridden
-    if (result.key && onFormationSelect) {
-      onFormationSelect(result.key, activeFormat);
-    }
   }, [activeFormat, currentOver, resolvedCtx.isSpinner, resolvedCtx.isLeftHander,
-      resolvedCtx.wickets, resolvedCtx.batterId, onFormationSelect]);
+      resolvedCtx.wickets, resolvedCtx.batterId]);
 
   // ── User selects a formation manually ──
   const handleSelect = (key: string) => {
@@ -855,6 +876,11 @@ export default function FieldSetupDashboard({
           presetKey={detailKey}
           aiReason={detailKey === aiKey ? aiReason : undefined}
           onClose={() => setDetailKey(null)}
+          onApply={(key) => {
+            setManualKey(key);
+            setIsManualOverride(true);
+            onFormationSelect?.(key, activeFormat);
+          }}
         />
       )}
     </div>
