@@ -248,14 +248,6 @@ export default function CricketActionVisualizer({
   const [zoneBowlingFilter, setZoneBowlingFilter] = useState<'ALL' | 'PACE' | 'SPIN'>('ALL');
   const [showHeatmapOnField, setShowHeatmapOnField] = useState<boolean>(true);
 
-  const activeBatterProfile = useMemo(() => {
-    if (!striker) return null;
-    return BatterScoringMemory.getBatterProfile(striker.id, {
-      format: zoneFormatFilter,
-      bowlingType: zoneBowlingFilter,
-    });
-  }, [striker, zoneFormatFilter, zoneBowlingFilter, activeDelivery]);
-
   // Edit Field gate: fielders can only be dragged while editing is enabled
   const [internalEditField, setInternalEditField] = useState<boolean>(false);
   const editFieldEnabled = propEditFieldMode !== undefined ? propEditFieldMode : internalEditField;
@@ -400,6 +392,14 @@ export default function CricketActionVisualizer({
     }
     return null;
   }, [deliveryResult, lastBall, ballCount, score, striker, nonStriker, bowler]);
+
+  const activeBatterProfile = useMemo(() => {
+    if (!striker) return null;
+    return BatterScoringMemory.getBatterProfile(striker.id, {
+      format: zoneFormatFilter,
+      bowlingType: zoneBowlingFilter,
+    });
+  }, [striker, zoneFormatFilter, zoneBowlingFilter, activeDelivery]);
 
   // Animation Frame Refs
   const animFrameRef = useRef<number | null>(null);
