@@ -12,6 +12,7 @@ import type { TacticalDeliveryModel } from '../ai/AdaptiveCaptainEngine';
 import type { MatchConditionsModel } from '../conditions/types';
 import { buildDeliveryModel } from '../ai/AdaptiveCaptainEngine';
 import { validateField } from '../fielding/FieldingRestrictionEngine';
+import { BatterScoringMemory, getCanonicalZoneFromPoint } from '../analytics/BatterScoringMemory';
 
 export interface DeliverySimulationInput {
   striker: Player;
@@ -250,6 +251,42 @@ export class DeliveryResultFactory {
 
     const deliveryId = `del_${Date.now()}_${currentBalls}_${Math.floor(Math.random() * 10000)}`;
 
+    const canonicalZoneId = getCanonicalZoneFromPoint(ballPath.target, isLeftHander);
+
+    // Record delivery outcome in persistent batter scoring memory
+    BatterScoringMemory.recordDelivery({
+      id: deliveryId,
+      matchId: (input as any).matchId || 'live_match',
+      inningsId: (input as any).inningsId || `inn_${overIndex}`,
+      batterId: striker.id,
+      batterName: striker.name,
+      bowlerId: bowler.id,
+      bowlerName: bowler.name,
+      bowlingType: BowlerFieldStrategyEngine.isSpinBowler(bowler) ? 'SPIN' : 'PACE',
+      bowlingArm: (bowler as any).bowlingArm || 'Right',
+      batterHand: isLeftHander ? 'Left' : 'Right',
+      format,
+      season: input.season || 2026,
+      over: overIndex,
+      ballInOver,
+      phase: input.fieldConfiguration?.phase || 'Active Play',
+      line: input.bowlingPlan?.line,
+      length: input.bowlingPlan?.length,
+      shotType,
+      targetZone,
+      canonicalZoneId,
+      targetPoint: { ...ballPath.target },
+      batterRuns,
+      extraRuns,
+      totalRuns,
+      isBoundary: totalRuns >= 4,
+      isWicket,
+      dismissalType: isWicket ? wicketType : undefined,
+      pitch: pitchType,
+      weather,
+      timestamp: Date.now(),
+    });
+
     const deliveryResult: DeliveryResult = {
       id: deliveryId,
       ballNumber: currentBalls + (isLegalBall ? 1 : 0),
@@ -272,6 +309,7 @@ export class DeliveryResultFactory {
       dismissedPlayerName: isWicket ? striker.name : undefined,
       shotType,
       targetZone,
+      canonicalZoneId,
       ballPath,
       resultType,
       commentary,
@@ -523,6 +561,8 @@ export class DeliveryResultFactory {
 
     const overCompleted = isLegalBall && (currentBalls + 1) % 6 === 0;
 
+    const canonicalZoneId = getCanonicalZoneFromPoint(ballPath.target, false);
+
     return Object.freeze({
       id: `det_${Date.now()}_${currentBalls}`,
       ballNumber: currentBalls + (isLegalBall ? 1 : 0),
@@ -545,6 +585,7 @@ export class DeliveryResultFactory {
       dismissedPlayerName: isWicket ? striker.name : undefined,
       shotType,
       targetZone,
+      canonicalZoneId,
       ballPath,
       resultType,
       commentary: `${striker.name} ${resultType} vs ${bowler.name}`,

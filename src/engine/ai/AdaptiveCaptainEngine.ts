@@ -7,6 +7,7 @@ import {
   FielderAssignment,
 } from '../strategy/BowlerFieldStrategyEngine';
 import { getFieldingPhase, type FieldingPhaseKey } from '../fielding/FieldingRestrictionEngine';
+import { BatterScoringMemory } from '../analytics/BatterScoringMemory';
 
 // ═══════════════════════════════════════════════════════════════════════════════
 //  ADAPTIVE AI CAPTAIN — Boundary Prevention, Realistic Wicket Strategy &
@@ -247,9 +248,37 @@ export function analyzeFieldCoverage(
 }
 
 /** Deterministic, normalised boundary-scoring preference per zone for a batter. */
-export function getBatterZonePreference(batter: Player | null): Record<ScoringZoneName, number> {
+export function getBatterZonePreference(batter: Player | null, format?: ArenaFormat | string): Record<ScoringZoneName, number> {
   const archetype = classifyBatterArchetype(batter);
-  const base = ARCHETYPE_ZONE_WEIGHTS[archetype];
+  const base = { ...ARCHETYPE_ZONE_WEIGHTS[archetype] };
+
+  // If batter has genuine historical scoring zone records, blend them in
+  if (batter?.id) {
+    const profile = BatterScoringMemory.getBatterProfile(batter.id, {
+      format: (format && format !== 'ALL' ? format : 'ALL') as any,
+    });
+    if (profile && profile.totalBalls >= 8 && profile.totalBoundaries > 0) {
+      // Map 16 canonical zones into 8 broad wagon zones
+      const histWeights: Record<ScoringZoneName, number> = {
+        THIRD_MAN_GULLY: (profile.zones.FINE_THIRD_MAN.boundaryCount + profile.zones.THIRD_MAN.boundaryCount),
+        POINT_SQUARE: (profile.zones.DEEP_BACKWARD_POINT.boundaryCount + profile.zones.POINT.boundaryCount),
+        COVER: (profile.zones.COVER_POINT.boundaryCount + profile.zones.COVER.boundaryCount + profile.zones.EXTRA_COVER.boundaryCount),
+        LONG_OFF: (profile.zones.LONG_OFF.boundaryCount + profile.zones.STRAIGHT_OFF.boundaryCount),
+        LONG_ON: (profile.zones.STRAIGHT_ON.boundaryCount + profile.zones.LONG_ON.boundaryCount),
+        MID_WICKET_COW: (profile.zones.MID_WICKET.boundaryCount + profile.zones.COW_CORNER.boundaryCount),
+        SQUARE_LEG: (profile.zones.SQUARE_LEG.boundaryCount + profile.zones.BACKWARD_SQUARE_LEG.boundaryCount),
+        FINE_LEG: (profile.zones.FINE_LEG.boundaryCount),
+      };
+      const totalHist = Object.values(histWeights).reduce((a, b) => a + b, 0);
+      if (totalHist > 0) {
+        // Blend: 50% archetype prior + 50% actual historical observations
+        for (const z of WAGON_ZONES) {
+          base[z.zone] = 0.5 * base[z.zone] + 0.5 * (histWeights[z.zone] / totalHist) * 8;
+        }
+      }
+    }
+  }
+
   const total = WAGON_ZONES.reduce((sum, z) => sum + base[z.zone], 0) || 1;
   const normalised = {} as Record<ScoringZoneName, number>;
   for (const z of WAGON_ZONES) normalised[z.zone] = base[z.zone] / total;

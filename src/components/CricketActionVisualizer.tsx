@@ -37,6 +37,7 @@ import { BallLifecycleState } from '../engine/fielding/BallLifecycleController';
 import { CaptainDecision } from '../engine/ai/AICaptainEngine';
 import { DetailedBowlingPlan } from '../engine/ai/BowlingPlanEngine';
 import { BattingIntent, BatterInningsState } from '../engine/ai/BatterDecisionEngine';
+import { BatterScoringMemory, CANONICAL_ZONES, CANONICAL_ZONE_LIST, CanonicalZoneId } from '../engine/analytics/BatterScoringMemory';
 
 export type AnimationSpeed = 1 | 1.5 | 2 | 0; // 0 = Skip/Instant
 export type BottomPanelTab = 'FIELD_MAP' | 'BOWLER_PLAN' | 'SCORING_ZONES' | 'AI_CAPTAIN';
@@ -243,6 +244,17 @@ export default function CricketActionVisualizer({
   const [activeBottomTab, setActiveBottomTab] = useState<BottomPanelTab>('FIELD_MAP');
   const [internalPresetKey, setInternalPresetKey] = useState<string | null>(null);
   const [showDebugHUD, setShowDebugHUD] = useState<boolean>(false);
+  const [zoneFormatFilter, setZoneFormatFilter] = useState<'ALL' | ArenaFormat>('ALL');
+  const [zoneBowlingFilter, setZoneBowlingFilter] = useState<'ALL' | 'PACE' | 'SPIN'>('ALL');
+  const [showHeatmapOnField, setShowHeatmapOnField] = useState<boolean>(true);
+
+  const activeBatterProfile = useMemo(() => {
+    if (!striker) return null;
+    return BatterScoringMemory.getBatterProfile(striker.id, {
+      format: zoneFormatFilter,
+      bowlingType: zoneBowlingFilter,
+    });
+  }, [striker, zoneFormatFilter, zoneBowlingFilter, activeDelivery]);
 
   // Edit Field gate: fielders can only be dragged while editing is enabled
   const [internalEditField, setInternalEditField] = useState<boolean>(false);
@@ -2153,31 +2165,212 @@ export default function CricketActionVisualizer({
           )}
 
           {activeBottomTab === 'SCORING_ZONES' && (
-            <div className="space-y-2">
-              <div className="flex items-center justify-between text-[11px] text-slate-400 font-bold px-1">
-                <span>360Â° Ground Wagon Wheel Zone</span>
-                <span>Protection & Risk Status</span>
-              </div>
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                {fieldConfig.scoringZones.map((z, idx) => (
-                  <div key={idx} className="bg-white/[0.03] p-2.5 rounded-xl border border-white/5 flex items-center justify-between">
-                    <div>
-                      <div className="text-[11px] font-black text-white">{z.zone}</div>
-                      <div className="text-[9px] text-slate-400">Angle: {z.angleRange[0]}Â° to {z.angleRange[1]}Â°</div>
-                    </div>
-                    <div className="text-right">
-                      <span className={cn(
-                        "px-1.5 py-0.5 rounded text-[8px] font-black uppercase block",
-                        z.protection === 'COVERED' 
-                          ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/30" 
-                          : "bg-red-500/20 text-red-300 border border-red-500/30"
-                      )}>
-                        {z.protection}
+            <div className="space-y-3">
+              {/* Top Striker Profile & Confidence Header */}
+              <div className="bg-white/[0.04] p-3 rounded-2xl border border-white/10 flex flex-wrap items-center justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-amber-500 to-orange-600 flex items-center justify-center font-black text-white text-base shadow-lg shadow-orange-500/20">
+                    {striker?.name?.[0] || 'B'}
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-black text-white">{striker?.name || 'Striker'}</span>
+                      <span className="text-[10px] font-bold text-slate-400 bg-white/5 px-2 py-0.5 rounded-full border border-white/10">
+                        {isLeftHander ? 'Left-Hander (Mirrored)' : 'Right-Hander'}
                       </span>
-                      <span className="text-[9px] font-bold text-slate-400 tabular-nums">{z.riskLevel} Risk</span>
+                    </div>
+                    <div className="text-[10px] text-slate-400 flex items-center gap-2 mt-0.5">
+                      <span>Balls: <strong className="text-white">{activeBatterProfile?.totalBalls || 0}</strong></span>
+                      <span>•</span>
+                      <span>Runs: <strong className="text-cyan-400">{activeBatterProfile?.totalRuns || 0}</strong></span>
+                      <span>•</span>
+                      <span>SR: <strong className="text-white">{activeBatterProfile?.strikeRate || 0}</strong></span>
+                      <span>•</span>
+                      <span>Boundaries: <strong className="text-amber-400">{activeBatterProfile?.totalBoundaries || 0}</strong></span>
+                      <span>•</span>
+                      <span>Dots: <strong className="text-slate-300">{activeBatterProfile?.totalDots || 0}</strong></span>
                     </div>
                   </div>
-                ))}
+                </div>
+
+                {/* Sample Size Confidence Badge */}
+                <div className="flex items-center gap-2">
+                  <div className={cn(
+                    "px-2.5 py-1 rounded-xl text-[10px] font-black uppercase flex items-center gap-1.5 border",
+                    activeBatterProfile?.sampleSizeConfidence === 'HIGH'
+                      ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/40"
+                      : activeBatterProfile?.sampleSizeConfidence === 'MEDIUM'
+                      ? "bg-cyan-500/20 text-cyan-300 border-cyan-500/40"
+                      : activeBatterProfile?.sampleSizeConfidence === 'LOW'
+                      ? "bg-amber-500/20 text-amber-300 border-amber-500/40"
+                      : "bg-rose-500/20 text-rose-300 border-rose-500/40"
+                  )}>
+                    <Shield className="w-3 h-3" />
+                    <span>{activeBatterProfile?.sampleSizeConfidence || 'INSUFFICIENT'} CONFIDENCE</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Insufficient Data Warning Banner */}
+              {activeBatterProfile?.insufficientDataWarning && (
+                <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-2.5 flex items-center gap-2 text-amber-200 text-[11px]">
+                  <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
+                  <span>{activeBatterProfile.insufficientDataWarning}</span>
+                </div>
+              )}
+
+              {/* Filters Bar */}
+              <div className="flex flex-wrap items-center justify-between gap-2 bg-slate-900/60 p-2 rounded-xl border border-white/5">
+                {/* Format Filter */}
+                <div className="flex items-center gap-1 text-[10px]">
+                  <span className="text-slate-500 font-bold px-1 uppercase">Format:</span>
+                  {(['ALL', 'T20', 'ODI', 'TEST'] as Array<'ALL' | ArenaFormat>).map((fmt) => (
+                    <button
+                      key={fmt}
+                      onClick={() => setZoneFormatFilter(fmt)}
+                      className={cn(
+                        "px-2 py-0.5 rounded-lg font-bold transition-colors",
+                        zoneFormatFilter === fmt
+                          ? "bg-cyan-500 text-slate-950 shadow"
+                          : "bg-white/5 text-slate-400 hover:text-white"
+                      )}
+                    >
+                      {fmt}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Bowling Type Filter */}
+                <div className="flex items-center gap-1 text-[10px]">
+                  <span className="text-slate-500 font-bold px-1 uppercase">Vs Bowler:</span>
+                  {(['ALL', 'PACE', 'SPIN'] as const).map((bType) => (
+                    <button
+                      key={bType}
+                      onClick={() => setZoneBowlingFilter(bType)}
+                      className={cn(
+                        "px-2 py-0.5 rounded-lg font-bold transition-colors",
+                        zoneBowlingFilter === bType
+                          ? "bg-cyan-500 text-slate-950 shadow"
+                          : "bg-white/5 text-slate-400 hover:text-white"
+                      )}
+                    >
+                      {bType}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Tactical Explanation from Bowling AI Captain */}
+              <div className="bg-gradient-to-r from-cyan-950/40 via-blue-950/30 to-transparent p-2.5 rounded-xl border border-cyan-500/20">
+                <div className="text-[10px] font-bold text-cyan-400 uppercase flex items-center gap-1.5">
+                  <Target className="w-3 h-3" />
+                  <span>Bowling AI Field Adjustment & Intent</span>
+                </div>
+                <p className="text-[11px] text-slate-200 mt-0.5 leading-relaxed font-medium">
+                  {fieldConfig.tacticalIntent}
+                </p>
+                {activeBatterProfile && (
+                  <div className="flex flex-wrap items-center gap-2 mt-2 pt-2 border-t border-white/5 text-[10px]">
+                    <div className="flex items-center gap-1">
+                      <span className="text-slate-400 font-bold">Top Boundary Zones:</span>
+                      {activeBatterProfile.topBoundaryZones.length > 0 ? (
+                        activeBatterProfile.topBoundaryZones.map((zId) => (
+                          <span key={zId} className="bg-rose-500/20 text-rose-300 px-1.5 py-0.5 rounded border border-rose-500/30 font-bold">
+                            {CANONICAL_ZONES[zId]?.name || zId}
+                          </span>
+                        ))
+                      ) : (
+                        <span className="text-slate-500 italic">None recorded</span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-1 ml-auto">
+                      <span className="text-slate-400 font-bold">Dismissal Hazards:</span>
+                      {activeBatterProfile.vulnerableDismissalZones.length > 0 ? (
+                        activeBatterProfile.vulnerableDismissalZones.map((zId) => (
+                          <span key={zId} className="bg-amber-500/20 text-amber-300 px-1.5 py-0.5 rounded border border-amber-500/30 font-bold">
+                            {CANONICAL_ZONES[zId]?.name || zId}
+                          </span>
+                        ))
+                      ) : (
+                        <span className="text-slate-500 italic">None recorded</span>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* 16 Canonical Zones Grid */}
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between text-[11px] text-slate-400 font-bold px-1">
+                  <span>16 Canonical Ground Scoring Zones (Batter Frame)</span>
+                  <span>Outcomes & Coverage</span>
+                </div>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 max-h-[380px] overflow-y-auto pr-1 custom-scrollbar">
+                  {CANONICAL_ZONE_LIST.map((zoneKey) => {
+                    const def = CANONICAL_ZONES[zoneKey];
+                    const metric = activeBatterProfile?.zones[zoneKey];
+                    const broadZone = fieldConfig.scoringZones.find(bz => bz.zone.toLowerCase().includes(def.broadWagonKey.toLowerCase().replace(/_/g, ' ')));
+                    const isCovered = broadZone ? broadZone.protection === 'COVERED' : false;
+
+                    return (
+                      <div
+                        key={zoneKey}
+                        className={cn(
+                          "p-2.5 rounded-xl border flex flex-col justify-between transition-colors",
+                          metric && metric.isDangerousBoundaryZone
+                            ? "bg-rose-500/10 border-rose-500/30"
+                            : metric && metric.isDismissalVulnerability
+                            ? "bg-amber-500/10 border-amber-500/30"
+                            : "bg-white/[0.03] border-white/5"
+                        )}
+                      >
+                        <div className="flex items-start justify-between gap-1">
+                          <div>
+                            <div className="text-[11px] font-black text-white flex items-center gap-1">
+                              <span>{def.name}</span>
+                            </div>
+                            <div className="text-[8.5px] text-slate-400">
+                              {def.side} • {def.angleRange[0]}° to {def.angleRange[1]}°
+                            </div>
+                          </div>
+                          <span className={cn(
+                            "px-1 py-0.5 rounded text-[8px] font-black uppercase shrink-0",
+                            isCovered
+                              ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/30"
+                              : "bg-red-500/20 text-red-300 border border-red-500/30"
+                          )}>
+                            {isCovered ? 'COVERED' : 'OPEN'}
+                          </span>
+                        </div>
+
+                        <div className="mt-2 pt-2 border-t border-white/5 grid grid-cols-3 gap-1 text-center">
+                          <div className="bg-black/30 p-1 rounded">
+                            <span className="text-[8px] text-slate-500 block font-bold">Balls</span>
+                            <span className="text-[10px] font-black text-white">{metric?.ballsFaced || 0}</span>
+                          </div>
+                          <div className="bg-black/30 p-1 rounded">
+                            <span className="text-[8px] text-slate-500 block font-bold">Runs</span>
+                            <span className="text-[10px] font-black text-cyan-400">{metric?.runsScored || 0}</span>
+                          </div>
+                          <div className="bg-black/30 p-1 rounded">
+                            <span className="text-[8px] text-slate-500 block font-bold">Boundaries</span>
+                            <span className="text-[10px] font-black text-amber-400">{metric?.boundaryCount || 0}</span>
+                          </div>
+                        </div>
+
+                        {metric && metric.ballsFaced > 0 && (
+                          <div className="mt-1 flex items-center justify-between text-[8px] text-slate-400 px-0.5">
+                            <span>Bound %: <strong className="text-rose-400">{metric.boundaryPct}%</strong></span>
+                            <span>Dots: <strong className="text-slate-300">{metric.dotCount}</strong></span>
+                            {metric.dismissalCount > 0 && (
+                              <span>Wickets: <strong className="text-amber-400">{metric.dismissalCount}</strong></span>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
             </div>
           )}

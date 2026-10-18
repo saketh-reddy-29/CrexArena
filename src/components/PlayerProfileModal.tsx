@@ -1,14 +1,16 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Star, Globe, TrendingUp, TrendingDown, Minus, Activity, Award, Shield, Zap } from 'lucide-react';
+import { X, Star, Globe, TrendingUp, TrendingDown, Minus, Activity, Award, Shield, Zap, Target, AlertTriangle, Compass } from 'lucide-react';
 import { Player } from '../types/common';
 import JerseyPlayerImage from './JerseyPlayerImage';
 import { getFormatSpecificProfile, getPlayerRating, getPlayerForm } from '../lib/ratingEngine';
 import { useGameStore, ArenaFormat } from '../stores/useGameStore';
 import { cn } from '../lib/utils';
+import { BatterScoringMemory, CANONICAL_ZONES, CANONICAL_ZONE_LIST } from '../engine/analytics/BatterScoringMemory';
 
 type ProfileTab = 
   | 'OVERVIEW' 
+  | 'SCORING_ZONES'
   | 'CAREER' 
   | 'SEASON' 
   | 'COMPETITION' 
@@ -45,6 +47,8 @@ export default function PlayerProfileModal({ player, franchiseId, onClose }: Pla
   const { selectedFormat, activeArenaId, arenaPlayerStates, getArenaPlayerState } = useGameStore();
   const [activeFormat, setActiveFormat] = useState<ArenaFormat>(selectedFormat || 'IPL');
   const [activeTab, setActiveTab] = useState<ProfileTab>('OVERVIEW');
+  const [zoneFormat, setZoneFormat] = useState<'ALL' | ArenaFormat>('ALL');
+  const [zoneBowling, setZoneBowling] = useState<'ALL' | 'PACE' | 'SPIN'>('ALL');
 
   if (!player) return null;
 
@@ -57,8 +61,14 @@ export default function PlayerProfileModal({ player, franchiseId, onClose }: Pla
   const isTest = activeFormat === 'TEST';
   const recentMatches = playerState?.recentMatches || [];
 
+  const scoringProfile = player ? BatterScoringMemory.getBatterProfile(player.id, {
+    format: zoneFormat,
+    bowlingType: zoneBowling,
+  }) : null;
+
   const tabs: { id: ProfileTab; label: string }[] = [
     { id: 'OVERVIEW', label: 'Overview' },
+    { id: 'SCORING_ZONES', label: 'Scoring Zones' },
     { id: 'RECENT_FORM', label: 'Recent Form' },
     { id: 'RATING', label: 'Rating' },
     { id: 'DEVELOPMENT', label: 'Development' },
@@ -258,6 +268,139 @@ export default function PlayerProfileModal({ player, franchiseId, onClose }: Pla
                       No matches played in this Arena yet. Form will calculate dynamically after the first match.
                     </div>
                   )}
+                </div>
+              </div>
+            )}
+
+            {activeTab === 'SCORING_ZONES' && (
+              <div className="space-y-3">
+                {/* Confidence & Filter Bar */}
+                <div className="bg-[#101a2e] p-3 rounded-2xl border border-white/5 space-y-2">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex items-center gap-1.5 text-xs font-black text-white">
+                      <Target className="w-4 h-4 text-cyan-400" />
+                      <span>Historical Scoring Zones</span>
+                    </div>
+
+                    <div className={cn(
+                      "px-2 py-0.5 rounded-lg text-[9px] font-black uppercase flex items-center gap-1 border",
+                      scoringProfile?.sampleSizeConfidence === 'HIGH'
+                        ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/40"
+                        : scoringProfile?.sampleSizeConfidence === 'MEDIUM'
+                        ? "bg-cyan-500/20 text-cyan-300 border-cyan-500/40"
+                        : scoringProfile?.sampleSizeConfidence === 'LOW'
+                        ? "bg-amber-500/20 text-amber-300 border-amber-500/40"
+                        : "bg-rose-500/20 text-rose-300 border-rose-500/40"
+                    )}>
+                      <Shield className="w-2.5 h-2.5" />
+                      <span>{scoringProfile?.sampleSizeConfidence || 'INSUFFICIENT'} DATA</span>
+                    </div>
+                  </div>
+
+                  {/* Filter Pills */}
+                  <div className="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-white/5 text-[10px]">
+                    <div className="flex items-center gap-1">
+                      <span className="text-white/40 font-bold uppercase">Format:</span>
+                      {(['ALL', 'T20', 'ODI', 'TEST'] as Array<'ALL' | ArenaFormat>).map((fmt) => (
+                        <button
+                          key={fmt}
+                          onClick={() => setZoneFormat(fmt)}
+                          className={cn(
+                            "px-2 py-0.5 rounded-md font-bold transition-colors",
+                            zoneFormat === fmt
+                              ? "bg-cyan-500 text-slate-950"
+                              : "bg-white/5 text-white/50 hover:text-white"
+                          )}
+                        >
+                          {fmt}
+                        </button>
+                      ))}
+                    </div>
+
+                    <div className="flex items-center gap-1">
+                      <span className="text-white/40 font-bold uppercase">Vs:</span>
+                      {(['ALL', 'PACE', 'SPIN'] as const).map((bType) => (
+                        <button
+                          key={bType}
+                          onClick={() => setZoneBowling(bType)}
+                          className={cn(
+                            "px-2 py-0.5 rounded-md font-bold transition-colors",
+                            zoneBowling === bType
+                              ? "bg-cyan-500 text-slate-950"
+                              : "bg-white/5 text-white/50 hover:text-white"
+                          )}
+                        >
+                          {bType}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Aggregate Summary */}
+                <div className="grid grid-cols-3 sm:grid-cols-6 gap-2 text-center text-xs">
+                  <div className="bg-[#101a2e] p-2 rounded-xl border border-white/5">
+                    <div className="text-[9px] text-white/40">Balls</div>
+                    <div className="font-bold text-white">{scoringProfile?.totalBalls || 0}</div>
+                  </div>
+                  <div className="bg-[#101a2e] p-2 rounded-xl border border-white/5">
+                    <div className="text-[9px] text-white/40">Runs</div>
+                    <div className="font-bold text-cyan-400">{scoringProfile?.totalRuns || 0}</div>
+                  </div>
+                  <div className="bg-[#101a2e] p-2 rounded-xl border border-white/5">
+                    <div className="text-[9px] text-white/40">Boundaries</div>
+                    <div className="font-bold text-amber-400">{scoringProfile?.totalBoundaries || 0}</div>
+                  </div>
+                  <div className="bg-[#101a2e] p-2 rounded-xl border border-white/5">
+                    <div className="text-[9px] text-white/40">Dots</div>
+                    <div className="font-bold text-slate-300">{scoringProfile?.totalDots || 0}</div>
+                  </div>
+                  <div className="bg-[#101a2e] p-2 rounded-xl border border-white/5">
+                    <div className="text-[9px] text-white/40">Strike Rate</div>
+                    <div className="font-bold text-white">{scoringProfile?.strikeRate || 0}</div>
+                  </div>
+                  <div className="bg-[#101a2e] p-2 rounded-xl border border-white/5">
+                    <div className="text-[9px] text-white/40">Dismissals</div>
+                    <div className="font-bold text-rose-400">{scoringProfile?.totalDismissals || 0}</div>
+                  </div>
+                </div>
+
+                {scoringProfile?.insufficientDataWarning && (
+                  <div className="bg-amber-500/10 border border-amber-500/20 rounded-xl p-2.5 flex items-center gap-2 text-amber-300 text-[10px]">
+                    <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                    <span>{scoringProfile.insufficientDataWarning}</span>
+                  </div>
+                )}
+
+                {/* Canonical 16-Zone Cards */}
+                <div className="grid grid-cols-2 gap-2 max-h-[300px] overflow-y-auto pr-1 custom-scrollbar">
+                  {CANONICAL_ZONE_LIST.map((zKey) => {
+                    const def = CANONICAL_ZONES[zKey];
+                    const metric = scoringProfile?.zones[zKey];
+                    return (
+                      <div
+                        key={zKey}
+                        className={cn(
+                          "bg-[#101a2e] p-2.5 rounded-xl border flex flex-col justify-between",
+                          metric && metric.isDangerousBoundaryZone
+                            ? "border-rose-500/40 bg-rose-500/5"
+                            : metric && metric.isDismissalVulnerability
+                            ? "border-amber-500/40 bg-amber-500/5"
+                            : "border-white/5"
+                        )}
+                      >
+                        <div className="flex items-center justify-between text-[11px] font-bold text-white">
+                          <span>{def.name}</span>
+                          <span className="text-[9px] text-white/40 font-mono">{def.side}</span>
+                        </div>
+                        <div className="text-[9px] text-white/40 mt-0.5">{def.description}</div>
+                        <div className="mt-2 pt-1.5 border-t border-white/5 flex items-center justify-between text-[10px]">
+                          <span>Runs: <strong className="text-cyan-300">{metric?.runsScored || 0}</strong> ({metric?.ballsFaced || 0}b)</span>
+                          <span>Bound: <strong className="text-amber-400">{metric?.boundaryCount || 0}</strong></span>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             )}

@@ -60,6 +60,7 @@ export interface DeliveryResult {
   dismissedPlayerName?: string;
   shotType: string;
   targetZone: string;
+  canonicalZoneId?: string;
   ballPath: BallTrajectoryPath;
   resultType: DeliveryResultType;
   commentary: string;

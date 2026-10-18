@@ -6,6 +6,7 @@ import {
   getLegSideLimit,
   isOnLegSide,
 } from '../fielding/FieldingRestrictionEngine';
+import { BatterScoringMemory, BatterScoringProfile } from '../analytics/BatterScoringMemory';
 
 export interface Point {
   x: number;
@@ -82,6 +83,8 @@ export interface FieldConfiguration {
   legSideLimit?: number;
   /** True when the strict two-fielder movement budget deferred part of the ideal change. */
   movementLimited?: boolean;
+  /** Historical scoring profile of the active striker used for tactical field placement. */
+  batterProfile?: BatterScoringProfile;
 }
 
 export interface FieldStrategyInput {
@@ -128,6 +131,7 @@ export const CANONICAL_POSITIONS: Record<string, FieldPositionDef> = {
   FIRST_SLIP: { key: 'FIRST_SLIP', name: '1st Slip', x: 265, y: 472, category: 'CATCHING', ringDistance: 'CLOSE', isOutsideCircle: false, tacticalRole: 'Edge Catcher' },
   SECOND_SLIP: { key: 'SECOND_SLIP', name: '2nd Slip', x: 240, y: 486, category: 'CATCHING', ringDistance: 'CLOSE', isOutsideCircle: false, tacticalRole: 'Edge Catcher' },
   THIRD_SLIP: { key: 'THIRD_SLIP', name: '3rd Slip', x: 215, y: 500, category: 'CATCHING', ringDistance: 'CLOSE', isOutsideCircle: false, tacticalRole: 'Attacking Edge Trap' },
+  FOURTH_SLIP: { key: 'FOURTH_SLIP', name: '4th Slip', x: 190, y: 514, category: 'CATCHING', ringDistance: 'CLOSE', isOutsideCircle: false, tacticalRole: 'Deep Cordon Catcher' },
   GULLY: { key: 'GULLY', name: 'Gully', x: 190, y: 450, category: 'CATCHING', ringDistance: 'CLOSE', isOutsideCircle: false, tacticalRole: 'Squarer Edge Intercept' },
   FLY_SLIP: { key: 'FLY_SLIP', name: 'Fly Slip', x: 220, y: 525, category: 'CATCHING', ringDistance: 'OUTER', isOutsideCircle: true, tacticalRole: 'Upper Cut / Ramp Trap' },
   LEG_SLIP: { key: 'LEG_SLIP', name: 'Leg Slip', x: 345, y: 470, category: 'CATCHING', ringDistance: 'CLOSE', isOutsideCircle: false, tacticalRole: 'Glance / Turn Catcher' },
@@ -147,20 +151,27 @@ export const CANONICAL_POSITIONS: Record<string, FieldPositionDef> = {
   MID_OFF: { key: 'MID_OFF', name: 'Mid-Off', x: 245, y: 195, category: 'RING', ringDistance: 'INNER', isOutsideCircle: false, tacticalRole: 'Straight Drive Control' },
   MID_ON: { key: 'MID_ON', name: 'Mid-On', x: 355, y: 195, category: 'RING', ringDistance: 'INNER', isOutsideCircle: false, tacticalRole: 'Straight On-Drive Control' },
   MID_WICKET: { key: 'MID_WICKET', name: 'Mid-Wicket', x: 425, y: 285, category: 'RING', ringDistance: 'INNER', isOutsideCircle: false, tacticalRole: 'Flick & Pull Stopper' },
+  FORWARD_SQUARE_LEG: { key: 'FORWARD_SQUARE_LEG', name: 'Forward Square Leg', x: 425, y: 350, category: 'RING', ringDistance: 'INNER', isOutsideCircle: false, tacticalRole: 'Short Midwicket / Pad Saver' },
   SQUARE_LEG: { key: 'SQUARE_LEG', name: 'Square Leg', x: 440, y: 405, category: 'RING', ringDistance: 'INNER', isOutsideCircle: false, tacticalRole: 'Clip / Sweep Sentry' },
+  BACKWARD_SQUARE_LEG: { key: 'BACKWARD_SQUARE_LEG', name: 'Backward Square Leg', x: 420, y: 440, category: 'RING', ringDistance: 'INNER', isOutsideCircle: false, tacticalRole: 'Square Leg Glance Intercept' },
   SHORT_FINE_LEG: { key: 'SHORT_FINE_LEG', name: 'Short Fine Leg', x: 385, y: 465, category: 'RING', ringDistance: 'INNER', isOutsideCircle: false, tacticalRole: 'Glance Single Stopper' },
   SHORT_THIRD_MAN: { key: 'SHORT_THIRD_MAN', name: 'Short Third Man', x: 210, y: 470, category: 'RING', ringDistance: 'INNER', isOutsideCircle: false, tacticalRole: 'Edge & Guide Saver' },
 
   // Deep Outfield Boundary Sweepers (Boundary Protectors)
+  DEEP_THIRD: { key: 'DEEP_THIRD', name: 'Deep Third', x: 160, y: 520, category: 'BOUNDARY', ringDistance: 'OUTER', isOutsideCircle: true, tacticalRole: 'Fine Boundary Third Sentry' },
   DEEP_THIRD_MAN: { key: 'DEEP_THIRD_MAN', name: 'Deep Third Man', x: 145, y: 495, category: 'BOUNDARY', ringDistance: 'OUTER', isOutsideCircle: true, tacticalRole: 'Upper Edge Boundary Patrol' },
+  DEEP_BACKWARD_POINT: { key: 'DEEP_BACKWARD_POINT', name: 'Deep Backward Point', x: 95, y: 455, category: 'BOUNDARY', ringDistance: 'OUTER', isOutsideCircle: true, tacticalRole: 'Upper Cut Boundary Sentry' },
   DEEP_POINT: { key: 'DEEP_POINT', name: 'Deep Point', x: 75, y: 385, category: 'BOUNDARY', ringDistance: 'OUTER', isOutsideCircle: true, tacticalRole: 'Square Cut Boundary Guard' },
   DEEP_COVER: { key: 'DEEP_COVER', name: 'Deep Cover', x: 95, y: 220, category: 'BOUNDARY', ringDistance: 'OUTER', isOutsideCircle: true, tacticalRole: 'Lofted Cover Sweeper' },
   SWEEPER_COVER: { key: 'SWEEPER_COVER', name: 'Deep Cover Sweeper', x: 80, y: 260, category: 'BOUNDARY', ringDistance: 'OUTER', isOutsideCircle: true, tacticalRole: 'Deep Off-Side Sentry' },
+  EXTRA_COVER_BOUNDARY: { key: 'EXTRA_COVER_BOUNDARY', name: 'Extra Cover Boundary', x: 135, y: 135, category: 'BOUNDARY', ringDistance: 'OUTER', isOutsideCircle: true, tacticalRole: 'Lofted Extra Cover Sweeper' },
   LONG_OFF: { key: 'LONG_OFF', name: 'Long-Off', x: 235, y: 75, category: 'BOUNDARY', ringDistance: 'OUTER', isOutsideCircle: true, tacticalRole: 'Straight Boundary Guard' },
   LONG_ON: { key: 'LONG_ON', name: 'Long-On', x: 365, y: 75, category: 'BOUNDARY', ringDistance: 'OUTER', isOutsideCircle: true, tacticalRole: 'Straight Boundary Guard' },
   COW_CORNER: { key: 'COW_CORNER', name: 'Cow Corner', x: 480, y: 165, category: 'BOUNDARY', ringDistance: 'OUTER', isOutsideCircle: true, tacticalRole: 'Slog Sweep Boundary Patrol' },
+  DEEP_LEG_SIDE: { key: 'DEEP_LEG_SIDE', name: 'Deep Leg Side', x: 475, y: 320, category: 'BOUNDARY', ringDistance: 'OUTER', isOutsideCircle: true, tacticalRole: 'Wide Midwicket Deep Sentry' },
   DEEP_MID_WICKET: { key: 'DEEP_MID_WICKET', name: 'Deep Mid-Wicket', x: 515, y: 240, category: 'BOUNDARY', ringDistance: 'OUTER', isOutsideCircle: true, tacticalRole: 'Pull Shot Boundary Guard' },
   DEEP_SQUARE_LEG: { key: 'DEEP_SQUARE_LEG', name: 'Deep Square Leg', x: 525, y: 395, category: 'BOUNDARY', ringDistance: 'OUTER', isOutsideCircle: true, tacticalRole: 'Hook / Pull Sweeper' },
+  DEEP_BACKWARD_SQUARE_LEG: { key: 'DEEP_BACKWARD_SQUARE_LEG', name: 'Deep Backward Square Leg', x: 495, y: 465, category: 'BOUNDARY', ringDistance: 'OUTER', isOutsideCircle: true, tacticalRole: 'Hook / Pull Deep Sweeper' },
   DEEP_FINE_LEG: { key: 'DEEP_FINE_LEG', name: 'Deep Fine Leg', x: 410, y: 495, category: 'BOUNDARY', ringDistance: 'OUTER', isOutsideCircle: true, tacticalRole: 'Hook / Glance Boundary Guard' },
 };
 
@@ -475,6 +486,64 @@ export class BowlerFieldStrategyEngine {
       }
     }
 
+    // ════ INTELLIGENT HISTORICAL BATTER SCORING-ZONE TACTICS ════
+    const batterProfile = striker ? BatterScoringMemory.getBatterProfile(striker.id, {
+      format,
+      bowlingType: isSpinner ? 'SPIN' : 'PACE',
+    }) : null;
+
+    if (!input.manualPresetKey && batterProfile && batterProfile.sampleSizeConfidence !== 'INSUFFICIENT') {
+      const topBoundary = batterProfile.topBoundaryZones[0];
+      const topDismissal = batterProfile.vulnerableDismissalZones[0];
+      const explanationParts: string[] = [];
+
+      // 1. Defend top boundary scoring zones
+      if (topBoundary === 'COW_CORNER' || topBoundary === 'MID_WICKET') {
+        if (!selectedKeys.includes('DEEP_MID_WICKET') && !selectedKeys.includes('COW_CORNER')) {
+          const replaceIdx = selectedKeys.findIndex(k => k === 'EXTRA_COVER' || k === 'COVER_POINT' || k === 'SHORT_THIRD_MAN' || k === 'POINT');
+          if (replaceIdx !== -1) {
+            selectedKeys[replaceIdx] = 'DEEP_MID_WICKET';
+          }
+        }
+        explanationParts.push("Deep midwicket added to reduce the batter's frequent leg-side boundaries");
+      } else if (topBoundary === 'COVER' || topBoundary === 'EXTRA_COVER') {
+        if (!selectedKeys.includes('DEEP_COVER') && !selectedKeys.includes('COVER')) {
+          const replaceIdx = selectedKeys.findIndex(k => k === 'SHORT_FINE_LEG' || k === 'MID_WICKET' || k === 'MID_ON');
+          if (replaceIdx !== -1) {
+            selectedKeys[replaceIdx] = 'DEEP_COVER';
+          }
+        }
+        explanationParts.push("Deep cover deployed to protect batter's productive off-side driving zone");
+      } else if (topBoundary === 'POINT' || topBoundary === 'DEEP_BACKWARD_POINT') {
+        if (!selectedKeys.includes('DEEP_POINT') && !selectedKeys.includes('POINT')) {
+          const replaceIdx = selectedKeys.findIndex(k => k === 'SHORT_FINE_LEG' || k === 'MID_ON' || k === 'EXTRA_COVER');
+          if (replaceIdx !== -1) {
+            selectedKeys[replaceIdx] = 'DEEP_POINT';
+          }
+        }
+        explanationParts.push("Deep point positioned to cut off square-cut boundaries");
+      } else if (topBoundary === 'LONG_OFF' || topBoundary === 'LONG_ON') {
+        explanationParts.push("Boundary patrol strengthened down the ground against lofted drives");
+      }
+
+      // 2. Attack dismissal vulnerabilities
+      if (topDismissal === 'FINE_THIRD_MAN' || topDismissal === 'THIRD_MAN') {
+        if (!selectedKeys.includes('FIRST_SLIP')) {
+          const replaceIdx = selectedKeys.findIndex(k => k === 'EXTRA_COVER' || k === 'MID_WICKET' || k === 'COVER_POINT');
+          if (replaceIdx !== -1) {
+            selectedKeys[replaceIdx] = 'FIRST_SLIP';
+          }
+        }
+        explanationParts.push("First slip retained to attack outside edge vulnerability");
+      }
+
+      if (explanationParts.length > 0) {
+        intentText = `${explanationParts.join('. ')}. (Adaptive AI Field Strategy)`;
+      }
+    } else if (batterProfile && batterProfile.sampleSizeConfidence === 'INSUFFICIENT') {
+      intentText = `${intentText} (standard template deployed - limited batter scoring history)`;
+    }
+
     // Adapt to manual preset request if specified
     if (input.manualPresetKey && this.PRESET_OVERLAYS[input.manualPresetKey]) {
       const preset = this.PRESET_OVERLAYS[input.manualPresetKey];
@@ -589,7 +658,7 @@ export class BowlerFieldStrategyEngine {
     // ─────────────────────────────────────────────────────────────────────────
     // 5. SCORING ZONES CALCULATION (360° Wagon Wheel)
     // ─────────────────────────────────────────────────────────────────────────
-    const scoringZones = this.computeScoringZones(fielders, isLeftHander);
+    const scoringZones = this.computeScoringZones(fielders, isLeftHander, batterProfile);
 
     return {
       id: `field_cfg_${Date.now()}`,
@@ -608,6 +677,7 @@ export class BowlerFieldStrategyEngine {
       isCompliant,
       changedFielders,
       scoringZones,
+      batterProfile: batterProfile || undefined,
     };
   }
 
@@ -819,16 +889,20 @@ export class BowlerFieldStrategyEngine {
   /**
    * Helper: computes 360-degree scoring zones and protection status.
    */
-  private static computeScoringZones(fielders: FielderAssignment[], isLeftHander: boolean): ScoringZoneData[] {
+  private static computeScoringZones(
+    fielders: FielderAssignment[],
+    isLeftHander: boolean,
+    batterProfile?: BatterScoringProfile | null
+  ): ScoringZoneData[] {
     const zones = [
-      { name: 'Third Man & Gully', angleRange: [-150, -110] as [number, number] },
-      { name: 'Point & Backward Point', angleRange: [-110, -70] as [number, number] },
-      { name: 'Cover & Extra Cover', angleRange: [-70, -25] as [number, number] },
-      { name: 'Straight Long-Off', angleRange: [-25, 0] as [number, number] },
-      { name: 'Straight Long-On', angleRange: [0, 25] as [number, number] },
-      { name: 'Mid-Wicket & Cow Corner', angleRange: [25, 70] as [number, number] },
-      { name: 'Square Leg', angleRange: [70, 110] as [number, number] },
-      { name: 'Fine Leg', angleRange: [110, 150] as [number, number] },
+      { name: 'Third Man & Gully', angleRange: [-150, -110] as [number, number], keys: ['FINE_THIRD_MAN', 'THIRD_MAN'] },
+      { name: 'Point & Backward Point', angleRange: [-110, -70] as [number, number], keys: ['DEEP_BACKWARD_POINT', 'POINT'] },
+      { name: 'Cover & Extra Cover', angleRange: [-70, -25] as [number, number], keys: ['COVER_POINT', 'COVER', 'EXTRA_COVER'] },
+      { name: 'Straight Long-Off', angleRange: [-25, 0] as [number, number], keys: ['LONG_OFF', 'STRAIGHT_OFF'] },
+      { name: 'Straight Long-On', angleRange: [0, 25] as [number, number], keys: ['STRAIGHT_ON', 'LONG_ON'] },
+      { name: 'Mid-Wicket & Cow Corner', angleRange: [25, 70] as [number, number], keys: ['MID_WICKET', 'COW_CORNER'] },
+      { name: 'Square Leg', angleRange: [70, 110] as [number, number], keys: ['SQUARE_LEG', 'BACKWARD_SQUARE_LEG'] },
+      { name: 'Fine Leg', angleRange: [110, 150] as [number, number], keys: ['FINE_LEG'] },
     ];
 
     return zones.map(z => {
@@ -840,11 +914,20 @@ export class BowlerFieldStrategyEngine {
         return deg >= z.angleRange[0] && deg <= z.angleRange[1];
       });
 
+      let realRuns = 0;
+      if (batterProfile && batterProfile.totalBalls > 0) {
+        for (const k of z.keys) {
+          if (batterProfile.zones[k as any]) {
+            realRuns += batterProfile.zones[k as any].runsScored;
+          }
+        }
+      }
+
       return {
         zone: z.name,
         angleRange: z.angleRange,
         riskLevel: hasCoverage ? 'LOW' : 'HIGH',
-        runsScored: hasCoverage ? Math.floor(Math.random() * 8) : 12 + Math.floor(Math.random() * 14),
+        runsScored: realRuns,
         protection: hasCoverage ? 'COVERED' : 'OPEN',
       };
     });
@@ -852,6 +935,7 @@ export class BowlerFieldStrategyEngine {
 
   /**
    * Tactical Preset Overlays for manual selection.
+   * Derived from authoritative T20, ODI, and Test reference blueprints.
    */
   public static readonly PRESET_OVERLAYS: Record<string, { name: string; keys: string[]; intent: string }> = {
     BALANCED_RING: {
@@ -878,6 +962,237 @@ export class BowlerFieldStrategyEngine {
       name: 'Short Ball Bouncer Trap',
       keys: ['FIRST_SLIP', 'SHORT_LEG', 'POINT', 'MID_OFF', 'MID_ON', 'SQUARE_LEG', 'DEEP_SQUARE_LEG', 'DEEP_MID_WICKET', 'DEEP_THIRD_MAN'],
       intent: 'Bouncer ambush with deep square and mid-wicket waiting for hook and pull shots',
+    },
+
+    // ── ODI REFERENCE PRESETS ──
+    ODI_PP_PACE: {
+      name: 'ODI Powerplay - Right-Arm Pace (New Ball)',
+      keys: ['FIRST_SLIP', 'GULLY', 'POINT', 'COVER', 'MID_OFF', 'MID_ON', 'SQUARE_LEG', 'DEEP_THIRD_MAN', 'DEEP_FINE_LEG'],
+      intent: 'Attacking 2-slip cordon with 2 boundary catchers on rope within 2-outside limit',
+    },
+    ODI_PP_LEFT_ARM_PACE: {
+      name: 'ODI Powerplay - Left-Arm Pace (New Ball)',
+      keys: ['FIRST_SLIP', 'GULLY', 'POINT', 'COVER', 'MID_OFF', 'MID_ON', 'SQUARE_LEG', 'DEEP_THIRD_MAN', 'DEEP_FINE_LEG'],
+      intent: 'Angling across right-hander with slip and gully, fine leg protected',
+    },
+    ODI_PP_SWING: {
+      name: 'ODI Powerplay - Swing Conditions (Cloudy)',
+      keys: ['FIRST_SLIP', 'SECOND_SLIP', 'POINT', 'COVER', 'MID_OFF', 'MID_ON', 'SQUARE_LEG', 'DEEP_THIRD_MAN', 'DEEP_FINE_LEG'],
+      intent: 'Overcast swing attack with 2 slips hunting moving deliveries',
+    },
+    ODI_PP_SPIN: {
+      name: 'ODI Powerplay - Spin Bowling',
+      keys: ['FIRST_SLIP', 'POINT', 'COVER', 'MID_OFF', 'MID_ON', 'MID_WICKET', 'SQUARE_LEG', 'DEEP_THIRD_MAN', 'DEEP_FINE_LEG'],
+      intent: 'Powerplay spin choke with ring single denial and slip catcher',
+    },
+    ODI_PP_DEFENSIVE: {
+      name: 'ODI Powerplay - Defensive Start',
+      keys: ['POINT', 'COVER', 'EXTRA_COVER', 'MID_OFF', 'MID_ON', 'MID_WICKET', 'SQUARE_LEG', 'DEEP_THIRD_MAN', 'DEEP_FINE_LEG'],
+      intent: 'Defensive ring preventing singles and limiting early boundary blitz',
+    },
+    ODI_MID_PACE_BALANCED: {
+      name: 'ODI Middle - Pace Balanced Field',
+      keys: ['POINT', 'COVER', 'MID_OFF', 'MID_ON', 'SQUARE_LEG', 'DEEP_THIRD_MAN', 'DEEP_FINE_LEG', 'DEEP_COVER', 'DEEP_MID_WICKET'],
+      intent: '4 deep sweepers controlling strike rotation and boundary releases',
+    },
+    ODI_MID_SPIN_ATTACK: {
+      name: 'ODI Middle - Spin Attacking Field',
+      keys: ['FIRST_SLIP', 'SHORT_LEG', 'POINT', 'COVER', 'MID_OFF', 'MID_ON', 'SHORT_FINE_LEG', 'DEEP_COVER', 'DEEP_MID_WICKET'],
+      intent: 'Attacking spin with slip and short leg bat-pad, 2 deep sweepers for lofted shots',
+    },
+    ODI_MID_BLOCK_HOLES: {
+      name: 'ODI Middle - Block Holes (Dot Balls)',
+      keys: ['POINT', 'COVER', 'MID_OFF', 'MID_ON', 'SQUARE_LEG', 'DEEP_THIRD_MAN', 'SHORT_FINE_LEG', 'LONG_OFF', 'LONG_ON'],
+      intent: 'Denying boundary down ground and choking singles to build dot-ball pressure',
+    },
+    ODI_MID_PARTNERSHIP_BREAKER: {
+      name: 'ODI Middle - Partnership Breaker',
+      keys: ['FIRST_SLIP', 'SHORT_LEG', 'POINT', 'COVER', 'MID_OFF', 'MID_ON', 'SHORT_FINE_LEG', 'DEEP_COVER', 'DEEP_MID_WICKET'],
+      intent: 'Aggressive close-catcher deployment to induce mistimed stroke against settled partnership',
+    },
+    ODI_MID_LEFT_HAND_BATTER: {
+      name: 'ODI Middle - Against Left-Hand Batter',
+      keys: ['POINT', 'COVER', 'MID_OFF', 'MID_ON', 'SQUARE_LEG', 'DEEP_THIRD_MAN', 'DEEP_FINE_LEG', 'DEEP_COVER', 'DEEP_MID_WICKET'],
+      intent: 'Realigned 4-deep field mirroring angles for left-handed striker',
+    },
+    ODI_DEATH_STANDARD: {
+      name: 'ODI Death - Standard Death Field',
+      keys: ['COVER', 'MID_OFF', 'MID_ON', 'MID_WICKET', 'DEEP_THIRD_MAN', 'DEEP_FINE_LEG', 'DEEP_POINT', 'DEEP_SQUARE_LEG', 'LONG_OFF'],
+      intent: '5 deep boundary sweepers protecting ropes during final phase',
+    },
+    ODI_DEATH_YORKER: {
+      name: 'ODI Death - Yorker Plan',
+      keys: ['SHORT_THIRD_MAN', 'COVER', 'MID_OFF', 'MID_ON', 'DEEP_POINT', 'LONG_OFF', 'LONG_ON', 'DEEP_MID_WICKET', 'DEEP_SQUARE_LEG'],
+      intent: 'Boundary denial with 5 on rope executing toe-crushing yorkers',
+    },
+    ODI_DEATH_SLOWER_BALL: {
+      name: 'ODI Death - Slower Ball Plan',
+      keys: ['POINT', 'COVER', 'MID_OFF', 'MID_ON', 'DEEP_POINT', 'LONG_OFF', 'LONG_ON', 'DEEP_MID_WICKET', 'DEEP_SQUARE_LEG'],
+      intent: 'Off-pace cutters forcing mistimed aerial strokes into deep sweepers',
+    },
+    ODI_DEATH_AGGRESSIVE_BATTER: {
+      name: 'ODI Death - Aggressive Batter',
+      keys: ['COVER', 'MID_OFF', 'MID_ON', 'MID_WICKET', 'DEEP_THIRD_MAN', 'DEEP_POINT', 'LONG_OFF', 'LONG_ON', 'DEEP_MID_WICKET'],
+      intent: 'Deep fence guarding prime hitting zones against power batter',
+    },
+    ODI_DEATH_DEFENDING_TOTAL: {
+      name: 'ODI Death - Defending a Total',
+      keys: ['SHORT_THIRD_MAN', 'COVER', 'MID_OFF', 'MID_ON', 'DEEP_POINT', 'LONG_OFF', 'LONG_ON', 'DEEP_MID_WICKET', 'DEEP_SQUARE_LEG'],
+      intent: 'Maximum boundary protection to squeeze required rate at the death',
+    },
+
+    // ── TEST CRICKET REFERENCE PRESETS ──
+    TEST_NEW_BALL_PACE: {
+      name: 'Test New Ball - Right-Arm Pace (Standard)',
+      keys: ['FIRST_SLIP', 'SECOND_SLIP', 'THIRD_SLIP', 'GULLY', 'POINT', 'COVER', 'MID_OFF', 'MID_ON', 'SHORT_FINE_LEG'],
+      intent: 'Relentless 4th-stump probing with 3 slips and gully hunting outside edge',
+    },
+    TEST_NEW_BALL_LEFT_ARM: {
+      name: 'Test New Ball - Left-Arm Pace',
+      keys: ['FIRST_SLIP', 'SECOND_SLIP', 'GULLY', 'POINT', 'COVER', 'MID_OFF', 'MID_ON', 'SQUARE_LEG', 'SHORT_FINE_LEG'],
+      intent: 'Left-arm seam movement across right-hander probing corridor of uncertainty',
+    },
+    TEST_NEW_BALL_SWING: {
+      name: 'Test New Ball - Swing Conditions',
+      keys: ['FIRST_SLIP', 'SECOND_SLIP', 'THIRD_SLIP', 'FOURTH_SLIP', 'GULLY', 'COVER', 'MID_OFF', 'MID_ON', 'SHORT_FINE_LEG'],
+      intent: 'Heavy overhead swing with 4 slips and gully attacking the moving ball',
+    },
+    TEST_NEW_BALL_BOUNCY: {
+      name: 'Test New Ball - Bouncy Pitch',
+      keys: ['FIRST_SLIP', 'SECOND_SLIP', 'THIRD_SLIP', 'GULLY', 'POINT', 'COVER', 'MID_OFF', 'MID_ON', 'DEEP_FINE_LEG'],
+      intent: 'High bounce attack with slips back and fine leg positioned for top edges',
+    },
+    TEST_NEW_BALL_OVERSEAS: {
+      name: 'Test New Ball - Overseas Conditions',
+      keys: ['FIRST_SLIP', 'SECOND_SLIP', 'GULLY', 'POINT', 'COVER', 'MID_OFF', 'MID_ON', 'SQUARE_LEG', 'DEEP_THIRD_MAN'],
+      intent: 'Disciplined channel bowling with deep third man backup for away tours',
+    },
+    TEST_SPIN_OFF_SPIN: {
+      name: 'Test Spin - Off Spin (Right-Arm)',
+      keys: ['FIRST_SLIP', 'SILLY_POINT', 'SHORT_LEG', 'POINT', 'COVER', 'MID_OFF', 'MID_ON', 'SQUARE_LEG', 'DEEP_MID_WICKET'],
+      intent: 'Close bat-pad catchers around batter pads with deep midwicket saving aerial hit',
+    },
+    TEST_SPIN_LEFT_ARM: {
+      name: 'Test Spin - Left-Arm Spin',
+      keys: ['FIRST_SLIP', 'SILLY_POINT', 'SHORT_LEG', 'POINT', 'COVER', 'MID_OFF', 'MID_ON', 'SQUARE_LEG', 'DEEP_MID_WICKET'],
+      intent: 'Arm ball and turn into the rough with silly point and short leg waiting',
+    },
+    TEST_SPIN_DRY_TURNING: {
+      name: 'Test Spin - Dry Turning Pitch',
+      keys: ['FIRST_SLIP', 'LEG_SLIP', 'SILLY_POINT', 'SHORT_LEG', 'POINT', 'COVER', 'MID_OFF', 'MID_ON', 'DEEP_MID_WICKET'],
+      intent: 'Puffing dust and sharp turn: leg slip, silly point and short leg surrounding batter',
+    },
+    TEST_SPIN_LEFT_HAND: {
+      name: 'Test Spin - Against Left-Hand Batter',
+      keys: ['FIRST_SLIP', 'LEG_SLIP', 'SILLY_POINT', 'SHORT_LEG', 'POINT', 'COVER', 'MID_OFF', 'MID_ON', 'DEEP_SQUARE_LEG'],
+      intent: 'Off-spinner turning into the left-hander pads with bat-pad cordon ready',
+    },
+    TEST_SPIN_DEFENSIVE: {
+      name: 'Test Spin - Defensive Spin Field',
+      keys: ['FIRST_SLIP', 'POINT', 'COVER', 'MID_OFF', 'MID_ON', 'MID_WICKET', 'SQUARE_LEG', 'DEEP_COVER', 'DEEP_MID_WICKET'],
+      intent: 'Ring choke cutting off singles and protecting boundary sweepers',
+    },
+    TEST_LATE_ATTACKING: {
+      name: 'Test Late Session - Attacking (Wicket Hunt)',
+      keys: ['FIRST_SLIP', 'SECOND_SLIP', 'SILLY_POINT', 'SHORT_LEG', 'POINT', 'COVER', 'MID_OFF', 'MID_ON', 'SHORT_FINE_LEG'],
+      intent: 'All-out wicket hunt with crowded infield catchers applying claustrophobic pressure',
+    },
+    TEST_LATE_DEFENSIVE: {
+      name: 'Test Late Session - Defensive (Run Prevention)',
+      keys: ['POINT', 'COVER', 'EXTRA_COVER', 'MID_OFF', 'MID_ON', 'MID_WICKET', 'SQUARE_LEG', 'DEEP_THIRD_MAN', 'DEEP_MID_WICKET'],
+      intent: 'Drying up runs and frustrating established batters before the close of play',
+    },
+    TEST_LATE_TAILENDERS: {
+      name: 'Test Late Session - Against Tailenders',
+      keys: ['FIRST_SLIP', 'GULLY', 'SILLY_POINT', 'SHORT_LEG', 'POINT', 'MID_OFF', 'MID_ON', 'SQUARE_LEG', 'DEEP_FINE_LEG'],
+      intent: 'Throat ball bouncer ambush with catchers under helmet and deep fine leg',
+    },
+    TEST_LATE_PROTECT_LEAD: {
+      name: 'Test Late Session - 4th Innings (Protect Lead)',
+      keys: ['FIRST_SLIP', 'POINT', 'COVER', 'MID_OFF', 'MID_ON', 'MID_WICKET', 'SQUARE_LEG', 'DEEP_THIRD_MAN', 'DEEP_MID_WICKET'],
+      intent: 'Deep boundary sweeper protection with slip to defend 4th innings target',
+    },
+    TEST_LATE_FORCE_DECISION: {
+      name: 'Test Late Session - To Force a Decision',
+      keys: ['FIRST_SLIP', 'SECOND_SLIP', 'GULLY', 'SILLY_POINT', 'SHORT_LEG', 'POINT', 'COVER', 'MID_OFF', 'SHORT_FINE_LEG'],
+      intent: 'Ultra-aggressive ring to force an error in dying overs of Day 5',
+    },
+
+    // ── T20 / IPL REFERENCE PRESETS ──
+    T20_PP_PACE: {
+      name: 'T20 Powerplay - Right-Arm Pace (New Ball)',
+      keys: ['FIRST_SLIP', 'POINT', 'COVER', 'MID_OFF', 'MID_ON', 'MID_WICKET', 'SQUARE_LEG', 'DEEP_THIRD_MAN', 'DEEP_FINE_LEG'],
+      intent: 'Slip catching edge with 2 boundary guards within powerplay limits',
+    },
+    T20_PP_LEFT_ARM_PACE: {
+      name: 'T20 Powerplay - Left-Arm Pace (New Ball)',
+      keys: ['FIRST_SLIP', 'POINT', 'COVER', 'MID_OFF', 'MID_ON', 'MID_WICKET', 'SQUARE_LEG', 'DEEP_THIRD_MAN', 'DEEP_FINE_LEG'],
+      intent: 'Left-arm swing across right-hander with slip and deep fine leg',
+    },
+    T20_PP_SPIN_RIGHT: {
+      name: 'T20 Powerplay - Right-Arm Spin',
+      keys: ['FIRST_SLIP', 'SHORT_LEG', 'POINT', 'COVER', 'MID_OFF', 'MID_ON', 'SQUARE_LEG', 'SHORT_FINE_LEG', 'DEEP_SQUARE_LEG'],
+      intent: 'Attacking powerplay spin with slip and deep square leg boundary protection',
+    },
+    T20_PP_SPIN_LEFT: {
+      name: 'T20 Powerplay - Left-Arm Spin',
+      keys: ['FIRST_SLIP', 'SHORT_LEG', 'POINT', 'COVER', 'MID_OFF', 'MID_ON', 'SQUARE_LEG', 'SHORT_FINE_LEG', 'DEEP_SQUARE_LEG'],
+      intent: 'Left-arm orthodox darting into stumps with slip and deep square',
+    },
+    T20_PP_DEFENSIVE: {
+      name: 'T20 Powerplay - Defensive Powerplay',
+      keys: ['POINT', 'COVER', 'EXTRA_COVER', 'MID_OFF', 'MID_ON', 'MID_WICKET', 'SQUARE_LEG', 'DEEP_THIRD_MAN', 'DEEP_SQUARE_LEG'],
+      intent: 'Restricting powerplay boundary avenues through 30-yard ring single choke',
+    },
+    T20_MID_PACE_ATTACK: {
+      name: 'T20 Middle - Pace Attacking Field',
+      keys: ['FIRST_SLIP', 'COVER', 'MID_OFF', 'MID_ON', 'DEEP_THIRD_MAN', 'DEEP_POINT', 'DEEP_COVER', 'DEEP_MID_WICKET', 'LONG_OFF'],
+      intent: 'Slip catcher retained with 5 boundary sweepers challenging aerial risks',
+    },
+    T20_MID_PACE_DEFENSIVE: {
+      name: 'T20 Middle - Pace Defensive Field',
+      keys: ['POINT', 'COVER', 'MID_OFF', 'MID_ON', 'DEEP_THIRD_MAN', 'DEEP_POINT', 'DEEP_COVER', 'DEEP_MID_WICKET', 'DEEP_FINE_LEG'],
+      intent: 'Deep fence on both flanks squeezing scoring opportunities in middle overs',
+    },
+    T20_MID_SPIN_ATTACK: {
+      name: 'T20 Middle - Spin Attacking Field',
+      keys: ['FIRST_SLIP', 'SHORT_LEG', 'POINT', 'COVER', 'MID_WICKET', 'LONG_OFF', 'LONG_ON', 'COW_CORNER', 'DEEP_SQUARE_LEG'],
+      intent: 'Tempting big shot with boundary fielders positioned at long-on and deep midwicket',
+    },
+    T20_MID_SPIN_DEFENSIVE: {
+      name: 'T20 Middle - Spin Defensive Field',
+      keys: ['POINT', 'COVER', 'MID_OFF', 'MID_ON', 'MID_WICKET', 'DEEP_POINT', 'LONG_OFF', 'LONG_ON', 'DEEP_SQUARE_LEG'],
+      intent: 'Deep fence denying boundaries and forcing single rotation against spin',
+    },
+    T20_MID_AGGRESSIVE_BATTER: {
+      name: 'T20 Middle - Against Aggressive Batter',
+      keys: ['COVER', 'MID_OFF', 'MID_ON', 'MID_WICKET', 'DEEP_THIRD_MAN', 'DEEP_POINT', 'LONG_OFF', 'LONG_ON', 'DEEP_MID_WICKET'],
+      intent: 'Plugging boundary zones to starve aggressive batter of boundary hits',
+    },
+    T20_DEATH_YORKER: {
+      name: 'T20 Death - Yorker Plan',
+      keys: ['SHORT_THIRD_MAN', 'COVER', 'MID_OFF', 'MID_ON', 'DEEP_POINT', 'LONG_OFF', 'LONG_ON', 'DEEP_MID_WICKET', 'DEEP_SQUARE_LEG'],
+      intent: 'Boundary denial with 5 sentries back on the rope for blockhole yorkers',
+    },
+    T20_DEATH_SLOWER_BALL: {
+      name: 'T20 Death - Slower Ball Plan',
+      keys: ['SHORT_THIRD_MAN', 'POINT', 'COVER', 'MID_OFF', 'DEEP_POINT', 'LONG_OFF', 'LONG_ON', 'DEEP_MID_WICKET', 'DEEP_SQUARE_LEG'],
+      intent: 'Off-pace deliveries enticing mishits into 5 boundary sweepers',
+    },
+    T20_DEATH_SPIN: {
+      name: 'T20 Death - Spin Death Overs',
+      keys: ['COVER', 'MID_OFF', 'MID_ON', 'MID_WICKET', 'DEEP_POINT', 'DEEP_SQUARE_LEG', 'LONG_OFF', 'LONG_ON', 'DEEP_MID_WICKET'],
+      intent: 'Deep straight and midwicket ropes covered against death-over slogs',
+    },
+    T20_DEATH_LEFT_HAND: {
+      name: 'T20 Death - Against Left-Hand Batter',
+      keys: ['COVER', 'MID_OFF', 'MID_ON', 'MID_WICKET', 'DEEP_THIRD_MAN', 'DEEP_FINE_LEG', 'DEEP_COVER', 'LONG_OFF', 'LONG_ON'],
+      intent: 'Realigned boundary ropes targeting left-hander hitting arcs at the death',
+    },
+    T20_DEATH_LEG_SIDE_HEAVY: {
+      name: 'T20 Death - Leg-Side Heavy Field',
+      keys: ['POINT', 'COVER', 'MID_OFF', 'SHORT_THIRD_MAN', 'DEEP_MID_WICKET', 'COW_CORNER', 'DEEP_SQUARE_LEG', 'DEEP_FINE_LEG', 'LONG_ON'],
+      intent: '5 leg-side sentries defending against pull, hook and slog sweep boundaries',
     },
   };
 

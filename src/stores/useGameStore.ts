@@ -28,6 +28,7 @@ import {
 } from '../engine/competition/seasonProgression';
 import { buildMatchConditionsReport, hashSeed } from '../engine/conditions';
 import type { MatchConditionReport, MatchFormatKey } from '../engine/conditions';
+import { BatterScoringMemory } from '../engine/analytics/BatterScoringMemory';
 
 // Pre-flight cleanup: if localStorage contains bloated old store payload, strip heavy keys immediately
 try {
@@ -695,6 +696,17 @@ export const useGameStore = create<GameStore>()(
               }
             : f
         );
+
+        // Idempotent adaptive learning: update batter scoring records once per finalized match
+        try {
+          BatterScoringMemory.backfillFromFixtures([{
+            ...existingFixture,
+            scorecard,
+            format: (state.selectedFormat || 'IPL') as any,
+          }]);
+        } catch {
+          // Analytics non-blocking
+        }
 
         const { team1Id, team2Id, winnerId } = scorecard;
         const team1Innings = scorecard.innings[0];
