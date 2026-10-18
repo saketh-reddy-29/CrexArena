@@ -640,13 +640,14 @@ export default function LiveMatchCenter() {
         pitch,
         weather,
         manualPresetKey: key,
+        maxFielderMoves: 11,
         fieldingSquad: bowlingSquad,
-        previousConfig: liveFieldConfiguration,
+        previousConfig: null,
       });
       setLiveFieldConfiguration(newConfig);
       setOpponentTacticalNotice(`Field set: ${BowlerFieldStrategyEngine.PRESET_OVERLAYS[key]?.name || key}`);
     }
-  }, [selectedFormat, currentBowler, striker, nonStriker, inning, matchTarget, pitch, weather, bowlingSquad, liveFieldConfiguration]);
+  }, [selectedFormat, currentBowler, striker, nonStriker, inning, matchTarget, pitch, weather, bowlingSquad]);
 
   const totalTestBalls = useMemo(() => innings.reduce((sum, inn) => sum + inn.balls, 0), [innings]);
   const testDaySession = useMemo(() => getTestDaySession(totalTestBalls, testRules), [totalTestBalls, testRules]);

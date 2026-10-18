@@ -270,6 +270,13 @@ export default function CricketActionVisualizer({
     if (propFieldPresetKey !== undefined) onFieldPresetChange?.(key);
   };
 
+  // Formations strictly matching the active match format (T20 in T20/IPL, Test in Test, ODI in ODI)
+  const formatPresets = useMemo(() => {
+    const fmt = selectedFormat === 'IPL' ? 'T20' : selectedFormat;
+    const prefix = fmt === 'TEST' ? 'TEST_' : fmt === 'ODI' ? 'ODI_' : 'T20_';
+    return Object.entries(BowlerFieldStrategyEngine.PRESET_OVERLAYS).filter(([key]) => key.startsWith(prefix));
+  }, [selectedFormat]);
+
   useEffect(() => {
     if (propSpeed !== undefined) {
       setSpeed(propSpeed);
@@ -309,7 +316,8 @@ export default function CricketActionVisualizer({
   // Physical Fielders in 2D Space (Exactly 11 Players)
   const [fielders, setFielders] = useState<FielderLiveState[]>(() => {
     return fieldConfig.fielders.map((f) => {
-      const pos = clampFielderCoordinate(f.targetPos);
+      const isAnchor = f.positionKey === 'BOWLER' || f.positionKey === 'WICKETKEEPER';
+      const pos = isAnchor ? { ...f.targetPos } : clampFielderCoordinate(f.targetPos);
       return {
         id: f.id,
         name: f.name,
@@ -452,30 +460,21 @@ export default function CricketActionVisualizer({
     const currentPositionsMap = new Map(fielders.map(f => [f.id, { x: f.currentX, y: f.currentY, role: f.role }]));
 
     const resolved = newConfig.fielders.map((f) => {
-      const clampedTarget = clampFielderCoordinate(f.targetPos);
+      const isAnchor = f.positionKey === 'BOWLER' || f.positionKey === 'WICKETKEEPER';
+      const clampedTarget = isAnchor ? { ...f.targetPos } : clampFielderCoordinate(f.targetPos);
       const rawCurrent = currentPositionsMap.get(f.id) || { x: clampedTarget.x, y: clampedTarget.y, role: f.positionName };
-      const clampedCurrent = clampFielderCoordinate(rawCurrent);
+      const clampedCurrent = isAnchor ? { x: rawCurrent.x, y: rawCurrent.y } : clampFielderCoordinate(rawCurrent);
       const dist = Math.hypot(clampedTarget.x - clampedCurrent.x, clampedTarget.y - clampedCurrent.y);
       return { f, clampedTarget, clampedCurrent, dist, fromRole: rawCurrent.role };
     });
-
-    // HARD MOVEMENT BUDGET — at most two outfielders animate per field update.
-    // Bowler and Wicketkeeper are stationary anchors.
-    const moverIds = new Set(
-      resolved
-        .filter((r) => r.f.positionKey !== 'BOWLER' && r.f.positionKey !== 'WICKETKEEPER' && r.dist > 4)
-        .sort((a, b) => b.dist - a.dist)
-        .slice(0, 2)
-        .map((r) => r.f.id),
-    );
 
     let hasMovement = false;
     const movingList: FieldConfiguration['changedFielders'] = [];
 
     const updatedFielders: FielderLiveState[] = resolved.map(({ f, clampedTarget, clampedCurrent, dist, fromRole }) => {
-      const isMoving = moverIds.has(f.id);
-      const targetX = isMoving ? clampedTarget.x : clampedCurrent.x;
-      const targetY = isMoving ? clampedTarget.y : clampedCurrent.y;
+      const isMoving = dist > 4;
+      const targetX = clampedTarget.x;
+      const targetY = clampedTarget.y;
 
       if (isMoving) {
         hasMovement = true;
@@ -579,8 +578,9 @@ export default function CricketActionVisualizer({
       partnershipRuns,
       partnershipBalls,
       fieldingSquad,
-      previousConfig: fieldConfig,
+      previousConfig: presetKey ? null : fieldConfig,
       manualPresetKey: presetKey,
+      maxFielderMoves: presetKey ? 11 : undefined,
       testDaySession,
       totalOvers,
       season,
@@ -1248,7 +1248,7 @@ export default function CricketActionVisualizer({
                 title="Select Field Preset"
               >
                 <option value="">🤖 AI Auto-Select</option>
-                {Object.entries(BowlerFieldStrategyEngine.PRESET_OVERLAYS).map(([pKey, pDef]) => (
+                {formatPresets.map(([pKey, pDef]) => (
                   <option key={pKey} value={pKey}>
                     {pDef.name.split('(')[0].trim()}
                   </option>
@@ -2098,9 +2098,9 @@ export default function CricketActionVisualizer({
 
             {/* Presets */}
             <div className="space-y-1.5">
-              <span className="text-[9px] font-black text-slate-500 uppercase tracking-wider block">Tactical Presets</span>
+              <span className="text-[9px] font-black text-slate-500 uppercase tracking-wider block">Tactical Presets ({selectedFormat})</span>
               <div className="grid grid-cols-2 gap-1.5">
-                {Object.entries(BowlerFieldStrategyEngine.PRESET_OVERLAYS).map(([pKey, pDef]) => (
+                {formatPresets.map(([pKey, pDef]) => (
                   <button
                     key={pKey}
                     onClick={() => {

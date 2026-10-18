@@ -580,6 +580,10 @@ export default function FieldSetupDashboard({
 
   const [activeFormat, setActiveFormat] = useState<FormatTab>(initTab);
 
+  useEffect(() => {
+    setActiveFormat(initTab);
+  }, [initTab]);
+
   // --- AI auto-selection state ---
   const [aiKey,      setAiKey]      = useState<string | null>(null);
   const [aiReason,   setAiReason]   = useState<string>('');
@@ -675,11 +679,17 @@ export default function FieldSetupDashboard({
     return 'In Session';
   }, [activeFormat, currentOver]);
 
-  const FORMAT_TABS = [
-    { id: 'T20' as FormatTab,  label: 'T20',  activeClass: 'bg-blue-600 text-white' },
-    { id: 'ODI' as FormatTab,  label: 'ODI',  activeClass: 'bg-sky-600 text-white' },
-    { id: 'TEST' as FormatTab, label: 'TEST', activeClass: 'bg-rose-700 text-white' },
-  ];
+  const FORMAT_TABS = useMemo(() => {
+    const all = [
+      { id: 'T20' as FormatTab,  label: 'T20 / IPL Formations',  activeClass: 'bg-blue-600 text-white' },
+      { id: 'ODI' as FormatTab,  label: 'ODI Formations',        activeClass: 'bg-sky-600 text-white' },
+      { id: 'TEST' as FormatTab, label: 'TEST Formations',       activeClass: 'bg-rose-700 text-white' },
+    ];
+    if (currentFormat) {
+      return all.filter(tab => tab.id === initTab);
+    }
+    return all;
+  }, [currentFormat, initTab]);
 
   const activePreset = activeKey ? BowlerFieldStrategyEngine.PRESET_OVERLAYS[activeKey] : null;
 
