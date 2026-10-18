@@ -1,8 +1,9 @@
 import React, { useMemo } from 'react';
 import { useGameStore, GameState } from '../stores/useGameStore';
-import { Shield, ArrowLeft, Users, Trophy, ChevronRight, Calendar, BarChart3, Activity, Zap, Globe } from 'lucide-react';
+import { Shield, ArrowLeft, Users, Trophy, ChevronRight, Calendar, BarChart3, Activity, Zap, Globe, Lock } from 'lucide-react';
 import { getIntlTeamLogoUrl } from '../data/crexIntlTeams';
 import { MatchStatus } from '../types/match';
+import { getNextScheduledUserFixture, validatePlayUserFixture } from '../engine/competition/fixtureService';
 
 const FORMAT_CONFIG: Record<string, { label: string; badge: string; accent: string; accentBorder: string; accentGlow: string; accentText: string; matchLabel: string; isTest: boolean }> = {
   IPL:  { label: 'IPL 2026',          badge: '🏏 FRANCHISE',        accent: 'from-blue-900/50 to-indigo-950/30',   accentBorder: 'border-blue-500/20',    accentGlow: 'bg-blue-600/10',    accentText: 'text-blue-400',    matchLabel: 'League Match',       isTest: false },
@@ -115,10 +116,20 @@ export default function ArenaDashboard() {
     return squad.reduce((acc, p) => acc + p.rating, 0) / squad.length;
   }, [squad]);
 
-  const nextMatch = useMemo(() =>
-    fixtures.find(f => (f.team1Id === selectedFranchiseId || f.team2Id === selectedFranchiseId) && f.status === MatchStatus.UPCOMING),
+  // Next unresolved fixture for the user's team (season progression aware),
+  // independent of whether it is *currently* eligible to start.
+  const nextMatch = useMemo(
+    () => getNextScheduledUserFixture(fixtures, selectedFranchiseId),
     [fixtures, selectedFranchiseId]
   );
+
+  // A match only becomes playable on the current match-day once every earlier
+  // fixture has a result. This mirrors the store's authoritative gate.
+  const playCheck = useMemo(
+    () => (nextMatch ? validatePlayUserFixture(nextMatch.id, fixtures, selectedFranchiseId) : null),
+    [nextMatch, fixtures, selectedFranchiseId]
+  );
+  const canPlay = playCheck?.ok === true;
 
   const opponentId   = nextMatch ? (nextMatch.team1Id === selectedFranchiseId ? nextMatch.team2Id : nextMatch.team1Id) : null;
   const opponent     = franchises.find(f => f.id === opponentId);
@@ -180,44 +191,57 @@ export default function ArenaDashboard() {
 
         {/* Next Match */}
         <div
-          className={`rounded-3xl border p-6 mb-6 transition-all ${nextMatch ? `${fmt.accentBorder} bg-gradient-to-br ${fmt.accent} cursor-pointer hover:scale-[1.01] active:scale-[0.99]` : 'border-zinc-800 bg-zinc-900/60'}`}
-          onClick={() => { if (nextMatch && startMatch(nextMatch.id)) { setGameState(GameState.PRE_MATCH); } }}
+          className={`rounded-3xl border p-6 mb-6 transition-all ${nextMatch ? `${fmt.accentBorder} bg-gradient-to-br ${fmt.accent} ${canPlay ? 'cursor-pointer hover:scale-[1.01] active:scale-[0.99]' : ''}` : 'border-zinc-800 bg-zinc-900/60'}`}
+          onClick={() => { if (canPlay && startMatch(nextMatch!.id)) { setGameState(GameState.PRE_MATCH); } }}
         >
           {nextMatch ? (
-            <div className="flex items-center gap-4">
-              <div className="flex items-center gap-3 flex-1 min-w-0">
-                {/* User team logo */}
-                <div className="flex flex-col items-center gap-1.5 shrink-0">
-                  <div className="w-14 h-14 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center p-1.5">
-                    {teamLogo ? <img src={teamLogo} alt={team.shortName} className="w-full h-full object-contain" onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }} /> : <Shield className="w-7 h-7 text-zinc-500" />}
+            <div className="space-y-3">
+              <div className="flex items-center gap-4">
+                <div className="flex items-center gap-3 flex-1 min-w-0">
+                  {/* User team logo */}
+                  <div className="flex flex-col items-center gap-1.5 shrink-0">
+                    <div className="w-14 h-14 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center p-1.5">
+                      {teamLogo ? <img src={teamLogo} alt={team.shortName} className="w-full h-full object-contain" onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }} /> : <Shield className="w-7 h-7 text-zinc-500" />}
+                    </div>
+                    <span className="text-xs font-black">{team.shortName}</span>
                   </div>
-                  <span className="text-xs font-black">{team.shortName}</span>
-                </div>
-                {/* Match info */}
-                <div className="flex flex-col items-center gap-1 flex-1">
-                  <div className={`text-[9px] font-black uppercase tracking-widest animate-pulse ${fmt.accentText}`}>NEXT {fmt.matchLabel.toUpperCase()}</div>
-                  <span className="text-2xl font-black text-zinc-400">VS</span>
-                  <div className="text-[10px] text-zinc-500 text-center font-semibold">Match {nextMatch.matchNumber} · {oversLabel}</div>
-                </div>
-                {/* Opponent logo */}
-                <div className="flex flex-col items-center gap-1.5 shrink-0">
-                  <div className="w-14 h-14 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center p-1.5">
-                    {opponentLogo ? <img src={opponentLogo} alt={opponent?.shortName} className="w-full h-full object-contain" onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }} /> : <Shield className="w-7 h-7 text-zinc-500" />}
+                  {/* Match info */}
+                  <div className="flex flex-col items-center gap-1 flex-1">
+                    <div className={`text-[9px] font-black uppercase tracking-widest ${canPlay ? 'animate-pulse' : ''} ${fmt.accentText}`}>{canPlay ? `NEXT ${fmt.matchLabel.toUpperCase()}` : 'UPCOMING'}</div>
+                    <span className="text-2xl font-black text-zinc-400">VS</span>
+                    <div className="text-[10px] text-zinc-500 text-center font-semibold">Match {nextMatch.matchNumber} · {oversLabel}</div>
                   </div>
-                  <span className="text-xs font-black text-zinc-400">{opponent?.shortName}</span>
+                  {/* Opponent logo */}
+                  <div className="flex flex-col items-center gap-1.5 shrink-0">
+                    <div className="w-14 h-14 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center p-1.5">
+                      {opponentLogo ? <img src={opponentLogo} alt={opponent?.shortName} className="w-full h-full object-contain" onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }} /> : <Shield className="w-7 h-7 text-zinc-500" />}
+                    </div>
+                    <span className="text-xs font-black text-zinc-400">{opponent?.shortName}</span>
+                  </div>
                 </div>
+                {canPlay ? (
+                  <button 
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (startMatch(nextMatch.id)) {
+                        setGameState(GameState.PRE_MATCH);
+                      }
+                    }}
+                    className={`shrink-0 px-5 py-3 rounded-xl font-black text-sm flex items-center gap-2 text-white ${playBtnClass} cursor-pointer active:scale-95 transition-all shadow-md`}
+                  >
+                    Play <ChevronRight className="w-4 h-4" />
+                  </button>
+                ) : (
+                  <span className="shrink-0 px-4 py-3 rounded-xl font-black text-xs flex items-center gap-2 text-zinc-400 bg-zinc-900/70 border border-zinc-700/60">
+                    <Lock className="w-4 h-4" /> Locked
+                  </span>
+                )}
               </div>
-              <button 
-                onClick={(e) => {
-                  e.stopPropagation();
-                  if (nextMatch && startMatch(nextMatch.id)) {
-                    setGameState(GameState.PRE_MATCH);
-                  }
-                }}
-                className={`shrink-0 px-5 py-3 rounded-xl font-black text-sm flex items-center gap-2 text-white ${playBtnClass} cursor-pointer active:scale-95 transition-all shadow-md`}
-              >
-                Play <ChevronRight className="w-4 h-4" />
-              </button>
+              {!canPlay && playCheck && !playCheck.ok && (
+                <p className="text-[11px] font-semibold text-amber-500/90 flex items-center gap-1.5">
+                  <Lock className="w-3 h-3 shrink-0" /> {playCheck.error.message}
+                </p>
+              )}
             </div>
           ) : (
             <div className="text-center py-4 text-zinc-500"><Trophy className="w-8 h-8 mx-auto mb-2 text-amber-500" /><div className="font-bold">Season Complete</div></div>

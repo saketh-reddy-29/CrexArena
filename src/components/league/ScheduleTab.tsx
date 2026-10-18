@@ -1,7 +1,7 @@
 import React from 'react';
 import { Franchise, useGameStore, GameState } from '../../stores/useGameStore';
 import { MatchStatus, Fixture } from '../../types/match';
-import { Play, CheckCircle2, FastForward, Lock, Calendar, MapPin, Eye, Trophy, Radio, CircleDot, ChevronRight } from 'lucide-react';
+import { Play, CheckCircle2, FastForward, Lock, Calendar, MapPin, Eye, Trophy, Radio, CircleDot, ChevronRight, BarChart3, AlertTriangle, X } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { getIntlTeamLogoUrl } from '../../data/crexIntlTeams';
 import {
@@ -11,6 +11,13 @@ import {
   canStartFixture,
   type FixtureProgress,
 } from '../../engine/competition/seasonProgression';
+import {
+  validatePlayUserFixture,
+  validateWatchAiFixture,
+  validateSimulateAiFixture,
+  getCompletedScorecard,
+  type FixtureActionError,
+} from '../../engine/competition/fixtureService';
 
 interface ScheduleTabProps {
   franchises: Franchise[];
@@ -56,24 +63,58 @@ export default function ScheduleTab({ franchises }: ScheduleTabProps) {
   const summary = React.useMemo(() => getSeasonSummary(fixtures), [fixtures]);
   const currentDay = summary.currentMatchDay;
 
+  // Surfaced when a service-layer gate refuses an action, so the user sees
+  // *why* instead of a button that silently does nothing.
+  const [actionError, setActionError] = React.useState<FixtureActionError | null>(null);
+
   const handleStartMatch = (matchId: string) => {
-    if (!startMatch(matchId)) return;
+    const check = validatePlayUserFixture(matchId, fixtures, selectedFranchiseId);
+    if (!check.ok) {
+      setActionError(check.error);
+      return;
+    }
+    if (!startMatch(matchId)) {
+      setActionError({ code: 'LOCKED', message: 'This match is not available right now.' });
+      return;
+    }
+    setActionError(null);
     setGameState(GameState.PRE_MATCH);
   };
 
   const handleWatchMatch = (matchId: string) => {
-    if (!startMatch(matchId)) return;
+    const check = validateWatchAiFixture(matchId, fixtures, selectedFranchiseId);
+    if (!check.ok) {
+      setActionError(check.error);
+      return;
+    }
+    if (!startMatch(matchId)) {
+      setActionError({ code: 'LOCKED', message: 'This match is not available right now.' });
+      return;
+    }
+    setActionError(null);
     setGameState(GameState.MATCH_SIMULATION);
   };
 
   const handleViewMatch = (matchId: string) => {
     // Completed fixtures are view-only: open the read-only scorecard instead
     // of re-entering the simulation (which would allow a replay).
+    const result = getCompletedScorecard(matchId, fixtures);
+    if (!result.ok) {
+      setActionError(result.error);
+      return;
+    }
+    setActionError(null);
     setViewingMatch(matchId);
     setGameState(GameState.MATCH_RESULT);
   };
 
   const handleAutoSimulate = (matchId: string) => {
+    const check = validateSimulateAiFixture(matchId, fixtures, selectedFranchiseId);
+    if (!check.ok) {
+      setActionError(check.error);
+      return;
+    }
+    setActionError(null);
     autoSimulateMatch(matchId);
   };
 
@@ -181,6 +222,20 @@ export default function ScheduleTab({ franchises }: ScheduleTabProps) {
               style={{ width: `${progressPct}%` }}
             />
           </div>
+        </div>
+      )}
+
+      {actionError && (
+        <div className="flex items-start gap-2.5 bg-amber-50 border border-amber-200 text-amber-800 rounded-2xl px-4 py-3">
+          <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+          <p className="flex-1 text-xs font-semibold">{actionError.message}</p>
+          <button
+            onClick={() => setActionError(null)}
+            className="text-amber-500 hover:text-amber-700 shrink-0 cursor-pointer"
+            aria-label="Dismiss"
+          >
+            <X className="w-4 h-4" />
+          </button>
         </div>
       )}
 
@@ -396,12 +451,21 @@ export default function ScheduleTab({ franchises }: ScheduleTabProps) {
 
                       <div className="shrink-0">
                         {isCompleted ? (
-                          <button
-                            onClick={() => handleViewMatch(fixture.id)}
-                            className="px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-[11px] font-bold transition-all flex items-center gap-1.5 cursor-pointer"
-                          >
-                            <Eye className="w-3.5 h-3.5" /> View Result
-                          </button>
+                          <div className="flex items-center gap-1.5">
+                            <button
+                              onClick={() => handleViewMatch(fixture.id)}
+                              className="px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-[11px] font-bold transition-all flex items-center gap-1.5 cursor-pointer"
+                            >
+                              <Eye className="w-3.5 h-3.5" /> View Scorecard
+                            </button>
+                            <button
+                              onClick={() => handleViewMatch(fixture.id)}
+                              title="View full batting & bowling statistics"
+                              className="px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-[11px] font-bold transition-all flex items-center gap-1.5 cursor-pointer"
+                            >
+                              <BarChart3 className="w-3.5 h-3.5" /> View Stats
+                            </button>
+                          </div>
                         ) : !canStart ? (
                           <span className="text-[10px] text-slate-400 font-semibold flex items-center gap-1">
                             <Lock className="w-3 h-3" /> Locked

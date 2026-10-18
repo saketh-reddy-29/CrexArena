@@ -2,6 +2,7 @@ import { Player } from '../../types/common';
 import { PitchType } from '../../types/match';
 import { ArenaFormat } from '../models/ArenaState';
 import { BowlerFieldStrategyEngine, FieldConfiguration } from '../strategy/BowlerFieldStrategyEngine';
+import { getFieldingPhase } from '../fielding/FieldingRestrictionEngine';
 import { BowlingPlanEngine, DetailedBowlingPlan } from './BowlingPlanEngine';
 import { BattingIntent, BatterDecisionEngine } from './BatterDecisionEngine';
 
@@ -92,8 +93,12 @@ export class AICaptainEngine {
     const boundariesInLast6 = last6.filter((b) => b === '4' || b === '6').length;
     const isBoundaryCluster = boundariesInLast6 >= 2;
 
-    const isDeath = format === 'T20' ? overs >= 16 : format === 'ODI' ? overs >= 40 : false;
-    const isPowerplay = format === 'T20' ? overs < 6 : format === 'ODI' ? overs < 10 : overs < 15;
+    // Phase boundaries come from the authoritative rules layer (single source of
+    // truth shared with the field engine), using the over currently being bowled
+    // (0-based completed overs + 1). Never hardcode format windows here.
+    const activePhase = getFieldingPhase(format, overs + 1);
+    const isDeath = activePhase.key === 'DEATH';
+    const isPowerplay = activePhase.key === 'POWERPLAY';
     const isTest = format === 'TEST';
 
     // ── 1. DECISION POINT: Wicket Fall (Attack New Batter) ──
@@ -261,8 +266,9 @@ export class AICaptainEngine {
     const { format, inningsState, bowlingHistory, currentBowler } = input;
     const overs = Math.floor(inningsState.balls / 6);
     const maxOversPerBowler = format === 'TEST' ? 999 : format === 'ODI' ? 10 : 4;
-    const isDeath = format === 'T20' ? overs >= 16 : format === 'ODI' ? overs >= 40 : false;
-    const isPowerplay = format === 'T20' ? overs < 6 : format === 'ODI' ? overs < 10 : overs < 15;
+    const activePhase = getFieldingPhase(format, overs + 1);
+    const isDeath = activePhase.key === 'DEATH';
+    const isPowerplay = activePhase.key === 'POWERPLAY';
 
     const scored = candidates.map((bowler) => {
       let score = bowler.stats?.bowling ?? (bowler.rating || 75);

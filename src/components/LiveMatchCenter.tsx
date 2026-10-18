@@ -48,6 +48,7 @@ import { BowlingPlanEngine, DetailedBowlingPlan } from '../engine/ai/BowlingPlan
 import { BowlerFieldStrategyEngine, CANONICAL_POSITIONS, type FieldConfiguration } from '../engine/strategy/BowlerFieldStrategyEngine';
 import { BallLifecycleController, BallLifecycleState } from '../engine/fielding/BallLifecycleController';
 import { validateField, getFieldingPhase, getRestrictionSummary, overFromBalls } from '../engine/fielding/FieldingRestrictionEngine';
+import { restoreFieldState, serializeFieldState } from '../engine/fielding/fieldPersistence';
 import {
   computeControlPermissions,
   canPerformAction,
@@ -482,10 +483,14 @@ export default function LiveMatchCenter() {
   const [commentaryFilter, setCommentaryFilter] = useState<'ALL' | 'HIGHLIGHTS' | 'OVERS' | 'WICKETS' | 'BOUNDARIES'>('ALL');
   const [tacticalSubTab, setTacticalSubTab] = useState<'BATTING' | 'BOWLING' | 'FIELD'>('BATTING');
   const [openTacticalMenu, setOpenTacticalMenu] = useState<TacticalMenuKey | null>('BATTING');
-  const [fieldPresetKey, setFieldPresetKey] = useState<string | null>(null);
+  // Field formation state is persisted inside liveMatchState so a refresh or
+  // match resumption restores the exact same formation instead of regenerating
+  // a fresh (possibly illegal) one. See restoreFieldState (§9).
+  const restoredFieldState = restoreFieldState(liveMatchState, currentMatchId);
+  const [fieldPresetKey, setFieldPresetKey] = useState<string | null>(restoredFieldState?.fieldPresetKey ?? null);
   // Live, authoritative field configuration reported by the visualizer, plus the
   // batter's recently punished arcs — both feed the fielding AI's movement budget.
-  const [liveFieldConfiguration, setLiveFieldConfiguration] = useState<FieldConfiguration | null>(null);
+  const [liveFieldConfiguration, setLiveFieldConfiguration] = useState<FieldConfiguration | null>(restoredFieldState?.liveFieldConfiguration ?? null);
   const [recentBoundaryZones, setRecentBoundaryZones] = useState<ScoringZoneName[]>([]);
   const [historyDeliveryResults, setHistoryDeliveryResults] = useState<DeliveryResult[]>([]);
 
@@ -1611,12 +1616,13 @@ export default function LiveMatchCenter() {
       saveLiveMatchState({
         currentMatchId, inningNo, innings, strikerId, nonStrikerId,
         bowlerId, lastOverBowlerId, battingCursor, pending,
-        pendingBatterEnd, pitch, weather
+        pendingBatterEnd, pitch, weather,
+        ...serializeFieldState({ fieldPresetKey, liveFieldConfiguration }),
       });
     } else if (resultSubmitted) {
       saveLiveMatchState(null);
     }
-  }, [currentMatchId, inningNo, innings, strikerId, nonStrikerId, bowlerId, lastOverBowlerId, battingCursor, pending, pendingBatterEnd, pitch, weather, resultSubmitted, saveLiveMatchState]);
+  }, [currentMatchId, inningNo, innings, strikerId, nonStrikerId, bowlerId, lastOverBowlerId, battingCursor, pending, pendingBatterEnd, pitch, weather, fieldPresetKey, liveFieldConfiguration, resultSubmitted, saveLiveMatchState]);
 
   const currentOverTotalRuns = useMemo(() => {
     return (inning?.deliveries || [])
@@ -1703,6 +1709,7 @@ export default function LiveMatchCenter() {
         pendingBatterEnd,
         pitch,
         weather,
+        ...serializeFieldState({ fieldPresetKey, liveFieldConfiguration }),
       });
     }
     setGameState(GameState.ARENA_HUB);
@@ -2131,6 +2138,7 @@ export default function LiveMatchCenter() {
                   onDisplayModeChange={setDisplayMode}
                   replayDeliveryResult={replayDelivery}
                   fieldPresetKey={fieldPresetKey}
+                  initialFieldConfiguration={liveFieldConfiguration}
                   onFieldPresetChange={setFieldPresetKey}
                   onFieldConfigurationChange={setLiveFieldConfiguration}
                   totalOvers={Math.round(maxBalls / 6)}
@@ -2682,6 +2690,11 @@ export default function LiveMatchCenter() {
                 <span className="text-sm font-black text-slate-900">
                   {fieldPresetKey ? (BowlerFieldStrategyEngine.PRESET_OVERLAYS[fieldPresetKey]?.name.split('(')[0].trim() || 'Preset') : 'Balanced Ring'}
                 </span>
+                {liveFieldConfiguration?.tacticalIntent && (
+                  <span className="text-[10px] text-slate-600 leading-snug block pt-0.5">
+                    {liveFieldConfiguration.tacticalIntent}
+                  </span>
+                )}
               </div>
               <p className="text-[9px] text-slate-400 leading-snug">
                 The bowling captain sets the field automatically and every formation is validated against the format's fielding restrictions.

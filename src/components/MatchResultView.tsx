@@ -18,6 +18,7 @@ export default function MatchResultView() {
     useGameStore();
 
   const fixture = fixtures.find((f) => f.id === viewingMatchId) ?? null;
+  const [tab, setTab] = React.useState<'scorecard' | 'stats'>('scorecard');
 
   const teamName = (id?: string) =>
     franchises.find((f) => f.id === id)?.name || id || '—';
@@ -120,6 +121,20 @@ export default function MatchResultView() {
     );
   };
 
+  const statsBatters = scorecard.innings
+    .flatMap((inn) =>
+      Object.values(inn.batsmen).map((b) => ({ stats: b as PlayerMatchStats, teamId: inn.battingTeamId })),
+    )
+    .sort((a, b) => b.stats.runs - a.stats.runs)
+    .slice(0, 10);
+
+  const statsBowlers = scorecard.innings
+    .flatMap((inn) =>
+      Object.values(inn.bowlers).map((b) => ({ stats: b as PlayerMatchStats, teamId: inn.bowlingTeamId })),
+    )
+    .sort((a, b) => b.stats.wickets - a.stats.wickets || a.stats.runsConceded - b.stats.runsConceded)
+    .slice(0, 10);
+
   return (
     <div className="min-h-screen bg-slate-50">
       <div className="max-w-3xl mx-auto p-4 sm:p-6 space-y-4">
@@ -174,8 +189,74 @@ export default function MatchResultView() {
           )}
         </div>
 
-        {/* Innings */}
-        {scorecard.innings.map((inn, i) => renderInnings(inn, i))}
+        {/* Tab switch: scorecard vs aggregated stats */}
+        <div className="flex gap-1.5 bg-white border border-slate-200 rounded-2xl p-1.5">
+          {(['scorecard', 'stats'] as const).map((key) => (
+            <button
+              key={key}
+              onClick={() => setTab(key)}
+              className={cn(
+                'flex-1 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition-all cursor-pointer',
+                tab === key ? 'bg-slate-900 text-white shadow-xs' : 'text-slate-500 hover:bg-slate-100',
+              )}
+            >
+              {key === 'scorecard' ? 'Scorecard' : 'Stats'}
+            </button>
+          ))}
+        </div>
+
+        {tab === 'scorecard' ? (
+          scorecard.innings.map((inn, i) => renderInnings(inn, i))
+        ) : (
+          <>
+            <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
+              <p className="px-4 py-3 bg-slate-50 border-b border-slate-200 text-[10px] font-black uppercase tracking-wider text-slate-400">
+                Top Batting
+              </p>
+              <div className="divide-y divide-slate-100">
+                {statsBatters.length === 0 && (
+                  <p className="px-4 py-3 text-xs text-slate-400 font-semibold">No batting data.</p>
+                )}
+                {statsBatters.map(({ stats, teamId }, i) => (
+                  <div key={`${stats.playerId}-${i}`} className="flex items-center justify-between px-4 py-2 text-xs">
+                    <div className="min-w-0">
+                      <span className="font-bold text-slate-700 truncate">{playerName(stats.playerId)}</span>
+                      <span className="text-slate-400 ml-2 font-semibold">{teamShort(teamId)}</span>
+                    </div>
+                    <span className="tabular-nums text-slate-600 shrink-0 font-semibold">
+                      {stats.runs} ({stats.balls})
+                      <span className="text-slate-400 ml-1">
+                        {stats.fours ? `${stats.fours}x4 ` : ''}{stats.sixes ? `${stats.sixes}x6` : ''}
+                      </span>
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
+              <p className="px-4 py-3 bg-slate-50 border-b border-slate-200 text-[10px] font-black uppercase tracking-wider text-slate-400">
+                Top Bowling
+              </p>
+              <div className="divide-y divide-slate-100">
+                {statsBowlers.length === 0 && (
+                  <p className="px-4 py-3 text-xs text-slate-400 font-semibold">No bowling data.</p>
+                )}
+                {statsBowlers.map(({ stats, teamId }, i) => (
+                  <div key={`${stats.playerId}-${i}`} className="flex items-center justify-between px-4 py-2 text-xs">
+                    <div className="min-w-0">
+                      <span className="font-bold text-slate-700 truncate">{playerName(stats.playerId)}</span>
+                      <span className="text-slate-400 ml-2 font-semibold">{teamShort(teamId)}</span>
+                    </div>
+                    <span className="tabular-nums text-slate-600 shrink-0 font-semibold">
+                      {stats.wickets}w · {stats.runsConceded}r
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </>
+        )}
       </div>
     </div>
   );

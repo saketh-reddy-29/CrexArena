@@ -93,6 +93,8 @@ export interface VisualizerProps {
   // Field preset & edit-field control (can be driven from outside the visualizer)
   fieldPresetKey?: string | null;
   onFieldPresetChange?: (presetKey: string | null) => void;
+  /** Persisted field formation restored on resume (§9); overrides the generated default. */
+  initialFieldConfiguration?: FieldConfiguration | null;
   editFieldMode?: boolean;
   onEditFieldModeChange?: (enabled: boolean) => void;
   playbackSpeed?: AnimationSpeed;
@@ -204,6 +206,7 @@ export default function CricketActionVisualizer({
   onDisplayModeChange,
   fieldPresetKey: propFieldPresetKey,
   onFieldPresetChange,
+  initialFieldConfiguration,
   editFieldMode: propEditFieldMode,
   onEditFieldModeChange,
   playbackSpeed: propSpeed,
@@ -242,7 +245,7 @@ export default function CricketActionVisualizer({
   const [speed, setSpeed] = useState<AnimationSpeed>(propSpeed !== undefined ? propSpeed : 1);
   const [isPaused, setIsPaused] = useState<boolean>(propIsPaused !== undefined ? propIsPaused : false);
   const [activeBottomTab, setActiveBottomTab] = useState<BottomPanelTab>('FIELD_MAP');
-  const [internalPresetKey, setInternalPresetKey] = useState<string | null>(null);
+  const [internalPresetKey, setInternalPresetKey] = useState<string | null>(propFieldPresetKey ?? null);
   const [showDebugHUD, setShowDebugHUD] = useState<boolean>(false);
   const [zoneFormatFilter, setZoneFormatFilter] = useState<'ALL' | ArenaFormat>('ALL');
   const [zoneBowlingFilter, setZoneBowlingFilter] = useState<'ALL' | 'PACE' | 'SPIN'>('ALL');
@@ -278,6 +281,9 @@ export default function CricketActionVisualizer({
 
   // Field Strategy Configuration
   const [fieldConfig, setFieldConfig] = useState<FieldConfiguration>(() => {
+    // §9 — restore the persisted formation on resume instead of regenerating it,
+    // so a refresh/match resumption shows the identical legal field.
+    if (initialFieldConfiguration) return initialFieldConfiguration;
     return BowlerFieldStrategyEngine.generateFieldConfiguration({
       format: initialFormat,
       bowler,
@@ -587,6 +593,15 @@ export default function CricketActionVisualizer({
     setInternalPresetKey(propFieldPresetKey);
     triggerTacticalRecalculation(propFieldPresetKey || undefined);
   }, [propFieldPresetKey, internalPresetKey, triggerTacticalRecalculation]);
+
+  // Report the initial (possibly restored) formation once on mount so the parent
+  // and the persisted live-match state always know the active field + intent even
+  // before the first tactical change (§8 UI, §9 persistence).
+  useEffect(() => {
+    onFieldConfigurationChangeRef.current?.(fieldConfig);
+    // Mount-only: later changes are reported by applyNewFieldConfiguration.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   // 2. CONTINUOUS 2D BALL MOVEMENT & TRAIL PLAYBACK
@@ -2117,7 +2132,10 @@ export default function CricketActionVisualizer({
                 </span>
               </div>
               <div className="bg-white/[0.03] p-3 rounded-xl border border-white/5">
-                <span className="text-[10px] font-bold text-slate-400 block uppercase">Format Restrictions</span>
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-bold text-slate-400 uppercase">Format Restrictions</span>
+                  <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-cyan-500/15 text-cyan-300 border border-cyan-500/30">{selectedFormat}</span>
+                </div>
                 <span className={cn("text-xs font-black", fieldConfig.isCompliant ? "text-emerald-400" : "text-red-400")}>
                   {fieldConfig.isCompliant ? 'Fully Compliant' : 'Illegal Formation'}
                 </span>

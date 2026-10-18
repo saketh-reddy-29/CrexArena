@@ -1,4 +1,6 @@
 import { Player } from '../../types/common';
+import { getFieldingPhase } from '../fielding/FieldingRestrictionEngine';
+import type { Format } from '../rules/types';
 
 export type BattingIntent =
   | 'SURVIVAL'
@@ -110,6 +112,10 @@ export class BatterDecisionEngine {
     const ballsRemaining = Math.max(1, maxBalls - inningsState.balls);
     const requiredRunRate = target > 0 ? ((target - inningsState.score) / (ballsRemaining / 6)) : 0;
 
+    // Phase windows resolve from the authoritative rules layer (single source of
+    // truth shared with the field engine) for the over currently being bowled.
+    const phase = getFieldingPhase(format as Format, overs + 1);
+
     const isTailender = (batter.role === 'Bowler') || (batter.stats?.batting || 50) < 38;
     const isFinisher = ['russell', 'klaasen', 'pooran', 'hetmyer', 'tim david', 'rinku'].some(t => batter.name.toLowerCase().includes(t));
     const isAnchor = ['kohli', 'williamson', 'rahul', 'root', 'pujara'].some(t => batter.name.toLowerCase().includes(t));
@@ -147,8 +153,8 @@ export class BatterDecisionEngine {
 
     // ── ODI Cricket Logic ──
     if (isODI) {
-      const isPowerplay = overs < 10;
-      const isDeath = overs >= 40;
+      const isPowerplay = phase.key === 'POWERPLAY';
+      const isDeath = phase.key === 'DEATH';
 
       // Chasing pressure
       if (target > 0) {
@@ -177,8 +183,8 @@ export class BatterDecisionEngine {
     }
 
     // ── T20 Cricket Logic ──
-    const isDeathT20 = overs >= 16;
-    const isPowerplayT20 = overs < 6;
+    const isDeathT20 = phase.key === 'DEATH';
+    const isPowerplayT20 = phase.key === 'POWERPLAY';
 
     // Chasing under steep RRR
     if (target > 0) {
