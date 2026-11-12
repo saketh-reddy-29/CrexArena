@@ -1,6 +1,9 @@
 import { Franchise } from '../../stores/useGameStore';
 import { Player } from '../../types/common';
 import { INITIAL_PLAYER_POOL } from '../../data/players';
+import { INTL_PLAYER_POOL } from '../../data/intlPlayers';
+
+const ALL_KNOWN_PLAYERS = [...INITIAL_PLAYER_POOL, ...INTL_PLAYER_POOL];
 
 export interface SquadAnalysis {
   total: number;
@@ -30,7 +33,7 @@ export interface SquadAnalysis {
 
 export function getFranchiseSquad(franchise: Franchise): Player[] {
   return franchise.squad
-    .map((id) => INITIAL_PLAYER_POOL.find((player) => player.id === id))
+    .map((id) => ALL_KNOWN_PLAYERS.find((player) => player.id === id))
     .filter((player): player is Player => Boolean(player));
 }
 

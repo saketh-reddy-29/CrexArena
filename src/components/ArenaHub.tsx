@@ -13,6 +13,7 @@ import TeamStatsView from './stats/TeamStatsView';
 import TopMatchesCarousel from './TopMatchesCarousel';
 import GlobalNavBar from './common/GlobalNavBar';
 import FieldSetupDashboard from './FieldSetupDashboard';
+import MatchRecoveryBanner from './common/MatchRecoveryBanner';
 import { cn } from '../lib/utils';
 
 export default function ArenaHub() {
@@ -141,13 +142,13 @@ export default function ArenaHub() {
   if (!team) return null;
 
   return (
-    <div className="min-h-screen flex flex-col bg-[#f4f6f9] text-slate-900 font-sans overflow-hidden">
+    <div className="min-h-screen flex flex-col bg-[#071426] text-[#F6F8FC] font-sans overflow-hidden">
       
       {/* Global Navigation Bar */}
       <GlobalNavBar />
 
       {/* Top Header */}
-      <header className="bg-white border-b border-slate-200/90 shrink-0 shadow-xs z-30">
+      <header className="bg-[#0D1C32] border-b border-white/10 shrink-0 shadow-lg z-30">
         <div className="max-w-7xl mx-auto px-4 sm:px-6">
           <div className="py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             
@@ -155,19 +156,19 @@ export default function ArenaHub() {
             <div className="flex items-center gap-3">
               <button 
                 onClick={() => setGameState(GameState.LANDING)}
-                className="w-8 h-8 rounded-full bg-slate-100 border border-slate-200 flex items-center justify-center hover:bg-slate-200 transition-colors shrink-0 text-slate-600"
+                className="w-8 h-8 rounded-full bg-[#10233D] border border-white/10 flex items-center justify-center hover:bg-[#152C4D] transition-colors shrink-0 text-[#9DAEC4] hover:text-white"
               >
                 <ArrowLeft className="w-4 h-4" />
               </button>
               <div>
                 <div className="flex items-center gap-2">
-                  <span className="text-[10px] font-black uppercase tracking-wider text-blue-700 bg-blue-50 px-2 py-0.5 rounded">
+                  <span className="text-[10px] font-black uppercase tracking-wider text-[#258BFF] bg-blue-500/10 border border-blue-500/20 px-2 py-0.5 rounded">
                     {selectedFormat} 2026
                   </span>
                   <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                  <span className="text-[10px] font-black uppercase tracking-wider text-emerald-600">LIVE ARENA</span>
+                  <span className="text-[10px] font-black uppercase tracking-wider text-emerald-400">LIVE ARENA</span>
                 </div>
-                <h1 className="text-base font-black tracking-tight text-slate-900">{team.name}</h1>
+                <h1 className="text-base font-black tracking-tight text-[#F6F8FC]">{team.name}</h1>
               </div>
             </div>
 
@@ -182,8 +183,8 @@ export default function ArenaHub() {
                     className={cn(
                       "px-3.5 py-1.5 text-xs font-bold uppercase tracking-wide rounded-full whitespace-nowrap transition-all duration-200 shrink-0",
                       isActive 
-                        ? "bg-blue-600 text-white shadow-xs" 
-                        : "text-slate-600 hover:text-slate-900 bg-slate-100 hover:bg-slate-200"
+                        ? "bg-[#258BFF] text-white shadow-md shadow-blue-500/20" 
+                        : "text-[#9DAEC4] hover:text-white bg-[#10233D] hover:bg-[#152C4D] border border-white/5"
                     )}
                   >
                     {tab.label}
@@ -198,6 +199,11 @@ export default function ArenaHub() {
 
       {/* Top Matches Carousel */}
       <TopMatchesCarousel />
+
+      {/* Match Recovery Banner for in-progress games */}
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 pt-4 w-full">
+        <MatchRecoveryBanner />
+      </div>
 
       {/* Main Content Area */}
       <div className="flex-1 overflow-y-auto custom-scrollbar relative">

@@ -14,6 +14,8 @@ import {
 } from 'lucide-react';
 import { resolveTeamLogoUrl } from '../../lib/teamLogos';
 import SettingsModal from './SettingsModal';
+import GoogleLoginButton from '../auth/GoogleLoginButton';
+import GoogleAccountModal from '../auth/GoogleAccountModal';
 
 interface GlobalNavBarProps {
   currentView?: string;
@@ -27,10 +29,12 @@ export default function GlobalNavBar({ currentView }: GlobalNavBarProps) {
     setActiveTab, 
     selectedFormat, 
     selectedFranchiseId, 
-    franchises 
+    franchises,
+    authUser,
   } = useGameStore();
 
   const [showSettings, setShowSettings] = useState(false);
+  const [showGoogleModal, setShowGoogleModal] = useState(false);
 
   const team = franchises.find(f => f.id === selectedFranchiseId);
 
@@ -106,6 +110,7 @@ export default function GlobalNavBar({ currentView }: GlobalNavBarProps) {
   return (
     <>
       {showSettings && <SettingsModal onClose={() => setShowSettings(false)} />}
+      {showGoogleModal && <GoogleAccountModal onClose={() => setShowGoogleModal(false)} />}
 
       <nav className="bg-white border-b border-slate-200/90 shadow-2xs sticky top-0 z-40">
         <div className="max-w-7xl mx-auto px-4 sm:px-6">
@@ -158,7 +163,7 @@ export default function GlobalNavBar({ currentView }: GlobalNavBarProps) {
               })}
             </div>
 
-            {/* Right: Team Emblem & Settings */}
+            {/* Right: Team Emblem, Google Profile & Settings */}
             <div className="flex items-center gap-2 shrink-0">
               {team && (
                 <div className="hidden sm:flex items-center gap-2 px-2.5 py-1 rounded-full bg-slate-50 border border-slate-200">
@@ -171,9 +176,44 @@ export default function GlobalNavBar({ currentView }: GlobalNavBarProps) {
                 </div>
               )}
 
+              {/* Google Profile or Sign In to Save Pill */}
+              {authUser ? (
+                <button
+                  type="button"
+                  onClick={() => setShowGoogleModal(true)}
+                  className="flex items-center gap-2 pl-1 pr-2.5 py-1 rounded-full bg-slate-50 hover:bg-slate-100 border border-slate-200 text-xs font-semibold transition-all shadow-2xs group cursor-pointer"
+                  title={`Google Account: ${authUser.email} (Cloud Sync Active)`}
+                >
+                  <div className="relative">
+                    {authUser.picture ? (
+                      <img 
+                        src={authUser.picture} 
+                        alt={authUser.name} 
+                        className="w-6 h-6 rounded-full object-cover border border-emerald-400" 
+                      />
+                    ) : (
+                      <div className="w-6 h-6 rounded-full bg-blue-600 text-white font-bold text-[10px] flex items-center justify-center border border-emerald-400">
+                        {authUser.name[0]?.toUpperCase() || 'U'}
+                      </div>
+                    )}
+                    <span className="absolute -bottom-0.5 -right-0.5 w-2 h-2 rounded-full bg-emerald-500 border border-white" />
+                  </div>
+                  <span className="max-w-[85px] truncate text-slate-800 font-bold hidden md:inline">{authUser.name}</span>
+                  <span className="text-[9px] font-bold text-emerald-700 bg-emerald-100 px-1.5 py-0.5 rounded-full border border-emerald-200 hidden sm:inline">Saved</span>
+                </button>
+              ) : (
+                <GoogleLoginButton
+                  onClick={() => setShowGoogleModal(true)}
+                  size="sm"
+                  variant="pill"
+                  text="Save with Google"
+                  className="hidden sm:inline-flex"
+                />
+              )}
+
               <button
                 onClick={() => setShowSettings(true)}
-                className="w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 border border-slate-200 flex items-center justify-center text-slate-600 hover:text-slate-900 transition-colors"
+                className="w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 border border-slate-200 flex items-center justify-center text-slate-600 hover:text-slate-900 transition-colors cursor-pointer"
                 title="Settings & Persistence"
               >
                 <Settings className="w-4 h-4" />

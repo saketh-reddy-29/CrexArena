@@ -29,6 +29,9 @@ import {
 import { buildMatchConditionsReport, hashSeed } from '../engine/conditions';
 import type { MatchConditionReport, MatchFormatKey } from '../engine/conditions';
 import { BatterScoringMemory } from '../engine/analytics/BatterScoringMemory';
+import { GoogleUserProfile, CloudSaveData } from '../types/auth';
+import type { MatchCheckpoint, MatchSaveStatus } from '../types/matchRecovery';
+import { matchRecoveryStorage } from '../engine/storage/MatchRecoveryStorage';
 
 // Pre-flight cleanup: if localStorage contains bloated old store payload, strip heavy keys immediately
 try {
@@ -40,7 +43,6 @@ try {
         if (parsed?.state) {
           delete parsed.state.players;
           delete parsed.state.arenaPlayerStates;
-          delete parsed.state.liveMatchState;
           delete parsed.state.stateHistory;
           delete parsed.state.auctionHistory;
           delete parsed.state.bidLog;
@@ -68,6 +70,13 @@ export enum GameState {
   MATCH_SIMULATION = 'match_simulation',
   PRE_MATCH = 'pre_match',
   MATCH_RESULT = 'match_result',
+  PLAYERS = 'players',
+  TEAMS = 'teams',
+  STATISTICS = 'statistics',
+  RECORDS = 'records',
+  ACHIEVEMENTS = 'achievements',
+  SETTINGS = 'settings',
+  FIXTURES = 'fixtures',
 }
 
 export type ArenaTab = 'OVERVIEW' | 'MATCHES' | 'TEAMS' | 'TABLE' | 'PLAYERS' | 'PLAYER_STATS' | 'TEAM_STATS' | 'AUCTION' | 'SQUAD' | 'PLAYOFFS' | 'SERIES' | 'FIELD_SETUP';
@@ -148,6 +157,21 @@ function buildOfficialFranchises(players: Player[], franchises: Franchise[]) {
   });
 }
 
+export type PlayerOwnershipStatus =
+  | 'AVAILABLE'
+  | 'CURRENTLY_NOMINATED'
+  | 'SOLD'
+  | 'UNSOLD'
+  | 'WITHDRAWN'
+  | 'RETAINED';
+
+export interface PlayerOwnershipRecord {
+  status: PlayerOwnershipStatus;
+  teamId?: string;
+  price?: number;
+  timestamp?: number;
+}
+
 interface BidEntry {
   teamId: string;
   amount: number;
@@ -166,6 +190,18 @@ interface GameStore {
   unsoldPlayerIds: string[];
   stateHistory: GameState[];
   
+  // Authoritative Auction State
+  auctionPool: string[];
+  auctionPoolIndex: number;
+  auctionCurrentBid: number;
+  auctionLeadingTeamId: string | null;
+  auctionPhase: 'idle' | 'bidding' | 'sold' | 'unsold' | 'completed';
+  auctionRound: number;
+  auctionTimer: number;
+  auctionIsPaused: boolean;
+  withdrawnTeams: string[];
+  playerOwnershipMap: Record<string, PlayerOwnershipRecord>;
+  
   // Arena-specific format-isolated Player State Map: Key is `${arenaId}_${playerId}_${format}`
   arenaPlayerStates: Record<string, ArenaPlayerState>;
 
@@ -180,6 +216,10 @@ interface GameStore {
   playerFatigue: Record<string, number>;
   fixturePlayingXIs: Record<string, { team1XI: string[]; team2XI: string[] }>;
   liveMatchState: Record<string, any> | null;
+  /** Active persistent match recovery checkpoint for accidental exit/crash protection */
+  activeMatchCheckpoint: MatchCheckpoint | null;
+  matchRecoveryStatus: MatchSaveStatus;
+  lastMatchSaveTime: string | null;
   /** Fixture currently opened in the read-only result/scorecard view. */
   viewingMatchId: string | null;
   selectedFormat: ArenaFormat | null;
@@ -213,6 +253,22 @@ interface GameStore {
   resetGame: () => void;
   simulateFullAuction: (playerPool: Player[]) => void;
   saveLiveMatchState: (state: Record<string, any> | null) => void;
+  // Match Recovery & Checkpoint Actions
+  saveMatchCheckpointAction: (checkpoint: MatchCheckpoint) => Promise<boolean>;
+  loadMatchCheckpointAction: (matchId?: string) => Promise<MatchCheckpoint | null>;
+  clearMatchCheckpointAction: (matchId: string) => Promise<void>;
+  setMatchRecoveryStatus: (status: MatchSaveStatus) => void;
+
+  // Authoritative Auction Engine Actions
+  initAuction: (format?: ArenaFormat) => void;
+  nominatePlayer: (playerId?: string) => void;
+  placeAuctionBid: (teamId: string, customAmount?: number) => { ok: boolean; reason?: string };
+  finalizePlayerSale: () => { outcome: 'SOLD' | 'UNSOLD'; playerId: string; teamId?: string; price?: number };
+  advanceAuctionNextPlayer: () => void;
+  teamPassPlayer: (teamId: string) => void;
+  setAuctionTimer: (seconds: number) => void;
+  setAuctionPaused: (isPaused: boolean) => void;
+  resetAuction: () => void;
 
   // Arena & Player State helpers
   getArenaPlayerState: (playerId: string, format?: ArenaFormat) => ArenaPlayerState;
@@ -254,6 +310,18 @@ interface GameStore {
   setCaptain: (franchiseId: string, captainId: string) => void;
   setupQuickMatch: (team1Id: string, team2Id: string, format: MatchFormat) => void;
   applyPostMatchPlayerUpdates: (playerId: string, updates: Partial<Player>) => void;
+
+  // Google Auth & Cloud Save State & Actions
+  authUser: GoogleUserProfile | null;
+  cloudSaveStatus: 'idle' | 'saving' | 'saved' | 'error';
+  lastCloudSaveTime: string | null;
+  setAuthUser: (user: GoogleUserProfile | null) => void;
+  loginWithGoogle: (profile: GoogleUserProfile) => void;
+  logoutGoogle: () => void;
+  saveToCloud: () => Promise<{ success: boolean; message: string; timestamp?: string }>;
+  loadFromCloud: () => Promise<{ success: boolean; message: string; data?: CloudSaveData }>;
+  exportSaveData: () => string;
+  importSaveData: (jsonStr: string) => { success: boolean; message: string };
 }
 
 export const useGameStore = create<GameStore>()(
@@ -270,6 +338,18 @@ export const useGameStore = create<GameStore>()(
       bidLog: [],
       unsoldPlayerIds: [],
       stateHistory: [],
+
+      // Authoritative Auction initial state
+      auctionPool: [],
+      auctionPoolIndex: 0,
+      auctionCurrentBid: 0,
+      auctionLeadingTeamId: null,
+      auctionPhase: 'idle',
+      auctionRound: 1,
+      auctionTimer: 10,
+      auctionIsPaused: false,
+      withdrawnTeams: [],
+      playerOwnershipMap: {},
       arenaPlayerStates: {},
       fixtures: [],
       standings: [],
@@ -281,10 +361,18 @@ export const useGameStore = create<GameStore>()(
       playerFatigue: {},
       fixturePlayingXIs: {},
       liveMatchState: null,
+      activeMatchCheckpoint: null,
+      matchRecoveryStatus: 'IDLE',
+      lastMatchSaveTime: null,
       viewingMatchId: null,
       activeTab: 'OVERVIEW',
       viewedPlayerId: null,
       seriesConfig: null,
+
+      // Google Auth & Cloud Save initial state
+      authUser: null,
+      cloudSaveStatus: 'idle',
+      lastCloudSaveTime: null,
 
       setArenaId: (arenaId) => set({ activeArenaId: arenaId }),
       setFormat: (format) => set({ selectedFormat: format }),
@@ -423,7 +511,48 @@ export const useGameStore = create<GameStore>()(
         }));
         return report;
       },
-      saveLiveMatchState: (matchState) => set({ liveMatchState: matchState }),
+      saveLiveMatchState: (matchState) => {
+        set({ liveMatchState: matchState });
+        if (!matchState) {
+          const currentId = get().currentMatchId;
+          if (currentId) {
+            matchRecoveryStorage.clearCheckpoint(currentId).catch(console.error);
+          }
+          set({ activeMatchCheckpoint: null, matchRecoveryStatus: 'IDLE' });
+        }
+      },
+      saveMatchCheckpointAction: async (checkpoint: MatchCheckpoint) => {
+        set({
+          activeMatchCheckpoint: checkpoint,
+          lastMatchSaveTime: new Date().toISOString(),
+          matchRecoveryStatus: 'SAVING...',
+        });
+        const res = await matchRecoveryStorage.saveCheckpoint(checkpoint);
+        set({
+          matchRecoveryStatus: matchRecoveryStorage.getStatus(),
+        });
+        return res.success;
+      },
+      loadMatchCheckpointAction: async (matchId?: string) => {
+        const cp = await matchRecoveryStorage.getCheckpoint(matchId);
+        if (cp) {
+          set({
+            activeMatchCheckpoint: cp,
+            currentMatchId: cp.matchId,
+            lastMatchSaveTime: cp.timestamp,
+            matchRecoveryStatus: 'ALL PROGRESS SAVED',
+          });
+        }
+        return cp;
+      },
+      clearMatchCheckpointAction: async (matchId: string) => {
+        await matchRecoveryStorage.clearCheckpoint(matchId);
+        set({
+          activeMatchCheckpoint: null,
+          matchRecoveryStatus: 'IDLE',
+        });
+      },
+      setMatchRecoveryStatus: (status: MatchSaveStatus) => set({ matchRecoveryStatus: status }),
       setSelectedSquadIds: (ids) => set({ selectedSquadIds: ids }),
       setPlayingXIIds: (ids) => set({ playingXIIds: ids }),
       selectFranchise: (id) => set({ selectedFranchiseId: id }),
@@ -479,6 +608,284 @@ export const useGameStore = create<GameStore>()(
         currentAuctionPlayerId: null
       })),
       setViewedPlayer: (id) => set({ viewedPlayerId: id }),
+
+      // Authoritative Auction Engine Implementations
+      initAuction: (format) => set((state) => {
+        // If already initialized and not completed, preserve current state
+        if (state.auctionPool && state.auctionPool.length > 0 && state.auctionPhase !== 'completed') {
+          return state;
+        }
+
+        const assignedIds = new Set(state.franchises.flatMap((f) => f.squad));
+        const availablePlayers = state.players.filter((p) => !assignedIds.has(p.id));
+
+        // Fisher-Yates shuffle
+        const shuffled = [...availablePlayers];
+        for (let i = shuffled.length - 1; i > 0; i--) {
+          const j = Math.floor(Math.random() * (i + 1));
+          [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+        }
+        const poolIds = shuffled.map((p) => p.id);
+
+        const ownershipMap: Record<string, PlayerOwnershipRecord> = {};
+        state.franchises.forEach((f) => {
+          f.squad.forEach((pId) => {
+            const pl = state.players.find((p) => p.id === pId);
+            ownershipMap[pId] = {
+              status: 'RETAINED',
+              teamId: f.id,
+              price: pl?.basePrice || 0,
+              timestamp: Date.now(),
+            };
+          });
+        });
+
+        poolIds.forEach((pId) => {
+          ownershipMap[pId] = { status: 'AVAILABLE' };
+        });
+
+        const firstPlayerId = poolIds[0] || null;
+        const firstPlayer = firstPlayerId ? state.players.find((p) => p.id === firstPlayerId) : null;
+
+        if (firstPlayerId) {
+          ownershipMap[firstPlayerId] = { status: 'CURRENTLY_NOMINATED' };
+        }
+
+        return {
+          auctionPool: poolIds,
+          auctionPoolIndex: 0,
+          auctionCurrentBid: firstPlayer?.basePrice || 20000000,
+          auctionLeadingTeamId: null,
+          currentAuctionPlayerId: firstPlayerId,
+          auctionPhase: firstPlayerId ? 'bidding' : 'completed',
+          auctionRound: 1,
+          auctionTimer: 10,
+          auctionIsPaused: false,
+          withdrawnTeams: [],
+          playerOwnershipMap: ownershipMap,
+          bidLog: [],
+        };
+      }),
+
+      nominatePlayer: (playerId) => set((state) => {
+        const targetId = playerId || state.auctionPool[state.auctionPoolIndex];
+        if (!targetId) {
+          return { auctionPhase: 'completed', currentAuctionPlayerId: null };
+        }
+
+        const player = state.players.find((p) => p.id === targetId);
+        const basePrice = player?.basePrice || 20000000;
+
+        return {
+          currentAuctionPlayerId: targetId,
+          auctionCurrentBid: basePrice,
+          auctionLeadingTeamId: null,
+          auctionPhase: 'bidding',
+          auctionTimer: 10,
+          withdrawnTeams: [],
+          bidLog: [],
+          playerOwnershipMap: {
+            ...state.playerOwnershipMap,
+            [targetId]: { status: 'CURRENTLY_NOMINATED' },
+          },
+        };
+      }),
+
+      placeAuctionBid: (teamId, customAmount) => {
+        const state = get();
+        if (state.auctionPhase !== 'bidding') {
+          return { ok: false, reason: 'Bidding is not active' };
+        }
+        if (!state.currentAuctionPlayerId) {
+          return { ok: false, reason: 'No player currently nominated' };
+        }
+        const team = state.franchises.find((f) => f.id === teamId);
+        if (!team) {
+          return { ok: false, reason: 'Team not found' };
+        }
+        if (state.withdrawnTeams.includes(teamId)) {
+          return { ok: false, reason: `${team.name} has withdrawn from this nomination` };
+        }
+        if (state.auctionLeadingTeamId === teamId) {
+          return { ok: false, reason: `${team.name} already holds the leading bid` };
+        }
+
+        const player = state.players.find((p) => p.id === state.currentAuctionPlayerId);
+        const increment = state.auctionCurrentBid < 50000000 ? 2500000 : 5000000;
+        const minNextBid = state.auctionLeadingTeamId ? state.auctionCurrentBid + increment : state.auctionCurrentBid;
+        const bidAmount = customAmount ? Math.max(minNextBid, customAmount) : minNextBid;
+
+        // Purse validation
+        if (team.purse < bidAmount) {
+          return { ok: false, reason: `${team.name} has insufficient purse (Available: ₹${(team.purse / 10000000).toFixed(2)} Cr)` };
+        }
+        // Squad capacity validation (max 25)
+        if (team.squad.length >= 25) {
+          return { ok: false, reason: `${team.name} has reached maximum squad limit (25 players)` };
+        }
+        // Overseas quota validation (max 8)
+        if (player?.nationality === 'Overseas' && team.overseasCount >= 8) {
+          return { ok: false, reason: `${team.name} has reached overseas limit (8 players)` };
+        }
+
+        // Apply bid atomically
+        set((s) => ({
+          auctionCurrentBid: bidAmount,
+          auctionLeadingTeamId: teamId,
+          auctionTimer: 8,
+          bidLog: [{ teamId, amount: bidAmount, timestamp: Date.now() }, ...s.bidLog].slice(0, 50),
+        }));
+
+        return { ok: true };
+      },
+
+      finalizePlayerSale: () => {
+        const state = get();
+        const playerId = state.currentAuctionPlayerId || state.auctionPool[state.auctionPoolIndex];
+        if (!playerId) {
+          return { outcome: 'UNSOLD', playerId: '' };
+        }
+
+        // Avoid double finalization
+        if (state.auctionPhase === 'sold' || state.auctionPhase === 'unsold') {
+          return {
+            outcome: state.auctionPhase === 'sold' ? 'SOLD' : 'UNSOLD',
+            playerId,
+            teamId: state.auctionLeadingTeamId || undefined,
+            price: state.auctionCurrentBid,
+          };
+        }
+
+        const player = state.players.find((p) => p.id === playerId);
+        const winningTeamId = state.auctionLeadingTeamId;
+        const salePrice = state.auctionCurrentBid;
+
+        if (winningTeamId) {
+          // Atomically deduct purse and add to squad
+          set((s) => ({
+            auctionPhase: 'sold',
+            auctionHistory: [...s.auctionHistory, { playerId, soldTo: winningTeamId, price: salePrice }],
+            playerOwnershipMap: {
+              ...s.playerOwnershipMap,
+              [playerId]: { status: 'SOLD', teamId: winningTeamId, price: salePrice, timestamp: Date.now() },
+            },
+            franchises: s.franchises.map((f) => {
+              if (f.id !== winningTeamId) return f;
+              const isOverseas = player?.nationality === 'Overseas';
+              return {
+                ...f,
+                purse: Math.max(0, f.purse - salePrice),
+                squad: f.squad.includes(playerId) ? f.squad : [...f.squad, playerId],
+                overseasCount: isOverseas && !f.squad.includes(playerId) ? f.overseasCount + 1 : f.overseasCount,
+              };
+            }),
+          }));
+
+          return { outcome: 'SOLD', playerId, teamId: winningTeamId, price: salePrice };
+        } else {
+          // Unsold
+          set((s) => ({
+            auctionPhase: 'unsold',
+            unsoldPlayerIds: [...s.unsoldPlayerIds, playerId],
+            auctionHistory: [...s.auctionHistory, { playerId, soldTo: 'UNSOLD', price: 0 }],
+            playerOwnershipMap: {
+              ...s.playerOwnershipMap,
+              [playerId]: { status: 'UNSOLD', timestamp: Date.now() },
+            },
+          }));
+
+          return { outcome: 'UNSOLD', playerId };
+        }
+      },
+
+      advanceAuctionNextPlayer: () => {
+        const state = get();
+        const nextIndex = state.auctionPoolIndex + 1;
+
+        if (nextIndex < state.auctionPool.length) {
+          const nextPlayerId = state.auctionPool[nextIndex];
+          const nextPlayer = state.players.find((p) => p.id === nextPlayerId);
+          set({
+            auctionPoolIndex: nextIndex,
+            currentAuctionPlayerId: nextPlayerId,
+            auctionCurrentBid: nextPlayer?.basePrice || 20000000,
+            auctionLeadingTeamId: null,
+            auctionPhase: 'bidding',
+            auctionTimer: 10,
+            withdrawnTeams: [],
+            bidLog: [],
+            playerOwnershipMap: {
+              ...state.playerOwnershipMap,
+              [nextPlayerId]: { status: 'CURRENTLY_NOMINATED' },
+            },
+          });
+        } else {
+          // End of pool: check if Round 1 unsold players can form accelerated Round 2
+          if (state.auctionRound === 1 && state.unsoldPlayerIds.length > 0) {
+            const round2Pool = [...state.unsoldPlayerIds];
+            const firstR2Id = round2Pool[0];
+            const firstR2Player = state.players.find((p) => p.id === firstR2Id);
+            set({
+              auctionPool: round2Pool,
+              auctionPoolIndex: 0,
+              auctionRound: 2,
+              unsoldPlayerIds: [],
+              currentAuctionPlayerId: firstR2Id,
+              auctionCurrentBid: firstR2Player?.basePrice || 20000000,
+              auctionLeadingTeamId: null,
+              auctionPhase: 'bidding',
+              auctionTimer: 10,
+              withdrawnTeams: [],
+              bidLog: [],
+              playerOwnershipMap: {
+                ...state.playerOwnershipMap,
+                [firstR2Id]: { status: 'CURRENTLY_NOMINATED' },
+              },
+            });
+          } else {
+            // Completed
+            set({
+              auctionPhase: 'completed',
+              currentAuctionPlayerId: null,
+              activeTab: 'OVERVIEW',
+            });
+          }
+        }
+      },
+
+      teamPassPlayer: (teamId) => set((s) => ({
+        withdrawnTeams: Array.from(new Set([...s.withdrawnTeams, teamId])),
+      })),
+
+      setAuctionTimer: (seconds) => set({ auctionTimer: Math.max(0, seconds) }),
+
+      setAuctionPaused: (isPaused) => set({ auctionIsPaused: isPaused }),
+
+      resetAuction: () => set((state) => {
+        const currentFranchises = state.franchises.map((f) => ({
+          ...f,
+          purse: 1200000000,
+          squad: [],
+          overseasCount: 0,
+        }));
+        return {
+          franchises: currentFranchises,
+          auctionPool: [],
+          auctionPoolIndex: 0,
+          auctionCurrentBid: 0,
+          auctionLeadingTeamId: null,
+          auctionPhase: 'idle',
+          auctionRound: 1,
+          auctionTimer: 10,
+          auctionIsPaused: false,
+          withdrawnTeams: [],
+          playerOwnershipMap: {},
+          auctionHistory: [],
+          unsoldPlayerIds: [],
+          currentAuctionPlayerId: null,
+          bidLog: [],
+        };
+      }),
 
       getArenaPlayerState: (playerId: string, format?: ArenaFormat): ArenaPlayerState => {
         const state = get();
@@ -963,12 +1370,23 @@ export const useGameStore = create<GameStore>()(
           }));
         }
 
+        // If this completed match was the active saved match, clear checkpoint
+        const shouldClearCheckpoint = state.currentMatchId === matchId || state.activeMatchCheckpoint?.matchId === matchId;
+        if (shouldClearCheckpoint) {
+          matchRecoveryStorage.clearCheckpoint(matchId).catch(console.error);
+        }
+
         return { 
           fixtures: [...updatedFixtures, ...extraFixtures], 
           standings: finalStandings, 
           playerSeasonStats: newPlayerStats,
           arenaPlayerStates: updatedRecentPlayerStates,
           playerFatigue: updatedFatigue,
+          ...(shouldClearCheckpoint ? {
+            liveMatchState: null,
+            activeMatchCheckpoint: null,
+            matchRecoveryStatus: 'saved' as MatchSaveStatus,
+          } : {}),
         };
       }),
 
@@ -1216,9 +1634,26 @@ export const useGameStore = create<GameStore>()(
           })),
         );
 
+        const ownershipMap: Record<string, PlayerOwnershipRecord> = {};
+        history.forEach((h) => {
+          ownershipMap[h.playerId] = {
+            status: 'SOLD',
+            teamId: h.soldTo,
+            price: h.price,
+            timestamp: Date.now(),
+          };
+        });
+        state.players.forEach((p) => {
+          if (!assignedIds.has(p.id)) {
+            ownershipMap[p.id] = { status: 'UNSOLD', timestamp: Date.now() };
+          }
+        });
+
         return {
           franchises: currentFranchises,
           auctionHistory: history,
+          playerOwnershipMap: ownershipMap,
+          auctionPhase: 'completed',
           unsoldPlayerIds: state.players.filter((player) => !assignedIds.has(player.id)).map((player) => player.id),
           activeTab: 'OVERVIEW',
           gameState: GameState.ARENA_HUB
@@ -1246,10 +1681,184 @@ export const useGameStore = create<GameStore>()(
           gameState: GameState.PRE_MATCH
         });
       },
+
+      // Google Auth & Cloud Save implementations
+      setAuthUser: (user) => set({ authUser: user }),
+
+      loginWithGoogle: (profile: GoogleUserProfile) => {
+        set({ authUser: profile });
+        // Trigger auto-save immediately to anchor progress under Google ID
+        get().saveToCloud().catch((err) => {
+          console.warn('[useGameStore] Auto-sync after Google sign-in failed:', err);
+        });
+      },
+
+      logoutGoogle: () => {
+        set({
+          authUser: null,
+          cloudSaveStatus: 'idle',
+        });
+      },
+
+      saveToCloud: async () => {
+        const state = get();
+        set({ cloudSaveStatus: 'saving' });
+        try {
+          const franchise = state.franchises.find(f => f.id === state.selectedFranchiseId);
+          const completedFixtures = state.fixtures.filter(f => f.status === 'COMPLETED').length;
+          const now = new Date().toISOString();
+
+          const payload: CloudSaveData = {
+            version: 3,
+            user: state.authUser || {
+              id: 'guest',
+              email: 'guest@cricketarena.local',
+              name: 'Local Manager',
+            },
+            savedAt: now,
+            state: {
+              activeArenaId: state.activeArenaId,
+              gameState: state.gameState,
+              selectedFranchiseId: state.selectedFranchiseId,
+              selectedFormat: state.selectedFormat,
+              selectedSquadIds: state.selectedSquadIds,
+              playingXIIds: state.playingXIIds,
+              fixtures: state.fixtures,
+              standings: state.standings,
+              currentMatchId: state.currentMatchId,
+              playerSeasonStats: state.playerSeasonStats,
+              liveMatchState: state.liveMatchState,
+              franchises: state.franchises,
+              seriesConfig: state.seriesConfig,
+              activeTab: state.activeTab,
+            },
+            summary: {
+              format: state.selectedFormat || 'IPL',
+              franchiseName: franchise?.name || 'My Franchise',
+              totalFixtures: state.fixtures.length,
+              completedFixtures,
+              isLiveMatchActive: Boolean(state.liveMatchState && state.currentMatchId),
+            },
+          };
+
+          const storageKey = `cricket-arena-cloud-save-${state.authUser?.id || 'guest'}`;
+          if (typeof window !== 'undefined' && window.localStorage) {
+            window.localStorage.setItem(storageKey, JSON.stringify(payload));
+          }
+
+          set({
+            cloudSaveStatus: 'saved',
+            lastCloudSaveTime: now,
+            authUser: state.authUser ? { ...state.authUser, lastSyncedAt: now } : null,
+          });
+
+          return {
+            success: true,
+            message: state.authUser 
+              ? `Career saved to Google Cloud for ${state.authUser.email}!` 
+              : 'Career saved locally!',
+            timestamp: now,
+          };
+        } catch (err: any) {
+          set({ cloudSaveStatus: 'error' });
+          return { success: false, message: err?.message || 'Failed to save to cloud storage' };
+        }
+      },
+
+      loadFromCloud: async () => {
+        const state = get();
+        const storageKey = `cricket-arena-cloud-save-${state.authUser?.id || 'guest'}`;
+        try {
+          if (typeof window === 'undefined' || !window.localStorage) {
+            return { success: false, message: 'Storage not available' };
+          }
+          const raw = window.localStorage.getItem(storageKey);
+          if (!raw) {
+            return { success: false, message: 'No cloud save found for this Google account' };
+          }
+          const data: CloudSaveData = JSON.parse(raw);
+          if (!data || !data.state) {
+            return { success: false, message: 'Invalid cloud save data structure' };
+          }
+
+          set((prev) => ({
+            ...prev,
+            ...data.state,
+            cloudSaveStatus: 'saved',
+            lastCloudSaveTime: data.savedAt,
+          }));
+
+          return {
+            success: true,
+            message: `Restored cloud save from ${new Date(data.savedAt).toLocaleTimeString()} (${data.summary?.franchiseName || 'Career'})`,
+            data,
+          };
+        } catch (err: any) {
+          return { success: false, message: err?.message || 'Failed to restore cloud save' };
+        }
+      },
+
+      exportSaveData: () => {
+        const state = get();
+        const franchise = state.franchises.find(f => f.id === state.selectedFranchiseId);
+        const payload: CloudSaveData = {
+          version: 3,
+          user: state.authUser || {
+            id: 'guest',
+            email: 'guest@cricketarena.local',
+            name: 'Local Manager',
+          },
+          savedAt: new Date().toISOString(),
+          state: {
+            activeArenaId: state.activeArenaId,
+            gameState: state.gameState,
+            selectedFranchiseId: state.selectedFranchiseId,
+            selectedFormat: state.selectedFormat,
+            selectedSquadIds: state.selectedSquadIds,
+            playingXIIds: state.playingXIIds,
+            fixtures: state.fixtures,
+            standings: state.standings,
+            currentMatchId: state.currentMatchId,
+            playerSeasonStats: state.playerSeasonStats,
+            liveMatchState: state.liveMatchState,
+            franchises: state.franchises,
+            seriesConfig: state.seriesConfig,
+            activeTab: state.activeTab,
+          },
+          summary: {
+            format: state.selectedFormat || 'IPL',
+            franchiseName: franchise?.name || 'Franchise',
+            totalFixtures: state.fixtures.length,
+            completedFixtures: state.fixtures.filter(f => f.status === 'COMPLETED').length,
+            isLiveMatchActive: Boolean(state.liveMatchState && state.currentMatchId),
+          },
+        };
+        return JSON.stringify(payload, null, 2);
+      },
+
+      importSaveData: (jsonStr: string) => {
+        try {
+          const data: CloudSaveData = JSON.parse(jsonStr);
+          if (!data || !data.state) {
+            return { success: false, message: 'Invalid save file format.' };
+          }
+          set((prev) => ({
+            ...prev,
+            ...data.state,
+            cloudSaveStatus: 'saved',
+            lastCloudSaveTime: data.savedAt || new Date().toISOString(),
+          }));
+          return { success: true, message: `Successfully loaded save: ${data.summary?.franchiseName || 'Career'}` };
+        } catch (err: any) {
+          return { success: false, message: 'Corrupted or unreadable JSON save file.' };
+        }
+      },
     }),
     {
       name: 'cricket-arena-v3',
       partialize: (state) => ({
+        authUser: state.authUser,
+        lastCloudSaveTime: state.lastCloudSaveTime,
         activeArenaId: state.activeArenaId,
         gameState: state.gameState,
         selectedFranchiseId: state.selectedFranchiseId,
@@ -1269,7 +1878,20 @@ export const useGameStore = create<GameStore>()(
         // Persist the in-progress ball-by-ball state so a mid-match refresh
         // resumes exactly where it left off (spec: persistence & recovery).
         liveMatchState: state.liveMatchState,
+        activeMatchCheckpoint: state.activeMatchCheckpoint,
+        lastMatchSaveTime: state.lastMatchSaveTime,
         viewingMatchId: state.viewingMatchId,
+        // Authoritative Auction State persistence
+        auctionPool: state.auctionPool,
+        auctionPoolIndex: state.auctionPoolIndex,
+        auctionCurrentBid: state.auctionCurrentBid,
+        auctionLeadingTeamId: state.auctionLeadingTeamId,
+        auctionPhase: state.auctionPhase,
+        auctionRound: state.auctionRound,
+        playerOwnershipMap: state.playerOwnershipMap,
+        auctionHistory: state.auctionHistory,
+        unsoldPlayerIds: state.unsoldPlayerIds,
+        currentAuctionPlayerId: state.currentAuctionPlayerId,
       }),
       storage: {
         getItem: (name) => {

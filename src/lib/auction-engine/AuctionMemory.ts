@@ -27,10 +27,10 @@ export function getMemoryFactors(
   // 2. Bidding Fatigue
   // If the franchise has been bidding constantly without winning, they might pull back slightly
   // or if they just bought someone expensive, they rest for a bit.
-  if (franchiseState.fatigueLevel > 50) {
-    fatiguePenalty = -10; // Tired of bidding wars
-  } else if (franchiseState.fatigueLevel > 80) {
+  if (franchiseState.fatigueLevel > 80) {
     fatiguePenalty = -25; // Exhausted budget/energy
+  } else if (franchiseState.fatigueLevel > 50) {
+    fatiguePenalty = -10; // Tired of bidding wars
   }
 
   // 3. Consecutive Passes (Boredom/Desperation)

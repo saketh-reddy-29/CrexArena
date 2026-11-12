@@ -10,6 +10,7 @@ export class ArenaDatabase {
   private playerStates = new Map<string, ArenaPlayerState>(); // Key: `${arenaId}_${playerId}_${format}`
   private matchStats = new Map<string, PlayerMatchStats>();
   private seasonStandings = new Map<string, SeasonTeamStats>();
+  private matchCheckpoints = new Map<string, any>(); // Key: matchId
 
   // Transaction buffer for atomic commits / rollbacks
   private transactionBuffer: {
@@ -125,6 +126,34 @@ export class ArenaDatabase {
     } else {
       this.seasonStandings.set(key, { ...stats });
     }
+  }
+
+  async saveMatchCheckpoint(checkpoint: any): Promise<void> {
+    if (!checkpoint || !checkpoint.matchId) return;
+    this.matchCheckpoints.set(checkpoint.matchId, {
+      ...checkpoint,
+      savedAt: Date.now()
+    });
+  }
+
+  async getMatchCheckpoint(matchId: string): Promise<any | undefined> {
+    return this.matchCheckpoints.get(matchId);
+  }
+
+  async getLatestUnfinishedMatch(): Promise<any | undefined> {
+    let latest: any | undefined;
+    for (const cp of this.matchCheckpoints.values()) {
+      if (!cp.isMatchOver && !cp.resultSubmitted) {
+        if (!latest || (cp.savedAt || 0) > (latest.savedAt || 0)) {
+          latest = cp;
+        }
+      }
+    }
+    return latest;
+  }
+
+  async clearMatchCheckpoint(matchId: string): Promise<void> {
+    this.matchCheckpoints.delete(matchId);
   }
 
   private syncToStorage(): void {

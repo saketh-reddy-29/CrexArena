@@ -6,6 +6,7 @@ import { TossDecision, PitchType, WeatherCondition } from '../types/match';
 import { ArrowLeft, Users, Trophy, CheckCircle2, ChevronRight, Sparkles, Shield, AlertTriangle, Star, Activity, CloudSun, Wind, MapPin, Droplets, Gauge, Lightbulb } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { getPlayerImage, handlePlayerImageError } from '../lib/playerImages';
+import JerseyPlayerImage from './JerseyPlayerImage';
 import { getIntlTeamLogoUrl } from '../data/crexIntlTeams';
 import { getPlayerRating } from '../lib/ratingEngine';
 import { WorkloadRotationEngine } from '../engine/ai/WorkloadRotationEngine';
@@ -38,6 +39,8 @@ export default function PreMatch() {
     franchises,
     players,
     selectedFranchiseId,
+    activeMatchCheckpoint,
+    liveMatchState,
     selectedSquadIds,
     playingXIIds,
     playerFatigue,
@@ -295,35 +298,35 @@ export default function PreMatch() {
   };
 
   return (
-    <div className="min-h-screen bg-[#f4f6f9] text-slate-900 font-sans flex flex-col">
-      {/* CREX Top Bar */}
-      <header className="bg-white border-b border-slate-200/90 sticky top-0 z-40">
+    <div className="min-h-screen bg-[#071426] text-[#F6F8FC] font-sans flex flex-col">
+      {/* Stadium Top Bar */}
+      <header className="bg-[#0D1C32] border-b border-white/10 sticky top-0 z-40 shadow-lg">
         <div className="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <button
               onClick={() => setGameState(GameState.ARENA_HUB)}
-              className="w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 flex items-center justify-center transition-colors"
+              className="w-8 h-8 rounded-full bg-[#10233D] hover:bg-[#152C4D] border border-white/10 flex items-center justify-center transition-colors text-[#9DAEC4] hover:text-white"
             >
-              <ArrowLeft className="w-4 h-4 text-slate-600" />
+              <ArrowLeft className="w-4 h-4" />
             </button>
             <div>
               <div className="flex items-center gap-2">
-                <span className="text-[10px] font-black uppercase tracking-wider text-blue-700 bg-blue-50 px-2 py-0.5 rounded">
+                <span className="text-[10px] font-black uppercase tracking-wider text-[#258BFF] bg-blue-500/10 border border-blue-500/20 px-2 py-0.5 rounded">
                   Match Day Squad & Toss
                 </span>
-                <span className="text-[10px] font-bold text-slate-400">
+                <span className="text-[10px] font-bold text-[#9DAEC4]">
                   {currentMatch?.isPlayoff ? currentMatch.playoffType : `Match ${currentMatch?.matchNumber || 1}`}
                 </span>
               </div>
-              <h1 className="text-base font-black text-slate-900">
-                {userTeam.name} <span className="text-slate-400 font-normal">vs</span> {opponentTeam.name}
+              <h1 className="text-base font-black text-[#F6F8FC]">
+                {userTeam.name} <span className="text-[#9DAEC4] font-normal">vs</span> {opponentTeam.name}
               </h1>
             </div>
           </div>
 
           <div className="flex items-center gap-2">
-            <span className="text-xs font-bold text-slate-500 hidden sm:inline">
-              Venue: <strong className="text-slate-800">{currentMatch?.venue || 'Cricket Stadium'}</strong>
+            <span className="text-xs font-bold text-[#9DAEC4] hidden sm:inline">
+              Venue: <strong className="text-[#F6F8FC]">{currentMatch?.venue || 'Cricket Stadium'}</strong>
             </span>
           </div>
         </div>
@@ -333,39 +336,39 @@ export default function PreMatch() {
       <main className="flex-1 max-w-6xl w-full mx-auto p-4 sm:p-6 space-y-4">
         
         {/* Conditions Card */}
-        <div className="bg-white rounded-2xl border border-slate-200/90 p-4 shadow-xs space-y-3">
+        <div className="bg-[#10233D] rounded-2xl border border-white/10 p-4 shadow-xl space-y-3">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-center">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center font-black shrink-0">
+              <div className="w-10 h-10 rounded-xl bg-blue-500/10 border border-blue-500/20 text-[#258BFF] flex items-center justify-center font-black shrink-0">
                 <Gauge className="w-5 h-5" />
               </div>
               <div>
-                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Pitch Deck</span>
-                <span className="text-sm font-black text-slate-900">
+                <span className="text-[10px] font-bold text-[#9DAEC4] uppercase tracking-wider block">Pitch Deck</span>
+                <span className="text-sm font-black text-[#F6F8FC]">
                   {pitchText ? `${pitchText.surface} Wicket` : `${pitchType} Wicket`}
                 </span>
               </div>
             </div>
 
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center font-black shrink-0">
+              <div className="w-10 h-10 rounded-xl bg-amber-500/10 border border-amber-500/20 text-[#F5B82E] flex items-center justify-center font-black shrink-0">
                 <CloudSun className="w-5 h-5" />
               </div>
               <div>
-                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Weather</span>
-                <span className="text-sm font-black text-slate-900">
+                <span className="text-[10px] font-bold text-[#9DAEC4] uppercase tracking-wider block">Weather</span>
+                <span className="text-sm font-black text-[#F6F8FC]">
                   {weatherText ? weatherText.headline : `${weather} Skies`}
                 </span>
               </div>
             </div>
 
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center font-black shrink-0">
+              <div className="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-[#13A875] flex items-center justify-center font-black shrink-0">
                 <MapPin className="w-5 h-5" />
               </div>
               <div className="min-w-0">
-                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Ground</span>
-                <span className="text-sm font-black text-slate-900 truncate block">
+                <span className="text-[10px] font-bold text-[#9DAEC4] uppercase tracking-wider block">Ground</span>
+                <span className="text-sm font-black text-[#F6F8FC] truncate block">
                   {conditionReport?.venue.name || currentMatch?.venue || 'Cricket Stadium'}
                 </span>
               </div>
@@ -375,39 +378,39 @@ export default function PreMatch() {
           {/* Detailed venue / pitch / weather report */}
           {conditionReport && pitchText && weatherText ? (
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-[11px] leading-relaxed">
-              <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-200/60">
-                <div className="flex items-center gap-1.5 font-black text-slate-700 mb-1">
-                  <MapPin className="w-3.5 h-3.5" /> Ground & Outfield
+              <div className="bg-[#0D1C32] p-2.5 rounded-xl border border-white/5">
+                <div className="flex items-center gap-1.5 font-black text-[#F6F8FC] mb-1">
+                  <MapPin className="w-3.5 h-3.5 text-[#258BFF]" /> Ground & Outfield
                 </div>
-                <p className="text-slate-600 font-medium">{groundText}</p>
+                <p className="text-[#9DAEC4] font-medium">{groundText}</p>
               </div>
-              <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-200/60">
-                <div className="flex items-center gap-1.5 font-black text-slate-700 mb-1">
-                  <Gauge className="w-3.5 h-3.5" /> Pitch Report
+              <div className="bg-[#0D1C32] p-2.5 rounded-xl border border-white/5">
+                <div className="flex items-center gap-1.5 font-black text-[#F6F8FC] mb-1">
+                  <Gauge className="w-3.5 h-3.5 text-[#258BFF]" /> Pitch Report
                 </div>
-                <p className="text-slate-600 font-medium">{pitchText.detail}</p>
+                <p className="text-[#9DAEC4] font-medium">{pitchText.detail}</p>
                 <div className="flex flex-wrap gap-1 mt-1.5">
                   {pitchText.traits.map((t) => (
-                    <span key={t} className="text-[9px] font-bold bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded">{t}</span>
+                    <span key={t} className="text-[9px] font-bold bg-blue-500/10 border border-blue-500/20 text-[#258BFF] px-1.5 py-0.5 rounded">{t}</span>
                   ))}
                 </div>
               </div>
-              <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-200/60">
-                <div className="flex items-center gap-1.5 font-black text-slate-700 mb-1">
-                  <Droplets className="w-3.5 h-3.5" /> Weather Report
+              <div className="bg-[#0D1C32] p-2.5 rounded-xl border border-white/5">
+                <div className="flex items-center gap-1.5 font-black text-[#F6F8FC] mb-1">
+                  <Droplets className="w-3.5 h-3.5 text-blue-400" /> Weather Report
                 </div>
-                <p className="text-slate-600 font-medium">{weatherText.detail}</p>
-                <p className="text-slate-500 font-medium mt-1">{weatherText.swingNote} {weatherText.dewNote}</p>
+                <p className="text-[#9DAEC4] font-medium">{weatherText.detail}</p>
+                <p className="text-[#9DAEC4]/80 font-medium mt-1">{weatherText.swingNote} {weatherText.dewNote}</p>
               </div>
             </div>
           ) : (
-            <div className="text-xs font-medium text-slate-600 bg-slate-50 p-2.5 rounded-xl border border-slate-200/60">
+            <div className="text-xs font-medium text-[#9DAEC4] bg-[#0D1C32] p-2.5 rounded-xl border border-white/5">
               {getPitchAdvice(pitchType)}
             </div>
           )}
 
           {conditionsSummary && (
-            <div className="text-[10px] font-bold text-slate-500 bg-slate-900/5 px-2.5 py-1.5 rounded-lg border border-slate-200/60">
+            <div className="text-[10px] font-bold text-[#9DAEC4] bg-[#0D1C32] px-2.5 py-1.5 rounded-lg border border-white/5">
               Gameplay influence: {conditionsSummary}
             </div>
           )}
@@ -420,30 +423,30 @@ export default function PreMatch() {
             {/* LEFT 2 COLUMNS: User Team Squad Picker */}
             <div className="lg:col-span-2 space-y-3">
               {/* Squad Header and Controls */}
-              <div className="bg-white rounded-2xl border border-slate-200/90 p-4 shadow-xs space-y-3">
+              <div className="bg-[#10233D] rounded-2xl border border-white/10 p-4 shadow-xl space-y-3">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                   <div>
-                    <h2 className="text-sm font-black text-slate-900 uppercase tracking-wide">
+                    <h2 className="text-sm font-black text-[#F6F8FC] uppercase tracking-wide">
                       Select Playing XI ({selectedIds.length}/11)
                     </h2>
-                    <p className="text-xs text-slate-500">
+                    <p className="text-xs text-[#9DAEC4]">
                       Tap players to toggle them into your match squad. Star marks the Captain.
                     </p>
                   </div>
 
                   <button
                     onClick={handleAutoBalance}
-                    className="px-3 py-1.5 rounded-xl bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-bold transition-colors flex items-center gap-1.5 shrink-0 self-start sm:self-auto"
+                    className="px-3 py-1.5 rounded-xl bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/20 text-[#258BFF] text-xs font-bold transition-colors flex items-center gap-1.5 shrink-0 self-start sm:self-auto cursor-pointer"
                   >
                     <Sparkles className="w-3.5 h-3.5" /> AI Auto-Pick & Balance
                   </button>
                 </div>
 
                 {/* Team Validation Bar */}
-                <div className="grid grid-cols-3 gap-2 pt-2 border-t border-slate-100 text-xs">
+                <div className="grid grid-cols-3 gap-2 pt-2 border-t border-white/5 text-xs">
                   <div className={cn(
                     "p-2 rounded-xl border flex items-center gap-2 font-bold",
-                    selectedIds.length === 11 ? "bg-emerald-50 border-emerald-200 text-emerald-800" : "bg-slate-50 border-slate-200 text-slate-600"
+                    selectedIds.length === 11 ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-400" : "bg-[#0D1C32] border-white/10 text-[#9DAEC4]"
                   )}>
                     <CheckCircle2 className="w-4 h-4 shrink-0" />
                     <span>{selectedIds.length}/11 Players</span>
@@ -451,7 +454,7 @@ export default function PreMatch() {
 
                   <div className={cn(
                     "p-2 rounded-xl border flex items-center gap-2 font-bold",
-                    keepersCount >= 1 ? "bg-emerald-50 border-emerald-200 text-emerald-800" : "bg-rose-50 border-rose-200 text-rose-800"
+                    keepersCount >= 1 ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-400" : "bg-rose-500/10 border-rose-500/30 text-rose-400"
                   )}>
                     {keepersCount >= 1 ? <CheckCircle2 className="w-4 h-4 shrink-0" /> : <AlertTriangle className="w-4 h-4 shrink-0" />}
                     <span>{keepersCount} WKs (Min 1)</span>
@@ -459,7 +462,7 @@ export default function PreMatch() {
 
                   <div className={cn(
                     "p-2 rounded-xl border flex items-center gap-2 font-bold",
-                    bowlersCount >= 5 ? "bg-emerald-50 border-emerald-200 text-emerald-800" : "bg-rose-50 border-rose-200 text-rose-800"
+                    bowlersCount >= 5 ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-400" : "bg-rose-500/10 border-rose-500/30 text-rose-400"
                   )}>
                     {bowlersCount >= 5 ? <CheckCircle2 className="w-4 h-4 shrink-0" /> : <AlertTriangle className="w-4 h-4 shrink-0" />}
                     <span>{bowlersCount} Bowlers (Min 5)</span>
@@ -481,23 +484,22 @@ export default function PreMatch() {
                       key={player.id}
                       onClick={() => togglePlayer(player.id)}
                       className={cn(
-                        "p-3 rounded-2xl border transition-all cursor-pointer bg-white relative flex items-center justify-between gap-3 group select-none",
+                        "p-3 rounded-2xl border transition-all cursor-pointer relative flex items-center justify-between gap-3 group select-none",
                         isSelected
-                          ? "border-blue-600 shadow-sm bg-blue-50/20"
-                          : "border-slate-200/90 hover:border-slate-300 hover:bg-slate-50/60"
+                          ? "border-[#258BFF] bg-[#152C4D] shadow-md shadow-blue-500/10"
+                          : "border-white/5 bg-[#10233D] hover:border-white/20 hover:bg-[#152C4D]/60"
                       )}
                     >
                       {/* Left: Player Avatar & Name */}
                       <div className="flex items-center gap-2.5 min-w-0">
-                        <div className="relative shrink-0">
-                          <img
-                            src={getPlayerImage(player.name)}
-                            alt={player.name}
-                            onError={handlePlayerImageError}
-                            className="w-10 h-10 rounded-full object-cover border border-slate-200 bg-slate-100"
+                        <div className="relative shrink-0 w-11 h-11 rounded-full overflow-hidden border border-white/10 bg-[#0D1C32]">
+                          <JerseyPlayerImage
+                            player={player}
+                            franchiseId={userTeam.id}
+                            className="w-full h-full"
                           />
                           {isCap && (
-                            <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-amber-500 text-white text-[9px] font-black flex items-center justify-center shadow-xs">
+                            <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-[#F5B82E] text-slate-900 text-[9px] font-black flex items-center justify-center shadow-md z-20">
                               C
                             </span>
                           )}
@@ -505,14 +507,14 @@ export default function PreMatch() {
 
                         <div className="min-w-0">
                           <div className="flex items-center gap-1.5">
-                            <span className="text-xs font-bold text-slate-900 truncate">{player.name}</span>
-                            <span className="text-[10px] font-bold text-slate-400 tabular-nums">
+                            <span className="text-xs font-bold text-[#F6F8FC] truncate">{player.name}</span>
+                            <span className="text-[10px] font-bold text-[#F5B82E] tabular-nums">
                               {player.rating}
                             </span>
                           </div>
 
                           <div className="flex items-center gap-1.5 mt-0.5">
-                            <span className="text-[9px] font-bold uppercase tracking-wider text-slate-500 bg-slate-100 px-1.5 py-0.2 rounded">
+                            <span className="text-[9px] font-bold uppercase tracking-wider text-[#9DAEC4] bg-white/5 px-1.5 py-0.2 rounded border border-white/5">
                               {player.role}
                             </span>
 
@@ -521,10 +523,10 @@ export default function PreMatch() {
                               className={cn(
                                 "text-[9px] font-bold px-1.5 py-0.2 rounded",
                                 isCritical
-                                  ? "bg-red-100 text-red-700"
+                                  ? "bg-red-500/10 text-red-400 border border-red-500/20"
                                   : isFatigued
-                                  ? "bg-amber-100 text-amber-700"
-                                  : "bg-emerald-100 text-emerald-700"
+                                  ? "bg-amber-500/10 text-amber-400 border border-amber-500/20"
+                                  : "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
                               )}
                               title={`Workload fatigue: ${fatigue}%`}
                             >
@@ -540,8 +542,8 @@ export default function PreMatch() {
                           <button
                             onClick={() => setCaptainId(player.id)}
                             className={cn(
-                              "p-1.5 rounded-lg transition-colors",
-                              isCap ? "text-amber-500 hover:text-amber-600 bg-amber-50" : "text-slate-300 hover:text-amber-500 hover:bg-slate-100"
+                              "p-1.5 rounded-lg transition-colors cursor-pointer",
+                              isCap ? "text-[#F5B82E] bg-amber-500/10" : "text-white/20 hover:text-[#F5B82E] hover:bg-white/5"
                             )}
                             title="Set as Captain"
                           >
@@ -554,8 +556,8 @@ export default function PreMatch() {
                           className={cn(
                             "w-5 h-5 rounded-md border flex items-center justify-center transition-all cursor-pointer",
                             isSelected
-                              ? "bg-blue-600 border-blue-600 text-white"
-                              : "border-slate-300 hover:border-slate-400"
+                              ? "bg-[#258BFF] border-[#258BFF] text-white"
+                              : "border-white/20 hover:border-white/40 bg-white/5"
                           )}
                         >
                           {isSelected && <CheckCircle2 className="w-3.5 h-3.5" />}
@@ -570,8 +572,8 @@ export default function PreMatch() {
             {/* RIGHT COLUMN: Opponent Announced XI & Confirmation */}
             <div className="space-y-3">
               {/* Opponent Card */}
-              <div className="bg-white rounded-2xl border border-slate-200/90 p-4 shadow-xs space-y-3">
-                <div className="flex items-center gap-2.5 pb-2 border-b border-slate-100">
+              <div className="bg-[#10233D] rounded-2xl border border-white/10 p-4 shadow-xl space-y-3">
+                <div className="flex items-center gap-2.5 pb-2 border-b border-white/5">
                   {resolveTeamLogo(opponentTeam.shortName) ? (
                     <img
                       src={resolveTeamLogo(opponentTeam.shortName)}
@@ -579,17 +581,17 @@ export default function PreMatch() {
                       className="w-7 h-7 object-contain"
                     />
                   ) : (
-                    <div className="w-7 h-7 rounded-full bg-slate-100 flex items-center justify-center font-bold text-xs text-slate-600">
+                    <div className="w-7 h-7 rounded-full bg-[#152C4D] border border-white/10 flex items-center justify-center font-bold text-xs text-[#9DAEC4]">
                       {opponentTeam.shortName?.[0]}
                     </div>
                   )}
                   <div>
-                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wide block">Opponent Lineup</span>
-                    <h3 className="text-xs font-black text-slate-900">{opponentTeam.name}</h3>
+                    <span className="text-[10px] font-bold text-[#9DAEC4] uppercase tracking-wide block">Opponent Lineup</span>
+                    <h3 className="text-xs font-black text-[#F6F8FC]">{opponentTeam.name}</h3>
                   </div>
                 </div>
 
-                <div className="text-[11px] text-slate-500 font-medium">
+                <div className="text-[11px] text-[#9DAEC4] font-medium">
                   {opponentOptimalSelection.tacticalSummary}
                 </div>
 
@@ -598,12 +600,12 @@ export default function PreMatch() {
                     const p = opponentSquad.find((player) => player.id === pId);
                     if (!p) return null;
                     return (
-                      <div key={pId} className="flex items-center justify-between text-xs py-1 px-2 rounded-lg bg-slate-50">
+                      <div key={pId} className="flex items-center justify-between text-xs py-1.5 px-2.5 rounded-lg bg-[#0D1C32] border border-white/5">
                         <div className="flex items-center gap-2">
-                          <span className="text-[10px] font-bold text-slate-400 tabular-nums w-3.5">{idx + 1}</span>
-                          <span className="font-bold text-slate-800">{p.name}</span>
+                          <span className="text-[10px] font-bold text-[#9DAEC4] tabular-nums w-3.5">{idx + 1}</span>
+                          <span className="font-bold text-[#F6F8FC]">{p.name}</span>
                         </div>
-                        <span className="text-[10px] text-slate-400 font-semibold">{p.role}</span>
+                        <span className="text-[10px] text-[#9DAEC4] font-semibold">{p.role}</span>
                       </div>
                     );
                   })}
@@ -611,21 +613,21 @@ export default function PreMatch() {
               </div>
 
               {/* Proceed to Toss Button */}
-              <div className="bg-white rounded-2xl border border-slate-200/90 p-4 shadow-xs space-y-2">
+              <div className="bg-[#10233D] rounded-2xl border border-white/10 p-4 shadow-xl space-y-2">
                 <button
                   disabled={!isValidXI}
                   onClick={proceedToToss}
                   className={cn(
-                    "w-full py-3 rounded-xl font-black text-sm transition-all flex items-center justify-center gap-2 shadow-xs",
+                    "w-full py-3 rounded-xl font-black text-sm transition-all flex items-center justify-center gap-2 shadow-lg",
                     isValidXI
-                      ? "bg-blue-600 hover:bg-blue-700 text-white cursor-pointer active:scale-[0.99]"
-                      : "bg-slate-200 text-slate-400 cursor-not-allowed"
+                      ? "bg-[#258BFF] hover:bg-blue-600 text-white cursor-pointer active:scale-[0.99] shadow-blue-500/20"
+                      : "bg-[#152C4D] text-[#9DAEC4]/50 cursor-not-allowed border border-white/5"
                   )}
                 >
                   Confirm Squad & Proceed to Toss <ChevronRight className="w-4 h-4" />
                 </button>
                 {!isValidXI && (
-                  <p className="text-[10px] text-rose-600 text-center font-medium">
+                  <p className="text-[10px] text-rose-400 text-center font-medium">
                     Select exactly 11 players including at least 1 Wicketkeeper and 5 Bowlers.
                   </p>
                 )}
@@ -635,65 +637,65 @@ export default function PreMatch() {
         ) : (
           /* TOSS STEP */
           <div className="max-w-xl mx-auto space-y-4">
-            <div className="bg-white rounded-2xl border border-slate-200/90 p-6 shadow-sm text-center space-y-5">
+            <div className="bg-[#10233D] rounded-2xl border border-white/10 p-6 shadow-2xl text-center space-y-5">
               <div>
-                <span className="text-[10px] font-black uppercase tracking-wider text-blue-700 bg-blue-50 px-2 py-0.5 rounded">
+                <span className="text-[10px] font-black uppercase tracking-wider text-[#258BFF] bg-blue-500/10 border border-blue-500/20 px-2 py-0.5 rounded">
                   Match Day Protocol
                 </span>
-                <h2 className="text-xl font-black text-slate-900 mt-2">The Coin Toss</h2>
-                <p className="text-xs text-slate-500">
+                <h2 className="text-xl font-black text-[#F6F8FC] mt-2">The Coin Toss</h2>
+                <p className="text-xs text-[#9DAEC4]">
                   {userTeam.name} vs {opponentTeam.name} at {currentMatch?.venue || 'Stadium'}
                 </p>
               </div>
 
               {/* Intelligent toss advisor (decision support only) */}
               {recommendation && (
-                <div className="text-left bg-slate-50 border border-slate-200/80 rounded-2xl p-3.5 space-y-2.5">
+                <div className="text-left bg-[#0D1C32] border border-white/10 rounded-2xl p-3.5 space-y-2.5">
                   <div className="flex items-center justify-between gap-2">
                     <div className="flex items-center gap-1.5">
-                      <Lightbulb className="w-4 h-4 text-amber-500" />
-                      <span className="text-[10px] font-black uppercase tracking-wider text-slate-500">Toss Advisor</span>
+                      <Lightbulb className="w-4 h-4 text-[#F5B82E]" />
+                      <span className="text-[10px] font-black uppercase tracking-wider text-[#9DAEC4]">Toss Advisor</span>
                     </div>
-                    <span className="text-[10px] font-bold text-slate-400">Confidence {Math.round(recommendation.confidence * 100)}%</span>
+                    <span className="text-[10px] font-bold text-[#9DAEC4]">Confidence {Math.round(recommendation.confidence * 100)}%</span>
                   </div>
 
                   <div className="flex items-center gap-2">
                     <span className={cn(
                       "px-2.5 py-1 rounded-lg text-xs font-black",
-                      recommendation.recommendation === 'BAT' ? "bg-blue-600 text-white" : "bg-emerald-600 text-white"
+                      recommendation.recommendation === 'BAT' ? "bg-[#258BFF] text-white" : "bg-[#13A875] text-white"
                     )}>
                       {recommendation.recommendation === 'BAT' ? 'Bat First' : 'Bowl First'}
                     </span>
-                    <span className="text-[11px] font-medium text-slate-600">
+                    <span className="text-[11px] font-medium text-[#9DAEC4]">
                       recommended in these conditions
                     </span>
                   </div>
 
                   {/* Bat vs Bowl scores */}
                   <div className="space-y-1">
-                    <div className="flex items-center gap-2 text-[10px] font-bold text-slate-500">
+                    <div className="flex items-center gap-2 text-[10px] font-bold text-[#9DAEC4]">
                       <span className="w-14">Bat {recommendation.batFirstScore}</span>
-                      <div className="flex-1 h-1.5 rounded-full bg-slate-200 overflow-hidden">
-                        <div className="h-full bg-blue-500" style={{ width: `${recommendation.batFirstScore}%` }} />
+                      <div className="flex-1 h-1.5 rounded-full bg-[#152C4D] overflow-hidden">
+                        <div className="h-full bg-[#258BFF]" style={{ width: `${recommendation.batFirstScore}%` }} />
                       </div>
                     </div>
-                    <div className="flex items-center gap-2 text-[10px] font-bold text-slate-500">
+                    <div className="flex items-center gap-2 text-[10px] font-bold text-[#9DAEC4]">
                       <span className="w-14">Bowl {recommendation.bowlFirstScore}</span>
-                      <div className="flex-1 h-1.5 rounded-full bg-slate-200 overflow-hidden">
-                        <div className="h-full bg-emerald-500" style={{ width: `${recommendation.bowlFirstScore}%` }} />
+                      <div className="flex-1 h-1.5 rounded-full bg-[#152C4D] overflow-hidden">
+                        <div className="h-full bg-[#13A875]" style={{ width: `${recommendation.bowlFirstScore}%` }} />
                       </div>
                     </div>
                   </div>
 
                   <ul className="space-y-1">
                     {recommendation.rationale.map((r, i) => (
-                      <li key={i} className="text-[11px] text-slate-600 font-medium flex gap-1.5">
-                        <span className="text-slate-400">•</span><span>{r}</span>
+                      <li key={i} className="text-[11px] text-[#9DAEC4] font-medium flex gap-1.5">
+                        <span className="text-[#258BFF]">•</span><span>{r}</span>
                       </li>
                     ))}
                   </ul>
-                  <p className="text-[10px] text-slate-400 font-medium italic">{recommendation.alternative}</p>
-                  <p className="text-[9px] text-slate-400">Advisory only — you are free to choose either option.</p>
+                  <p className="text-[10px] text-[#9DAEC4]/70 font-medium italic">{recommendation.alternative}</p>
+                  <p className="text-[9px] text-[#9DAEC4]/50">Advisory only — you are free to choose either option.</p>
                 </div>
               )}
 
@@ -702,7 +704,7 @@ export default function PreMatch() {
                 <motion.div
                   animate={isFlipping ? { rotateY: 1800, scale: [1, 1.2, 1] } : {}}
                   transition={{ duration: 1.5, ease: 'easeInOut' }}
-                  className="w-24 h-24 rounded-full bg-gradient-to-tr from-amber-400 to-yellow-200 border-4 border-amber-500 shadow-md flex items-center justify-center text-amber-900 font-black text-2xl select-none"
+                  className="w-24 h-24 rounded-full bg-gradient-to-tr from-[#F5B82E] to-amber-200 border-4 border-amber-400 shadow-xl shadow-amber-500/20 flex items-center justify-center text-slate-900 font-black text-2xl select-none"
                 >
                   {isFlipping ? '...' : tossResult ? (tossResult.winnerId === userTeam.id ? userTeam.shortName : opponentTeam.shortName) : 'CRX'}
                 </motion.div>
@@ -712,7 +714,7 @@ export default function PreMatch() {
                 <button
                   disabled={isFlipping}
                   onClick={handleToss}
-                  className="px-8 py-3 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-sm font-black transition-all shadow-xs active:scale-95 cursor-pointer"
+                  className="px-8 py-3 rounded-xl bg-[#258BFF] hover:bg-blue-600 text-white text-sm font-black transition-all shadow-lg shadow-blue-500/25 active:scale-95 cursor-pointer"
                 >
                   {isFlipping ? 'Flipping Coin...' : 'Spin the Coin'}
                 </button>
@@ -720,28 +722,28 @@ export default function PreMatch() {
 
               {tossResult && (
                 <div className="space-y-4 pt-2">
-                  <div className="p-3 bg-blue-50/70 border border-blue-200 rounded-xl">
-                    <span className="text-xs font-black text-blue-900 block">
+                  <div className="p-3 bg-blue-500/10 border border-blue-500/20 rounded-xl">
+                    <span className="text-xs font-black text-[#258BFF] block">
                       {tossResult.winnerId === userTeam.id ? userTeam.name : opponentTeam.name} won the toss!
                     </span>
                   </div>
 
                   {tossResult.winnerId === userTeam.id ? (
                     <div className="space-y-2">
-                      <p className="text-xs font-bold text-slate-700">Choose your match strategy:</p>
+                      <p className="text-xs font-bold text-[#F6F8FC]">Choose your match strategy:</p>
                       <div className="grid grid-cols-2 gap-3 max-w-xs mx-auto">
                         <button
                           onClick={() => setTossResult({ ...tossResult, decision: TossDecision.BAT })}
                           className={cn(
                             "py-2.5 px-4 rounded-xl font-black text-xs border transition-all cursor-pointer",
                             tossResult.decision === TossDecision.BAT
-                              ? "bg-blue-600 text-white border-blue-600 shadow-xs"
-                              : "bg-white text-slate-700 border-slate-200 hover:border-blue-400"
+                              ? "bg-[#258BFF] text-white border-[#258BFF] shadow-md shadow-blue-500/20"
+                              : "bg-[#0D1C32] text-[#9DAEC4] border-white/10 hover:border-white/30 hover:text-white"
                           )}
                         >
                           Bat First
                           {recommendation?.recommendation === 'BAT' && (
-                            <span className="block text-[9px] font-bold text-amber-500">★ Recommended</span>
+                            <span className="block text-[9px] font-bold text-[#F5B82E]">★ Recommended</span>
                           )}
                         </button>
                         <button
@@ -749,30 +751,30 @@ export default function PreMatch() {
                           className={cn(
                             "py-2.5 px-4 rounded-xl font-black text-xs border transition-all cursor-pointer",
                             tossResult.decision === TossDecision.BOWL
-                              ? "bg-blue-600 text-white border-blue-600 shadow-xs"
-                              : "bg-white text-slate-700 border-slate-200 hover:border-blue-400"
+                              ? "bg-[#258BFF] text-white border-[#258BFF] shadow-md shadow-blue-500/20"
+                              : "bg-[#0D1C32] text-[#9DAEC4] border-white/10 hover:border-white/30 hover:text-white"
                           )}
                         >
                           Bowl First
                           {recommendation?.recommendation === 'BOWL' && (
-                            <span className="block text-[9px] font-bold text-amber-500">★ Recommended</span>
+                            <span className="block text-[9px] font-bold text-[#F5B82E]">★ Recommended</span>
                           )}
                         </button>
                       </div>
                       {recommendation && tossResult.decision && (
                         (tossResult.decision === TossDecision.BAT ? 'BAT' : 'BOWL') !== recommendation.recommendation && (
-                          <p className="text-[10px] text-amber-600 font-medium text-center">
+                          <p className="text-[10px] text-[#F5B82E] font-medium text-center">
                             Going against the advisor's call — brave, but conditions favour {recommendation.recommendation === 'BAT' ? 'batting' : 'bowling'} first.
                           </p>
                         )
                       )}
-                      <p className="text-[9px] text-slate-400 text-center">
+                      <p className="text-[9px] text-[#9DAEC4]/70 text-center">
                         Your choice is final and never changes the simulation's fairness.
                       </p>
                     </div>
                   ) : (
-                    <p className="text-xs font-medium text-slate-600">
-                      {opponentTeam.name} decided to <strong className="text-slate-900">{tossResult.decision} first</strong> on this {pitchType} wicket
+                    <p className="text-xs font-medium text-[#9DAEC4]">
+                      {opponentTeam.name} decided to <strong className="text-[#F6F8FC]">{tossResult.decision} first</strong> on this {pitchType} wicket
                       {recommendation && ` (their captain's call — advisor leaned ${recommendation.recommendation === 'BAT' ? 'bat-first' : 'bowl-first'})`}.
                     </p>
                   )}
@@ -780,9 +782,11 @@ export default function PreMatch() {
                   {tossResult.decision && (
                     <button
                       onClick={startMatch}
-                      className="w-full py-3.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-black transition-all shadow-xs cursor-pointer active:scale-95"
+                      className="w-full py-3.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-sm font-black transition-all shadow-lg shadow-emerald-600/30 cursor-pointer active:scale-95"
                     >
-                      Walk Out to the Middle & Start Match
+                      {activeMatchCheckpoint?.matchId === currentMatchId || (liveMatchState?.currentMatchId === currentMatchId)
+                        ? 'Resume In-Progress Match'
+                        : 'Walk Out to the Middle & Start Match'}
                     </button>
                   )}
                 </div>
@@ -792,7 +796,7 @@ export default function PreMatch() {
             <div className="text-center">
               <button
                 onClick={() => setStep('squad')}
-                className="text-xs font-bold text-slate-500 hover:text-slate-800 transition-colors"
+                className="text-xs font-bold text-[#9DAEC4] hover:text-[#F6F8FC] transition-colors cursor-pointer"
               >
                 ← Back to Squad Selection
               </button>

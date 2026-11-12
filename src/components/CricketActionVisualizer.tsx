@@ -22,8 +22,37 @@ import {
   X,
   Info,
   Cpu,
+  Box,
 } from 'lucide-react';
 import FieldSetupDashboard from './FieldSetupDashboard';
+const CricketAction3DView = React.lazy(() => import('./CricketAction3DView'));
+
+class CricketAction3DErrorBoundary extends React.Component<
+  { children: React.ReactNode },
+  { error: Error | null }
+> {
+  state = { error: null as Error | null };
+
+  static getDerivedStateFromError(error: Error) {
+    return { error };
+  }
+
+  componentDidCatch(error: Error) {
+    console.error('Advanced 3D cricket view failed to load.', error);
+  }
+
+  render() {
+    if (this.state.error) {
+      return (
+        <div role="alert" className="absolute inset-0 z-20 grid place-items-center rounded-xl bg-slate-950 p-4 text-center text-sm font-bold text-rose-200">
+          The rigged 3D view could not be loaded: {this.state.error.message}
+        </div>
+      );
+    }
+
+    return this.props.children;
+  }
+}
 import { PitchType, WeatherCondition } from '../types/match';
 import { Player } from '../types/common';
 import { ArenaFormat } from '../engine/models/ArenaState';
@@ -238,6 +267,7 @@ export default function CricketActionVisualizer({
     if (propDisplayMode) setInternalDisplayMode(propDisplayMode);
   }, [propDisplayMode]);
   const effectiveDisplayMode = propDisplayMode || internalDisplayMode;
+  const [showAdvanced3D, setShowAdvanced3D] = useState(true);
   const handleDisplayModeToggle = (mode: 'STANDARD' | 'LABELS') => {
     setInternalDisplayMode(mode);
     onDisplayModeChange?.(mode);
@@ -1032,7 +1062,7 @@ export default function CricketActionVisualizer({
             </div>
             <div>
               <div className="text-[9px] sm:text-[10px] font-black tracking-widest text-cyan-400 uppercase leading-none">CRICKET ARENA</div>
-              <div className="text-[11px] sm:text-xs font-black tracking-wide text-white">FIELD TACTICS 2D</div>
+              <div className="text-[11px] sm:text-xs font-black tracking-wide text-white">FIELD TACTICS {showAdvanced3D ? '3D' : '2D'}</div>
             </div>
           </div>
 
@@ -1201,6 +1231,21 @@ export default function CricketActionVisualizer({
 
           {/* Fielder Display Mode Pill (Standard vs Labels) */}
           <div className="absolute top-2.5 left-2.5 sm:top-3.5 sm:left-3.5 z-30 flex items-center gap-1.5 sm:gap-2">
+            <button
+              type="button"
+              onClick={() => setShowAdvanced3D((value) => !value)}
+              aria-pressed={showAdvanced3D}
+              title={showAdvanced3D ? 'Switch to the 2D field map' : 'Switch to the rigged 3D field view'}
+              className={cn(
+                "bg-slate-950/85 backdrop-blur-md px-2.5 py-1 sm:px-3 sm:py-1.5 rounded-xl border shadow-lg text-[9px] sm:text-[10px] font-black flex items-center gap-1 transition-all",
+                showAdvanced3D
+                  ? "border-cyan-400/60 text-cyan-200"
+                  : "border-white/10 text-slate-300 hover:text-white"
+              )}
+            >
+              <Box className="w-3 h-3" />
+              {showAdvanced3D ? '3D' : '2D / 3D'}
+            </button>
             <div className="flex items-center bg-slate-950/85 backdrop-blur-md p-0.5 sm:p-1 rounded-xl border border-white/10 shadow-lg text-[9px] sm:text-[10px] font-bold">
               <button
                 type="button"
@@ -1325,12 +1370,45 @@ export default function CricketActionVisualizer({
             </span>
           </div>
 
-          <div className="w-full max-w-[540px] aspect-square mx-auto relative flex items-center justify-center">
+          <div className={cn(
+            "w-full mx-auto relative flex items-center justify-center transition-all duration-300",
+            showAdvanced3D
+              ? "h-[520px] md:h-[600px] max-w-full rounded-2xl overflow-hidden shadow-2xl border border-cyan-500/20"
+              : "max-w-[540px] aspect-square"
+          )}>
+            {showAdvanced3D && (
+              <CricketAction3DErrorBoundary>
+                <React.Suspense fallback={<div className="absolute inset-0 z-20 grid place-items-center rounded-xl bg-slate-950 text-sm font-bold text-cyan-200">Loading rigged 3D stadium...</div>}>
+                  <CricketAction3DView
+                    fielders={fielders}
+                    striker={striker ? { id: striker.id, name: striker.name, role: 'Striker', currentX: strikerPos.x, currentY: strikerPos.y } : null}
+                    nonStriker={nonStriker ? { id: nonStriker.id, name: nonStriker.name, role: 'Non-striker', currentX: nonStrikerPos.x, currentY: nonStrikerPos.y } : null}
+                    delivery={activeDelivery}
+                    stage={playbackStage}
+                    progress={animProgress}
+                    ballPos={ballPos}
+                    ballVisible={ballVisible}
+                    ballScale={ballScale}
+                    strikerPos={strikerPos}
+                    nonStrikerPos={nonStrikerPos}
+                    bowlerPos={bowlerPos}
+                    activeFielderAction={activeFielderAction}
+                    score={score}
+                    target={target}
+                    battingTeamName={battingTeamName}
+                    bowlingTeamName={bowlingTeamName}
+                    bowlerName={bowler?.name}
+                    isLeftHanded={Boolean(striker?.battingStyle?.toLowerCase().includes('left'))}
+                  />
+                </React.Suspense>
+              </CricketAction3DErrorBoundary>
+            )}
             <svg
               ref={svgRef}
               viewBox="0 0 600 600"
               preserveAspectRatio="xMidYMid meet"
               className="w-full h-full drop-shadow-[0_0_50px_rgba(0,0,0,0.95)] cursor-crosshair relative z-10 select-none"
+              style={showAdvanced3D ? { display: 'none' } : undefined}
               onMouseMove={handleSvgMouseMove}
               onMouseUp={() => setDraggedFielderId(null)}
             >
@@ -2811,4 +2889,3 @@ export default function CricketActionVisualizer({
     </div>
   );
 }
-

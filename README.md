@@ -1,6 +1,8 @@
-# Cricket Arena (CrexArena) — Advanced Ball-by-Ball Engine & 2D Tactical Field Simulator
+# Cricket Arena (CrexArena) — Advanced Ball-by-Ball Engine & Tactical Field Simulator
 
-A broadcast-quality cricket match simulation engine and interactive 2D stadium visualizer built with **React**, **TypeScript**, **Tailwind CSS**, **Framer Motion**, and **HTML5 Canvas / SVG**.
+A broadcast-quality cricket match simulation engine and interactive 2D field map with an optional rigged 3D match view, built with **React**, **TypeScript**, **Tailwind CSS**, **Framer Motion**, and **HTML5 Canvas / SVG**. The 3D view is visual-only; it uses the existing delivery and fielder playback state and does not change match rules or engine behavior.
+
+In the live match field, use **2D / 3D** to switch views. The 2D field remains the default and is still used for field editing.
 
 ---
 
@@ -23,7 +25,8 @@ CrexArena/
 │   │   │   ├── LeaderboardTab.tsx  # CREX points table with NRR, Test PCT% & recent form pills
 │   │   │   └── QualificationTab.tsx# Monte Carlo qualification odds & playoff bracket projections
 │   │   ├── TopMatchesCarousel.tsx  # Horizontal match carousel with format/status filter pills
-│   │   ├── CricketActionVisualizer.tsx # 2D stadium, Canvas trajectory, fielders, AI Captain HUD
+│   │   ├── CricketActionVisualizer.tsx # 2D/3D field, ball trajectory, fielders, AI Captain HUD
+│   │   ├── CricketAction3DView.tsx     # Optional GLB-based field view and rigged match actions
 │   │   ├── PlayerSelectionDrawer.tsx # Modal drawer for manual openers, batter & bowler selection
 │   │   ├── LiveMatchCenter.tsx     # Central match coordinator, recent delivery ribbon, bowler stamina
 │   │   ├── PreMatch.tsx            # Match-Day Team Selection & Coin Toss with fatigue & pitch adaptation
@@ -63,6 +66,8 @@ CrexArena/
 │   │       └── ArenaState.ts           # Format types ('T20' | 'ODI' | 'TEST') and match models
 │   │
 │   ├── lib/
+│   │   ├── cricketArenaAnimations.ts # Match-view poses for the rigged character
+│   │   ├── cricketArenaRig.js        # GLB humanoid pose retargeter
 │   │   ├── matchEngine.ts          # Match math, powerplay phases, DRS rules, Super Overs
 │   │   ├── ratingEngine.ts         # Player attribute formulas and form multipliers
 │   │   ├── teamLogos.ts            # Centralized vector team logo resolver
@@ -76,7 +81,8 @@ CrexArena/
 │   │   ├── match.ts                # PitchType, WeatherCondition, Fixture, Standing, DRSReview
 │   │   └── common.ts               # Player, Franchise, SkillStats interfaces
 │   │
-│   └── tests/                      # Automated Vitest Suite (234 tests across 28 suites)
+│   └── tests/                      # Automated Vitest Suite
+│       ├── cricketArenaAnimations.test.ts # Rigged action pose validation
 │       ├── matchLifecycle.test.ts        # Idempotent match completion, standing updates & persistence
 │       ├── testMatchFlow.test.ts         # 4-innings Test match progression, follow-on & draws
 │       ├── seriesEngine.test.ts          # Bilateral series generation, trophy tracking & calendar

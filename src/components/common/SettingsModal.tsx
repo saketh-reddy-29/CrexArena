@@ -1,7 +1,9 @@
 import React, { useState } from 'react';
 import { useGameStore, GameState } from '../../stores/useGameStore';
-import { X, Save, RefreshCw, Trash2, Volume2, VolumeX, Gauge, Shield, Database, Check } from 'lucide-react';
+import { X, Save, RefreshCw, Trash2, Volume2, VolumeX, Gauge, Shield, Database, Check, Cloud, CloudCheck, LogOut } from 'lucide-react';
 import { cn } from '../../lib/utils';
+import GoogleAccountModal from '../auth/GoogleAccountModal';
+import GoogleLoginButton from '../auth/GoogleLoginButton';
 
 interface SettingsModalProps {
   onClose: () => void;
@@ -15,25 +17,47 @@ export default function SettingsModal({ onClose }: SettingsModalProps) {
     setGameState,
     fixtures,
     standings,
+    authUser,
+    cloudSaveStatus,
+    lastCloudSaveTime,
+    saveToCloud,
+    loadFromCloud,
+    logoutGoogle,
   } = useGameStore();
 
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [defaultSpeed, setDefaultSpeed] = useState<number>(1);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [resetConfirm, setResetConfirm] = useState(false);
+  const [showGoogleModal, setShowGoogleModal] = useState(false);
+  const [isCloudSyncing, setIsCloudSyncing] = useState(false);
+  const [cloudSyncFeedback, setCloudSyncFeedback] = useState<string | null>(null);
 
   const team = franchises.find(f => f.id === selectedFranchiseId);
 
   const handleManualSave = () => {
     try {
       if (typeof window !== 'undefined' && window.localStorage) {
-        // Trigger zustand persistence flush
-        const state = useGameStore.getState();
+        // Trigger zustand persistence flush and cloud save if logged in
+        if (authUser) {
+          saveToCloud();
+        }
         setSaveSuccess(true);
         setTimeout(() => setSaveSuccess(false), 2500);
       }
     } catch (e) {
       console.error('Failed to save state:', e);
+    }
+  };
+
+  const handleCloudSync = async () => {
+    setIsCloudSyncing(true);
+    try {
+      const res = await saveToCloud();
+      setCloudSyncFeedback(res.message);
+      setTimeout(() => setCloudSyncFeedback(null), 3000);
+    } finally {
+      setIsCloudSyncing(false);
     }
   };
 
@@ -54,7 +78,9 @@ export default function SettingsModal({ onClose }: SettingsModalProps) {
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+    <>
+      {showGoogleModal && <GoogleAccountModal onClose={() => setShowGoogleModal(false)} />}
+      <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
       <div 
         className="bg-white rounded-3xl border border-slate-200 shadow-2xl max-w-lg w-full overflow-hidden animate-in fade-in zoom-in-95 duration-200"
         onClick={(e) => e.stopPropagation()}
@@ -146,12 +172,93 @@ export default function SettingsModal({ onClose }: SettingsModalProps) {
 
           {/* Persistence & Save Management */}
           <div className="space-y-3 pt-2 border-t border-slate-100">
-            <h3 className="text-xs font-black uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
-              <Database className="w-3.5 h-3.5 text-indigo-600" />
-              Career Data & Storage
+            <h3 className="text-xs font-black uppercase tracking-wider text-slate-700 flex items-center justify-between">
+              <span className="flex items-center gap-1.5">
+                <Cloud className="w-3.5 h-3.5 text-blue-600" />
+                Google Cloud Backup & Storage
+              </span>
+              {authUser && (
+                <span className="text-[10px] text-emerald-600 font-bold flex items-center gap-1">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                  Synced
+                </span>
+              )}
             </h3>
 
-            <div className="space-y-2">
+            {/* Google Account Status Box */}
+            <div className="bg-slate-50 border border-slate-200 rounded-2xl p-3.5 space-y-2.5">
+              {authUser ? (
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2.5">
+                    {authUser.picture ? (
+                      <img src={authUser.picture} alt={authUser.name} className="w-8 h-8 rounded-full border border-blue-400 object-cover" />
+                    ) : (
+                      <div className="w-8 h-8 rounded-full bg-blue-600 text-white font-bold text-xs flex items-center justify-center">
+                        {authUser.name[0]?.toUpperCase() || 'U'}
+                      </div>
+                    )}
+                    <div>
+                      <div className="text-xs font-bold text-slate-900 leading-tight">{authUser.name}</div>
+                      <div className="text-[10px] text-slate-500 font-mono">{authUser.email}</div>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => setShowGoogleModal(true)}
+                    className="px-2.5 py-1 text-[11px] font-bold text-blue-700 hover:text-blue-800 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors"
+                  >
+                    Manage
+                  </button>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <div className="text-xs font-bold text-slate-900">Sign in with Google to Save</div>
+                      <div className="text-[10px] text-slate-500">Enable cloud auto-save and sync across devices</div>
+                    </div>
+                  </div>
+                  <GoogleLoginButton
+                    onClick={() => setShowGoogleModal(true)}
+                    size="sm"
+                    variant="rectangular"
+                    text="Sign in with Google to Save"
+                    className="w-full justify-center"
+                  />
+                </div>
+              )}
+
+              {authUser && (
+                <div className="pt-2 border-t border-slate-200/80 flex items-center justify-between gap-2">
+                  <button
+                    onClick={handleCloudSync}
+                    disabled={isCloudSyncing}
+                    className="flex-1 py-1.5 px-3 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs flex items-center justify-center gap-1.5 transition-colors"
+                  >
+                    {isCloudSyncing ? (
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <CloudCheck className="w-3.5 h-3.5" />
+                    )}
+                    <span>{isCloudSyncing ? 'Syncing...' : 'Sync to Cloud'}</span>
+                  </button>
+
+                  <button
+                    onClick={() => setShowGoogleModal(true)}
+                    className="py-1.5 px-3 rounded-lg bg-white border border-slate-200 text-slate-700 hover:text-slate-900 hover:bg-slate-50 font-bold text-xs transition-colors"
+                  >
+                    Account Details
+                  </button>
+                </div>
+              )}
+
+              {cloudSyncFeedback && (
+                <div className="text-[10px] font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg p-1.5 text-center">
+                  {cloudSyncFeedback}
+                </div>
+              )}
+            </div>
+
+            <div className="space-y-2 pt-1">
               <button
                 onClick={handleManualSave}
                 className={cn(
@@ -223,5 +330,6 @@ export default function SettingsModal({ onClose }: SettingsModalProps) {
 
       </div>
     </div>
+    </>
   );
 }
